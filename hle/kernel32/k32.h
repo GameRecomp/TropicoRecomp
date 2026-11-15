@@ -24,6 +24,10 @@
 
 #define INVALID_HANDLE 0xffffffffu
 
+/* The first `n` bytes of a guest file, by guest path, or (path NULL) by
+ * an open file handle; -1 if it cannot be read. */
+long rc_vfs_read_head(const char *guest_path, uint32_t h, uint8_t *buf, uint32_t n);
+
 extern const rc_import_def rc_k32_process[];
 extern const uint32_t rc_k32_process_count;
 extern const rc_import_def rc_k32_memory[];

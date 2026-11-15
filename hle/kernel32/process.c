@@ -233,36 +233,11 @@ static void k_CreateEventA(rc_cpu *c)
 }
 
 /* ---- time ---- */
-static uint64_t now_ms(void)
-{
-#if defined(_WIN32)
-    return GetTickCount64();
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
-#endif
-}
-
-static uint64_t start_ms;
-
-static void k_GetTickCount(rc_cpu *c)
-{
-    if (!start_ms) {
-        start_ms = now_ms() - 1000000; /* as if the machine had been up for a while */
-    }
-    RC_RETURN(c, (uint32_t)(now_ms() - start_ms), 0);
-}
+static void k_GetTickCount(rc_cpu *c) { RC_RETURN(c, (uint32_t)rc_ticks_ms(), 0); }
 
 static void k_Sleep(rc_cpu *c)
 {
-    uint32_t ms = RC_ARG(c, 0);
-#if defined(_WIN32)
-    Sleep(ms); /* the host's */
-#else
-    struct timespec ts = {(time_t)(ms / 1000), (long)(ms % 1000) * 1000000L};
-    nanosleep(&ts, NULL);
-#endif
+    rc_sleep_ms(RC_ARG(c, 0));
     RC_RETURN(c, 0, 1);
 }
 

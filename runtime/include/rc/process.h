@@ -4,6 +4,7 @@
 #ifndef RC_PROCESS_H
 #define RC_PROCESS_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "rc/cpu.h"
@@ -49,6 +50,15 @@ int rc_run(const rc_config *cfg);
 
 /* Leave the process (ExitProcess). */
 RC_NORETURN void rc_exit(uint32_t code);
+
+/* A resource of the executable (`module` is its base): guest address and
+ * size of its data. Numeric types and names only. */
+bool rc_resource(uint32_t module, uint32_t type, uint32_t id, uint32_t *data, uint32_t *size);
+
+/* Milliseconds on a monotonic clock (GetTickCount). */
+uint64_t rc_ticks_ms(void);
+/* Wait (Sleep); with the virtual clock, only advance it. */
+void rc_sleep_ms(uint32_t ms);
 
 /* A small guest allocation that lives as long as the process. */
 uint32_t rc_proc_alloc(uint32_t size);

@@ -379,6 +379,34 @@ static void k_GetFileAttributesA(rc_cpu *c)
     RC_RETURN(c, is_dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_ARCHIVE, 1);
 }
 
+/* For other modules: read a guest file's first bytes, by name or by an
+ * open handle. Returns the number of bytes read, or -1. */
+long rc_vfs_read_head(const char *guest_path, uint32_t h, uint8_t *buf, uint32_t n)
+{
+    if (guest_path) {
+        char rel[RC_PATH_MAX], host[RC_PATH_MAX];
+        if (!guest_rel(guest_path, rel, sizeof rel) || !find_existing(rel, host, NULL, NULL)) {
+            return -1;
+        }
+        FILE *f = fopen(host, "rb");
+        if (!f) {
+            return -1;
+        }
+        long r = (long)fread(buf, 1, n, f);
+        fclose(f);
+        return r;
+    }
+    handle *x = get(h, K_FILE);
+    if (!x) {
+        return -1;
+    }
+    long pos = ftell(x->f);
+    fseek(x->f, 0, SEEK_SET);
+    long r = (long)fread(buf, 1, n, x->f);
+    fseek(x->f, pos, SEEK_SET);
+    return r;
+}
+
 /* ---- searches ---- */
 
 static bool wild(const char *p, const char *s)
