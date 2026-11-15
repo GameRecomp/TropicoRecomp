@@ -20,6 +20,7 @@
 #include "rc/hle_modules.h"
 #include "rc/hostfs.h"
 #include "rc/log.h"
+#include "rc/native.h"
 #include "rc/platform.h"
 #include "rc/process.h"
 
@@ -54,8 +55,29 @@ static void setup(void)
     rc_hle_all();
 }
 
+/* RC_NATIVE=file: run the lifted code from a native-code blob (recomp lift
+ * --native) instead of the C compiled into this program. */
+static void load_native(void)
+{
+    const char *path = getenv("RC_NATIVE");
+    if (!path || !*path) {
+        return;
+    }
+    uint32_t size = 0;
+    uint8_t *blob = rc_host_read(path, &size);
+    if (!blob) {
+        rc_fatal("cannot read native code %s", path);
+    }
+    char err[256];
+    if (!rc_native_load(blob, size, err, sizeof err)) {
+        rc_fatal("%s: %s", path, err);
+    }
+    free(blob);
+}
+
 int main(int argc, char **argv)
 {
+    load_native();
     const char *game = getenv("TROPICO1_DIR");
     const char *user = getenv("TROPICO1_USER");
     static char args[1024];

@@ -18,6 +18,7 @@ rc-discover.workspace = true
 rc-ir.workspace = true
 rc-x86.workspace = true
 rc-emit-c.workspace = true
+rc-emit-native.workspace = true
 iced-x86 = { workspace = true, features = ["encoder", "op_code_info", "intel"] }
 
 [lints]

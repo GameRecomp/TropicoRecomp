@@ -4,6 +4,10 @@
  * writes cases.c with one lifted program per test instance and the table
  * `rc_programs`; this harness reads the same input as the reference runner
  * and writes output in the same format.
+ *
+ * Built with RC_NATIVE_HARNESS, it runs the native back end's code instead:
+ * the programs come from a bundle of blobs named on the command line
+ * (u32 count, then per program u32 size and the blob).
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +17,7 @@
 #include "case.h"
 #include "rc/dispatch.h"
 #include "rc/lifted.h"
+#include "rc/native.h"
 
 typedef struct rc_program {
     rc_fn entry;
@@ -20,8 +25,54 @@ typedef struct rc_program {
     uint32_t count;
 } rc_program;
 
+#if defined(RC_NATIVE_HARNESS)
+static rc_program *rc_programs;
+static uint32_t rc_program_count;
+
+/* Map every blob of the bundle at `path`. */
+static int load_bundle(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f || fread(&rc_program_count, 4, 1, f) != 1) {
+        fprintf(stderr, "harness: cannot read %s\n", path);
+        return 0;
+    }
+    rc_programs = calloc(rc_program_count, sizeof *rc_programs);
+    for (uint32_t k = 0; k < rc_program_count; k++) {
+        uint32_t n;
+        if (fread(&n, 4, 1, f) != 1) {
+            return 0;
+        }
+        uint8_t *b = malloc(n);
+        if (!b || fread(b, 1, n, f) != n) {
+            return 0;
+        }
+        rc_native_image img;
+        char err[200];
+        if (!rc_native_open(b, n, &img, err, sizeof err)) {
+            fprintf(stderr, "harness: program %u: %s\n", k, err);
+            return 0;
+        }
+        free(b);
+        rc_programs[k].table = img.table;
+        rc_programs[k].count = img.count;
+        for (uint32_t i = 0; i < img.count; i++) {
+            if (img.table[i].addr == RC_CASE_CODE) {
+                rc_programs[k].entry = img.table[i].fn;
+            }
+        }
+        if (!rc_programs[k].entry) {
+            fprintf(stderr, "harness: program %u has no entry\n", k);
+            return 0;
+        }
+    }
+    fclose(f);
+    return 1;
+}
+#else
 extern const rc_program rc_programs[];
 extern const uint32_t rc_program_count;
+#endif
 
 /* Unused here, but the runtime refers to them. */
 const rc_fn_entry rc_lifted_table[1];
@@ -31,8 +82,16 @@ const char *const rc_lifted_modules[] = {0};
 static rc_case_in in;
 static rc_case_out out;
 
-int main(void)
+int main(int argc, char **argv)
 {
+#if defined(RC_NATIVE_HARNESS)
+    if (argc < 2 || !load_bundle(argv[1])) {
+        return 2;
+    }
+#else
+    (void)argc;
+    (void)argv;
+#endif
     if (!rc_mem_reserve(UINT64_C(1) << 32) || !rc_mem_commit(RC_CASE_CODE, RC_CASE_CODE_MAX) ||
         !rc_mem_commit(RC_CASE_WINDOW, RC_CASE_WINDOW_SIZE)) {
         fprintf(stderr, "harness: cannot set up guest memory\n");
@@ -51,6 +110,7 @@ int main(void)
         memcpy(rc_ptr(RC_CASE_WINDOW), in.window, RC_CASE_WINDOW_SIZE);
         rc_cpu c;
         memset(&c, 0, sizeof c);
+        rc_native_bind(&c);
         memcpy(c.r, in.regs, 32);
         rc_set_eflags(&c, in.eflags);
         rc_set_lifted(p->table, p->count);

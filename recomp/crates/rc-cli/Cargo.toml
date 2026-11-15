@@ -19,6 +19,7 @@ rc-ir.workspace = true
 rc-x86.workspace = true
 rc-emit-c.workspace = true
 rc-inno.workspace = true
+rc-emit-native.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

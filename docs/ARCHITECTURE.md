@@ -39,6 +39,7 @@ recomp/                 Rust workspace: the recompiler
     rc-ir/              the IR: statements, expressions, terminators
     rc-analysis/        x87 stack depth, stack deltas, call contracts (later)
     rc-emit-c/          IR → C
+    rc-emit-native/     IR → x86-64 / ARM64 machine code with Cranelift (one blob per target)
     rc-emit-wasm/       IR → WebAssembly module (later)
     rc-manifest/        game.toml and override files
     rc-report/          JSON reports
@@ -156,6 +157,32 @@ fixed guest-address buckets so that a change rebuilds only its bucket.
 Functions are emitted in parallel and written in address order. Optionally
 each guest instruction is emitted as a comment above its C, for debugging
 and profiling.
+
+### The native back end
+
+`rc-emit-native` is the second back end beside `rc-emit-c` and keeps the
+same contract, so that lifted code from either behaves the same: each
+guest function becomes a host function `void f(rc_cpu *c)` in the
+platform's C calling convention; registers and flags live in host
+registers and go back to `c` around calls exactly as in the C. It exists
+for the converter (M12): a browser cannot compile tens of megabytes of C,
+but Cranelift, built for WebAssembly, compiles the whole game in seconds.
+
+Native code is not linked against the runtime. It reaches it through two
+fields at the end of `rc_cpu`: `mem`, the guest memory base, and
+`helpers`, a table of runtime functions (dispatch, traps with their
+messages kept in the blob, cpuid, rdtsc, and one entry for all x87
+operations, which the runtime decodes and runs with the same functions the
+C uses). Calls between lifted functions are direct; the linker in the crate
+resolves them when it lays the functions out, so the blob needs no
+relocation and is loaded by copying it into executable memory (`mmap` and
+`mprotect`, `MAP_JIT` on Apple silicon, `VirtualProtect` on Windows). The
+blob's header names its target and the offsets of the two fields, which the
+loader checks against its own build.
+
+Both back ends are held equal by the difftest (every instruction form from
+random states, against the real CPU) and by the scenarios, which give the
+same API sequences and screenshots with either.
 
 ### Generated-code contract
 

@@ -4,9 +4,11 @@
 //! Every instruction form the lifter models (found by instantiating each
 //! iced `Code` and keeping those that lift without a trap), plus a few
 //! string-instruction and whole-program fixtures, is run from random states
-//! twice: on the real CPU in 32-bit mode (`tools/difftest/ref32.c`) and as
-//! lifted C (`tools/difftest/harness.c`). Registers, the defined flags and
-//! a 4 KiB memory window must agree.
+//! on the real CPU in 32-bit mode (`tools/difftest/ref32.c`) and through
+//! each back end: as lifted C (`tools/difftest/harness.c`) and as native
+//! code from rc-emit-native (the same harness built with
+//! RC_NATIVE_HARNESS; on hosts that are a native-code target). Registers,
+//! the defined flags and a 4 KiB memory window must agree.
 //!
 //! Needs an x86 Linux host that can run 32-bit programs, clang (for
 //! `-m32 -nostdlib`) and a C compiler. Writes to `build/difftest`.
@@ -125,8 +127,36 @@ fn real_main() -> Result<bool, String> {
     let mut src = String::new();
     let mut decls = String::new();
     let mut counts = Vec::new();
+    let native = rc_emit_native::Target::host();
+    let compiler = match native {
+        Some(t) => Some(
+            rc_emit_native::Compiler::new(
+                t,
+                rc_emit_native::Options {
+                    flags_at_return: true,
+                    verify: true,
+                },
+            )
+            .map_err(|e| e.to_string())?,
+        ),
+        None => None,
+    };
+    let mut bundle = Vec::new();
+    bundle.extend_from_slice(&(instances.len() as u32).to_le_bytes());
     for (k, inst) in instances.iter().enumerate() {
-        let (d, code, n) = cases::lift_program(inst, k);
+        let (funcs, entries) = cases::lift_functions(inst);
+        if let Some(cc) = &compiler {
+            let compiled = funcs
+                .iter()
+                .map(|f| cc.compile(f, &entries))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("{}: {e}", inst.text))?;
+            let blob =
+                rc_emit_native::link(cc.target(), &compiled, &[]).map_err(|e| e.to_string())?;
+            bundle.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+            bundle.extend_from_slice(&blob);
+        }
+        let (d, code, n) = cases::lift_program(&funcs, &entries, k);
         decls.push_str(&d);
         src.push_str(&code);
         counts.push(n);
@@ -157,7 +187,11 @@ fn real_main() -> Result<bool, String> {
     fs::write(gen_dir.join("programs.c"), table).map_err(|e| e.to_string())?;
     c_files.push(gen_dir.join("programs.c"));
 
-    build(&root, &work, &c_files)?;
+    build(&root, &work, &c_files, compiler.is_some())?;
+    let bundle_path = work.join("native.bundle");
+    if compiler.is_some() {
+        fs::write(&bundle_path, &bundle).map_err(|e| e.to_string())?;
+    }
 
     // Cases.
     let mut input = Vec::new();
@@ -196,11 +230,48 @@ fn real_main() -> Result<bool, String> {
             None => e.0,
         }
     };
-    let reference = execute(&work.join("ref32"), &input).map_err(|e| crashed("reference", e))?;
-    let lifted = execute(&work.join("harness"), &input).map_err(|e| crashed("lifted", e))?;
+    let reference =
+        execute(&work.join("ref32"), &[], &input).map_err(|e| crashed("reference", e))?;
+    let mut backends = vec![(
+        "C",
+        execute(&work.join("harness"), &[], &input).map_err(|e| crashed("lifted C", e))?,
+    )];
+    if compiler.is_some() {
+        let arg = bundle_path.to_string_lossy().into_owned();
+        backends.push((
+            "native",
+            execute(&work.join("harness-native"), &[arg], &input)
+                .map_err(|e| crashed("native code", e))?,
+        ));
+    } else {
+        eprintln!(
+            "difftest: this host is no native-code target; the native back end is not tested"
+        );
+    }
+    let mut all_ok = true;
+    for (name, lifted) in &backends {
+        all_ok &= report(name, &a, &instances, &states, &reference, lifted, out_size)?;
+    }
+    let covered = match &a.coverage {
+        Some(exe) => coverage(exe, &instances)?,
+        None => true,
+    };
+    Ok(all_ok && covered)
+}
+
+/// Compare one back end's output with the reference and print the result.
+fn report(
+    backend: &str,
+    a: &Args,
+    instances: &[Instance],
+    states: &[(usize, State)],
+    reference: &[u8],
+    lifted: &[u8],
+    out_size: usize,
+) -> Result<bool, String> {
     if reference.len() != states.len() * out_size || lifted.len() != states.len() * out_size {
         return Err(format!(
-            "short output: reference {} bytes, lifted {} bytes, expected {}",
+            "short output: reference {} bytes, {backend} {} bytes, expected {}",
             reference.len(),
             lifted.len(),
             states.len() * out_size
@@ -222,21 +293,17 @@ fn real_main() -> Result<bool, String> {
             }
         }
     }
-    let covered = match &a.coverage {
-        Some(exe) => coverage(exe, &instances)?,
-        None => true,
-    };
     let total = states.len() as u32;
     let mut by_mnemonic: BTreeMap<String, u32> = BTreeMap::new();
     for (k, (n, detail)) in &fails {
         let inst = &instances[*k];
         *by_mnemonic.entry(inst.mnemonic.clone()).or_default() += 1;
         if fails.len() <= 40 || a.keep_going {
-            println!("FAIL {} ({n} states)\n{detail}", inst.text);
+            println!("FAIL [{backend}] {} ({n} states)\n{detail}", inst.text);
         }
     }
     if !by_mnemonic.is_empty() {
-        println!("failing instances by mnemonic:");
+        println!("[{backend}] failing instances by mnemonic:");
         for (m, n) in &by_mnemonic {
             println!("  {m:<12} {n}");
         }
@@ -244,12 +311,12 @@ fn real_main() -> Result<bool, String> {
     let forms: std::collections::BTreeSet<&str> =
         instances.iter().map(|i| i.mnemonic.as_str()).collect();
     println!(
-        "difftest: {ok}/{total} states agree; {} of {} instances fail; {} mnemonics covered",
+        "difftest [{backend}]: {ok}/{total} states agree; {} of {} instances fail; {} mnemonics covered",
         fails.len(),
         instances.len(),
         forms.len()
     );
-    Ok(fails.is_empty() && covered)
+    Ok(fails.is_empty())
 }
 
 /// Every modelled instruction form in `exe` must be tested.
@@ -300,7 +367,7 @@ fn coverage(exe: &Path, instances: &[Instance]) -> Result<bool, String> {
     Ok(missing.is_empty())
 }
 
-fn build(root: &Path, work: &Path, c_files: &[PathBuf]) -> Result<(), String> {
+fn build(root: &Path, work: &Path, c_files: &[PathBuf], native: bool) -> Result<(), String> {
     let td = root.join("tools/difftest");
     let clang = std::env::var("CC32").unwrap_or_else(|_| "clang".into());
     run(Command::new(&clang)
@@ -335,7 +402,7 @@ fn build(root: &Path, work: &Path, c_files: &[PathBuf]) -> Result<(), String> {
     };
     let mut objs = Vec::new();
     let mut sources: Vec<PathBuf> = c_files.to_vec();
-    for s in ["mem.c", "log.c", "dispatch.c", "x87.c"] {
+    for s in ["mem.c", "log.c", "dispatch.c", "x87.c", "native.c"] {
         sources.push(root.join("runtime/src").join(s));
     }
     sources.push(td.join("harness.c"));
@@ -365,13 +432,45 @@ fn build(root: &Path, work: &Path, c_files: &[PathBuf]) -> Result<(), String> {
         .args(&objs)
         .arg("-lm")
         .arg("-o")
-        .arg(work.join("harness")))
+        .arg(work.join("harness")))?;
+    if !native {
+        return Ok(());
+    }
+    // The native harness: the runtime and the harness, no generated C.
+    let mut nobjs = Vec::new();
+    for s in ["mem.c", "log.c", "dispatch.c", "x87.c", "native.c"] {
+        let o = work.join(format!("native-{s}.o"));
+        let mut c = Command::new(&cc);
+        inc(&mut c);
+        run(c
+            .arg("-c")
+            .arg(root.join("runtime/src").join(s))
+            .arg("-o")
+            .arg(&o))?;
+        nobjs.push(o);
+    }
+    let o = work.join("native-harness.o");
+    let mut c = Command::new(&cc);
+    inc(&mut c);
+    run(c
+        .arg("-DRC_NATIVE_HARNESS")
+        .arg("-c")
+        .arg(td.join("harness.c"))
+        .arg("-o")
+        .arg(&o))?;
+    nobjs.push(o);
+    run(Command::new(&cc)
+        .args(&nobjs)
+        .arg("-lm")
+        .arg("-o")
+        .arg(work.join("harness-native")))
 }
 
 /// Run `bin` on `input`. On failure: the message and how many bytes of
 /// output it wrote first.
-fn execute(bin: &Path, input: &[u8]) -> Result<Vec<u8>, (String, usize)> {
+fn execute(bin: &Path, args: &[String], input: &[u8]) -> Result<Vec<u8>, (String, usize)> {
     let mut ch = Command::new(bin)
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

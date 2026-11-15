@@ -47,6 +47,12 @@ typedef struct rc_cpu {
 
     /* The guest address being executed, kept for diagnostics only. */
     uint32_t eip;
+    /* For lifted code compiled to native code (rc/native.h), which cannot
+     * link against the runtime: the base of guest memory and the runtime
+     * functions it calls. rc_native_bind sets them; generated C does not
+     * use them. */
+    uint8_t *mem;
+    const void *const *helpers;
 } rc_cpu;
 
 /* EFLAGS as the guest sees it (pushfd, lahf). */

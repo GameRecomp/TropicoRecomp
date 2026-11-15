@@ -57,6 +57,14 @@ Lifted code is the exception in the other direction: it is derived from the
 game, is not ours to license, and so gets no MIT identifier. It is never
 committed anyway.
 
+## 5. The C back end stays intact
+
+There are two back ends from the same IR: generated C (`rc-emit-c`, built
+with CMake) and native code (`rc-emit-native`, for the converter). A change
+to the IR, the lifter or the runtime contract keeps both working, and the
+difftest (`cargo run --release -p rc-difftest`) passes for both. The C path
+is the one to read and debug; it is never dropped in favour of the other.
+
 ## Everything else
 
 See [docs/WORKFLOWS.md](docs/WORKFLOWS.md) for how work is done and

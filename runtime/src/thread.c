@@ -46,6 +46,7 @@
 #include "rc/hle.h"
 #include "rc/log.h"
 #include "rc/mem.h"
+#include "rc/native.h"
 #include "rc/process.h"
 #include "rc/vm.h"
 #include "rc/x87.h"
@@ -303,6 +304,7 @@ uint32_t rc_thread_create(uint32_t start, uint32_t param, uint32_t stack_size, u
     rc_st32(tib + 0x30, rc_ld32(main_tib + 0x30));
 
     rc_cpu *c = t->cpu;
+    rc_native_bind(c);
     rc_finit(c);
     c->fpu_control = 0x027f;
     c->fs_base = tib;

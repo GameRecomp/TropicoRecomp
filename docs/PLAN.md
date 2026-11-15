@@ -21,6 +21,7 @@ Read [TARGETS.md](TARGETS.md) for the facts this plan rests on,
 | Commit messages never mention an AI model, vendor or session | A `commit-msg` hook rejects them; no attribution trailers |
 | The recompiler is written in Rust | Workspace under `recomp/`; pure-Rust dependencies in the pipeline |
 | Generated code and runtime are C | C11, no compiler extensions outside macros |
+| The C back end stays intact | Beside the native back end (`rc-emit-native`), `rc-emit-c` and the CMake build of generated C keep working; both back ends consume the same IR, and the difftest runs every case through both against the real CPU |
 | Recompiling and compiling must later work as WebAssembly | Pipeline crates build for `wasm32` from day one; no external tools (Ghidra, Python) in the pipeline; IR designed for a second, direct WebAssembly back end |
 | SDL3, and its satellite libraries where useful | All platform access through SDL3; `SDL3_ttf` for text, `SDL3_mixer` for audio |
 | Every source file carries an SPDX licence identifier | `SPDX-License-Identifier: MIT` in the first lines; checked by the `pre-commit` hook and CI |
@@ -205,9 +206,35 @@ replacement has a difference test.
 main menu with no server involved beyond static files, in a measured time
 that we publish.
 
+### M12. Converter: a page that turns a GOG installer into a native build
+
+The user opens a static page (GitHub Pages), chooses their GOG installer,
+and gets a build for their system; nothing is uploaded, and the site
+serves only our tools.
+
+- **Native back end** (`rc-emit-native`): IR to x86-64 and ARM64 machine
+  code with Cranelift, one position-independent blob per target. The
+  runtime loads it into executable memory (`runtime/src/native.c`) instead
+  of the C compiled in. Done: the whole game compiles in about a second on
+  16 threads, and the scenarios replay identically to the C build.
+- **Shells**: the runtime, HLE and SDL3 built by CI for each system, with
+  no game code; at start they load the blob and the game files that sit
+  beside them.
+- **Packaging** per system: Windows, a zip with the shell `.exe` and a
+  folder with the blob and the game files; Linux, an AppImage with the
+  payload after its squashfs; macOS, an unsigned `.app` (arm64 and x86-64)
+  with the payload in its resources.
+- **The page**: `rc-web` (the installer reader, discovery, lifting and the
+  native back end in WebAssembly) in Web Workers, with a progress bar per
+  step (extracting by bytes, compiling by functions, packaging by bytes),
+  and the output streamed to disk.
+
+*Exit:* from a clean browser profile, each of the two GOG installers turns
+into a build for Windows, Linux and macOS that reaches the main menu.
+
 ### Tropico 2
 
-Begins when M9 is done; M10 and M11 can run beside it.
+Begins when M9 is done; M10 to M12 can run beside it.
 
 - T2-0 Reconnaissance with our own tools; update TARGETS.md.
 - T2-1 Discovery without relocations: operand and data scanning, RTTI and

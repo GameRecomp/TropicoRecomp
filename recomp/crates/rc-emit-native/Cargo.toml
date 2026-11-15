@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "rc-emit-native"
+description = "IR to native machine code (x86-64, ARM64) with Cranelift, as one position-independent blob the runtime loads"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rc-ir.workspace = true
+cranelift-codegen.workspace = true
+cranelift-frontend.workspace = true
+
+[lints]
+workspace = true

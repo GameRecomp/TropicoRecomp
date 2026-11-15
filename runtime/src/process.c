@@ -9,6 +9,7 @@
  * exception handler chain.
  */
 #include "rc/process.h"
+#include "rc/native.h"
 #include "rc/thread.h"
 
 #include <stdio.h>
@@ -295,7 +296,8 @@ int rc_run(const rc_config *cfg)
     }
     /* The DLLs lifted with the program first, so that the executable's
      * imports from them bind to their code. */
-    for (const char *const *d = rc_lifted_modules; *d; d++) {
+    const char *const *mods = rc_native_modules();
+    for (const char *const *d = mods ? mods : rc_lifted_modules; *d; d++) {
         load_file(*d);
     }
     rc_module *exe = load_file(cfg->exe);
@@ -336,10 +338,14 @@ int rc_run(const rc_config *cfg)
         trace_exports();
     }
 
-    rc_set_lifted(rc_lifted_table, rc_lifted_count);
+    /* The lifted code: a loaded native blob, or the C compiled in. */
+    if (!rc_native_loaded()) {
+        rc_set_lifted(rc_lifted_table, rc_lifted_count);
+    }
     static rc_cpu cpu;
     rc_cpu *c = &cpu;
     memset(c, 0, sizeof *c);
+    rc_native_bind(c);
     rc_finit(c);
     c->fpu_control = 0x027f; /* as Windows starts threads: 53-bit precision */
     c->fs_base = TIB_ADDR;

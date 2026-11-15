@@ -688,7 +688,9 @@ impl Instance {
 /// Lift `inst` into C functions named `p<k>_<addr>`. Returns the
 /// declarations, the definitions with the program's dispatch table, and the
 /// number of functions.
-pub fn lift_program(inst: &Instance, k: usize) -> (String, String, usize) {
+/// The instance's code as a program: its lifted functions and their
+/// entries.
+pub fn lift_functions(inst: &Instance) -> (Vec<rc_ir::Function>, std::collections::BTreeSet<u32>) {
     let mut text = inst.code.clone();
     text.resize(0x1000, 0xcc);
     let mut b = PeBuilder::new(0x0040_0000);
@@ -699,9 +701,25 @@ pub fn lift_program(inst: &Instance, k: usize) -> (String, String, usize) {
     let pe = PeFile::parse(&file).expect("own PE parses");
     let image = Image::new(&pe);
     let map = rc_discover::discover(&pe, &image, &Options::default());
+    let entries = map.functions.iter().map(|f| f.addr).collect();
+    let funcs = map
+        .functions
+        .iter()
+        .map(|f| rc_x86::lift_function(&image, &map, f))
+        .collect();
+    (funcs, entries)
+}
+
+/// The program as C: declarations, definitions with its table
+/// `p<k>_table`, and the number of functions.
+pub fn lift_program(
+    funcs: &[rc_ir::Function],
+    entries: &std::collections::BTreeSet<u32>,
+    k: usize,
+) -> (String, String, usize) {
     let names = rc_emit_c::Entries {
         prefix: format!("p{k}_"),
-        entries: map.functions.iter().map(|f| f.addr).collect(),
+        entries: entries.clone(),
     };
     let opts = rc_emit_c::Options {
         comments: true,
@@ -710,15 +728,14 @@ pub fn lift_program(inst: &Instance, k: usize) -> (String, String, usize) {
     let mut decls = String::new();
     let mut defs = String::new();
     let mut table = format!("const rc_fn_entry p{k}_table[] = {{\n");
-    for f in &map.functions {
-        let lf = rc_x86::lift_function(&image, &map, f);
-        let _ = writeln!(decls, "void p{k}_{:08x}(rc_cpu *c);", f.addr);
-        defs.push_str(&rc_emit_c::function(&names, &lf, opts));
-        let _ = writeln!(table, "    {{{:#010x}u, p{k}_{:08x}}},", f.addr, f.addr);
+    for lf in funcs {
+        let _ = writeln!(decls, "void p{k}_{:08x}(rc_cpu *c);", lf.addr);
+        defs.push_str(&rc_emit_c::function(&names, lf, opts));
+        let _ = writeln!(table, "    {{{:#010x}u, p{k}_{:08x}}},", lf.addr, lf.addr);
     }
     table.push_str("};\n");
     defs.push_str(&table);
-    (decls, defs, map.functions.len())
+    (decls, defs, funcs.len())
 }
 
 /// Inputs for an x87 test: control word, input stack, memory operand.

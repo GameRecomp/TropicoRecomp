@@ -63,6 +63,11 @@ enum Cmd {
         /// Put each guest instruction as a comment above its C.
         #[arg(long)]
         comments: bool,
+        /// Compile to native code instead of C, for these targets
+        /// (comma-separated: host, x86_64-sysv, x86_64-windows, arm64-apple,
+        /// arm64-linux). Writes generated/<id>/native/code-<target>.bin.
+        #[arg(long, value_delimiter = ',')]
+        native: Vec<String>,
     },
     /// Extract a GOG installer (setup_*.exe, Inno Setup) into a directory:
     /// the game lands in <out>/app.
@@ -105,7 +110,8 @@ fn main() -> ExitCode {
             game,
             out,
             comments,
-        } => lift(&game_dir, &game, out.as_deref(), comments),
+            native,
+        } => lift(&game_dir, &game, out.as_deref(), comments, &native),
         Cmd::Unpack {
             installer,
             out,
@@ -404,7 +410,13 @@ fn discover(game_dir: &Path, arg: &GameArg, out: Option<&Path>, show: &[String])
     Ok(())
 }
 
-fn lift(game_dir: &Path, arg: &GameArg, out: Option<&Path>, comments: bool) -> Result<()> {
+fn lift(
+    game_dir: &Path,
+    arg: &GameArg,
+    out: Option<&Path>,
+    comments: bool,
+    native: &[String],
+) -> Result<()> {
     let (m, _pe, image, map) = analyse(game_dir, arg)?;
     let mut functions: Vec<rc_ir::Function> = map
         .functions
@@ -449,6 +461,16 @@ fn lift(game_dir: &Path, arg: &GameArg, out: Option<&Path>, comments: bool) -> R
         prefix: "f_".into(),
         entries,
     };
+    if !native.is_empty() {
+        let out = match out {
+            Some(o) => o.to_path_buf(),
+            None => repo_root()?
+                .join("generated")
+                .join(&m.game.id)
+                .join("native"),
+        };
+        return lift_native(&functions, &names.entries, &modules, native, &out);
+    }
     let tree = rc_emit_c::program(
         &names,
         &functions,
@@ -483,5 +505,65 @@ fn lift(game_dir: &Path, arg: &GameArg, out: Option<&Path>, comments: bool) -> R
         bytes as f64 / 1e6,
         m.game.id
     );
+    Ok(())
+}
+
+/// Compile `functions` to native code for each of `targets`, on all
+/// cores, and write one blob per target into `out`.
+fn lift_native(
+    functions: &[rc_ir::Function],
+    entries: &BTreeSet<u32>,
+    modules: &[String],
+    targets: &[String],
+    out: &Path,
+) -> Result<()> {
+    use rc_emit_native::{Compiler, Options, Target, link};
+    fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    for t in targets {
+        let target = if t == "host" {
+            Target::host().ok_or("this machine is not a native-code target")?
+        } else {
+            Target::from_name(t).ok_or_else(|| format!("unknown target {t}"))?
+        };
+        let compiler = Compiler::new(target, Options::default()).map_err(|e| e.to_string())?;
+        let start = std::time::Instant::now();
+        let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let chunk = functions.len().div_ceil(workers).max(1);
+        let results: Vec<_> = std::thread::scope(|s| {
+            let handles: Vec<_> = functions
+                .chunks(chunk)
+                .map(|part| {
+                    let compiler = &compiler;
+                    s.spawn(move || {
+                        part.iter()
+                            .map(|f| compiler.compile(f, entries))
+                            .collect::<std::result::Result<Vec<_>, _>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join()
+                        .unwrap_or_else(|_| Err(rc_emit_native::Error("a worker panicked".into())))
+                })
+                .collect()
+        });
+        let mut compiled = Vec::with_capacity(functions.len());
+        for r in results {
+            compiled.extend(r.map_err(|e| e.to_string())?);
+        }
+        let blob = link(target, &compiled, modules).map_err(|e| e.to_string())?;
+        let path = out.join(format!("code-{}.bin", target.name()));
+        fs::write(&path, &blob).map_err(|e| format!("{}: {e}", path.display()))?;
+        eprintln!(
+            "{}: {} functions in {:.1} s on {workers} threads, {:.1} MB of code, to {}",
+            target.name(),
+            compiled.len(),
+            start.elapsed().as_secs_f64(),
+            blob.len() as f64 / 1e6,
+            path.display()
+        );
+    }
     Ok(())
 }

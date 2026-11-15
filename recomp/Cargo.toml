@@ -17,6 +17,7 @@ rc-ir = { path = "crates/rc-ir" }
 rc-x86 = { path = "crates/rc-x86" }
 rc-emit-c = { path = "crates/rc-emit-c" }
 rc-inno = { path = "crates/rc-inno" }
+rc-emit-native = { path = "crates/rc-emit-native" }
 iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "code_asm", "instr_info"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,6 +25,8 @@ toml = "0.8"
 sha2 = "0.10"
 sha1 = "0.10"
 crc32fast = "1"
+cranelift-codegen = { version = "0.137", default-features = false, features = ["std", "x86", "arm64"] }
+cranelift-frontend = { version = "0.137", default-features = false, features = ["std"] }
 clap = { version = "4", features = ["derive"] }
 
 [workspace.lints.rust]
