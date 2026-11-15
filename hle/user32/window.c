@@ -630,6 +630,19 @@ void rc_pump_events(void)
     }
 }
 
+/* Work that needs a guest CPU and must happen regularly (sound callbacks):
+ * done whenever the program looks for messages. */
+#define HOOKS 8
+static void (*hooks[HOOKS])(rc_cpu *c);
+static int nhooks;
+
+void rc_add_pump_hook(void (*fn)(rc_cpu *c))
+{
+    if (nhooks < HOOKS) {
+        hooks[nhooks++] = fn;
+    }
+}
+
 void rc_input_mouse(int *x, int *y)
 {
     *x = mouse_x;
@@ -641,6 +654,9 @@ static void k_PeekMessageA(rc_cpu *c)
     uint32_t out = RC_ARG(c, 0), hwnd = RC_ARG(c, 1), lo = RC_ARG(c, 2), hi = RC_ARG(c, 3);
     uint32_t remove = RC_ARG(c, 4) & 1;
     rc_pump_events();
+    for (int h = 0; h < nhooks; h++) {
+        hooks[h](c);
+    }
     for (uint32_t i = qhead; i != qtail; i++) {
         msg m = queue[i % QUEUE];
         if ((hwnd && m.hwnd != hwnd) || ((lo || hi) && (m.message < lo || m.message > hi))) {

@@ -9,6 +9,7 @@ endif()
 
 if(SDL3_FOUND)
     find_package(SDL3_ttf CONFIG QUIET)
+    find_package(SDL3_mixer CONFIG QUIET)
 endif()
 
 if(SDL3_FOUND AND SDL3_ttf_FOUND)
@@ -18,5 +19,14 @@ if(SDL3_FOUND AND SDL3_ttf_FOUND)
 else()
     add_library(rc_platform STATIC src/frame.c src/platform_null.c src/text_null.c)
     message(STATUS "platform: null (SDL3 or SDL3_ttf not found)")
+endif()
+
+# Sound: SDL3_mixer when it is there, otherwise none.
+if(SDL3_FOUND AND SDL3_ttf_FOUND AND SDL3_mixer_FOUND)
+    target_sources(rc_platform PRIVATE src/audio_mixer.c)
+    target_link_libraries(rc_platform PUBLIC SDL3_mixer::SDL3_mixer)
+    message(STATUS "platform: SDL3_mixer ${SDL3_mixer_VERSION}")
+else()
+    target_sources(rc_platform PRIVATE src/audio_null.c)
 endif()
 target_include_directories(rc_platform PUBLIC include)

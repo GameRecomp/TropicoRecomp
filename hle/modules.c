@@ -29,7 +29,11 @@ void rc_hle_gdi32(void)
 
 void rc_hle_ddraw(void) { rc_register_imports(rc_ddraw_defs, rc_ddraw_count); }
 
-void rc_hle_mss32(void) { rc_register_imports(rc_mss32_defs, rc_mss32_count); }
+void rc_hle_mss32(void)
+{
+    rc_register_imports(rc_mss32_defs, rc_mss32_count);
+    rc_mss32_init();
+}
 void rc_hle_binkw32(void) { rc_register_imports(rc_binkw32_defs, rc_binkw32_count); }
 
 void rc_hle_all(void)

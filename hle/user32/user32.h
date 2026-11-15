@@ -21,6 +21,8 @@ void rc_post_message(uint32_t hwnd, uint32_t message, uint32_t wparam, uint32_t 
 struct rc_event;
 /* Deliver an input event as if the host had sent it (scripted input). */
 void rc_inject_event(const struct rc_event *e);
+/* Run `fn` whenever the program looks for messages. */
+void rc_add_pump_hook(void (*fn)(rc_cpu *c));
 /* Where the mouse is, in frame coordinates. */
 void rc_input_mouse(int *x, int *y);
 
