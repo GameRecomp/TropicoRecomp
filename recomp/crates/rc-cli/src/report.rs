@@ -164,7 +164,14 @@ pub fn lift(functions: &[rc_ir::Function]) {
             traps(&i.stmts, &mut by);
         }
     }
-    let expected = ["int3", "divide by zero", "divide overflow", "hlt", "ud2"];
+    let expected = [
+        "int3",
+        "divide by zero",
+        "divide overflow",
+        "hlt",
+        "ud2",
+        "software interrupt 0x6",
+    ];
     let unmodelled: u32 = by
         .iter()
         .filter(|(k, _)| !expected.contains(&k.as_str()))
@@ -174,7 +181,7 @@ pub fn lift(functions: &[rc_ir::Function]) {
     println!("instructions not modelled: {unmodelled}");
     let mut v: Vec<_> = by.into_iter().collect();
     v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    for (k, n) in v.iter().take(40) {
+    for (k, n) in &v {
         println!("  {k:<28} {n:>7}");
     }
 }

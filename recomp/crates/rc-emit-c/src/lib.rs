@@ -16,7 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use rc_ir::{
-    BinOp as B, Expr as E, Flag, Function, Helper, Part, Reg, Stmt as S, Term, UnOp as U, W,
+    BinOp as B, Expr as E, FArith, FBinary, FConst, FLoc, FUnary, Flag, Fpu, Function, Helper,
+    Part, Reg, Stmt as S, Term, UnOp as U, W,
 };
 
 const REGS: [&str; 8] = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"];
@@ -80,14 +81,6 @@ fn stype(w: W) -> &'static str {
     }
 }
 
-fn konst(w: W, v: u64) -> String {
-    match w {
-        W::B64 => format!("UINT64_C({v:#x})"),
-        W::B32 => format!("{v:#x}u"),
-        _ => format!("(({}){v:#x})", ctype(w)),
-    }
-}
-
 fn reg(r: Reg) -> String {
     let n = REGS[usize::from(r.n)];
     match r.part {
@@ -110,44 +103,137 @@ fn flag(f: Flag) -> &'static str {
     }
 }
 
-fn expr(e: &E) -> String {
+/// The C type of a rendered expression: exactly the unsigned type of a
+/// width, or `int` (small constants and comparison results, whose values
+/// always fit the IR width they stand for).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ty {
+    U(W),
+    Int,
+}
+
+fn wide(w: W) -> bool {
+    matches!(w, W::B32 | W::B64)
+}
+
+/// Render an expression with its C type. Casts are written only where C's
+/// conversions would otherwise give a different value: narrow results,
+/// left shifts of promoted values, signed operations, truncation.
+fn ex(e: &E) -> (String, Ty) {
     match e {
-        E::Const(w, v) => konst(*w, *v),
-        E::Tmp(_, t) => format!("t{t}"),
-        E::Reg(r) => reg(*r),
-        E::Flag(f) => flag(*f).into(),
-        E::FsBase => "c->fs_base".into(),
-        E::Load(w, a) => format!("rc_ld{}m(m, {})", w.bits(), expr(a)),
-        E::Bin(op, w, a, b) => bin(*op, *w, &expr(a), &expr(b)),
+        E::Const(w, v) => match w {
+            W::B64 => (format!("UINT64_C({v:#x})"), Ty::U(W::B64)),
+            W::B32 => (format!("{v:#x}u"), Ty::U(W::B32)),
+            _ => (format!("{v:#x}"), Ty::Int),
+        },
+        E::Tmp(w, t) => (format!("t{t}"), Ty::U(*w)),
+        E::Reg(r) => (reg(*r), Ty::U(r.part.width())),
+        E::Flag(f) => (flag(*f).into(), Ty::U(W::B8)),
+        E::FsBase => ("c->fs_base".into(), Ty::U(W::B32)),
+        E::FpuStatus => ("rc_fstsw(c)".into(), Ty::U(W::B16)),
+        E::FpuControl => ("c->fpu_control".into(), Ty::U(W::B16)),
+        E::Load(w, a) => (format!("rc_ld{}m(m, {})", w.bits(), ex(a).0), Ty::U(*w)),
+        E::Bin(op, w, a, b) => bin(*op, *w, a, b),
         E::Un(op, w, a) => {
-            let (t, a) = (ctype(*w), expr(a));
+            let t = ctype(*w);
             match op {
-                U::Not => format!("(({t})~({t})({a}))"),
-                U::Neg => format!("(({t})(0u - ({t})({a})))"),
-                U::Parity => format!("rc_parity8((uint8_t)({a}))"),
-                U::Ctz => format!("rc_ctz{}({a})", w.bits()),
-                U::Clz => format!("rc_clz{}({a})", w.bits()),
-                U::Bswap => format!("rc_bswap32({a})"),
+                U::Not if wide(*w) => (format!("(~{})", exact(a, *w)), Ty::U(*w)),
+                U::Not => (format!("(({t})~{})", ex(a).0), Ty::U(*w)),
+                U::Neg if *w == W::B64 => (format!("(UINT64_C(0) - {})", exact(a, *w)), Ty::U(*w)),
+                U::Neg if *w == W::B32 => (format!("(0u - {})", exact(a, *w)), Ty::U(*w)),
+                U::Neg => (format!("(({t})(0 - {}))", ex(a).0), Ty::U(*w)),
+                U::Parity => (format!("rc_parity8({})", bare(a)), Ty::U(W::B8)),
+                U::Ctz => (format!("rc_ctz{}({})", w.bits(), ex(a).0), Ty::U(*w)),
+                U::Clz => (format!("rc_clz{}({})", w.bits(), ex(a).0), Ty::U(*w)),
+                U::Bswap => (format!("rc_bswap32({})", ex(a).0), Ty::U(W::B32)),
             }
         }
-        E::Zext(to, a) | E::Trunc(to, a) => format!("(({})({}))", ctype(*to), expr(a)),
-        E::Sext(from, to, a) => format!(
-            "(({})({})({})({}))",
-            ctype(*to),
-            stype(*to),
-            stype(*from),
-            expr(a)
+        E::Zext(to, a) | E::Trunc(to, a) => (exact(a, *to), Ty::U(*to)),
+        E::Sext(from, to, a) => (
+            format!(
+                "(({})({})({}){})",
+                ctype(*to),
+                stype(*to),
+                stype(*from),
+                ex(a).0
+            ),
+            Ty::U(*to),
         ),
         E::Select(w, c, a, b) => {
-            let t = ctype(*w);
-            format!("(({}) ? ({t})({}) : ({t})({}))", expr(c), expr(a), expr(b))
+            let s = format!("({} ? {} : {})", ex(c).0, exact(a, *w), exact(b, *w));
+            if wide(*w) {
+                (s, Ty::U(*w))
+            } else {
+                (format!("(({}){s})", ctype(*w)), Ty::U(*w))
+            }
         }
     }
 }
 
-fn bin(op: B, w: W, a: &str, b: &str) -> String {
+/// `e` with C type exactly that of `w`.
+fn exact(e: &E, w: W) -> String {
+    let (s, t) = ex(e);
+    if t == Ty::U(w) {
+        s
+    } else {
+        format!("(({}){s})", ctype(w))
+    }
+}
+
+/// `e` where the context converts it anyway (an assignment or a
+/// parameter): an outermost zero extension or truncation is left to the
+/// conversion.
+fn bare(e: &E) -> String {
+    match e {
+        E::Zext(_, a) | E::Trunc(_, a) => ex(a).0,
+        _ => ex(e).0,
+    }
+}
+
+fn expr(e: &E) -> String {
+    ex(e).0
+}
+
+/// `s` in parentheses, unless one pair already encloses all of it.
+fn paren(s: &str) -> String {
+    let b = s.as_bytes();
+    if b.first() == Some(&b'(') && b.last() == Some(&b')') {
+        let mut depth = 0;
+        let mut closes_at_end = true;
+        for (i, &c) in b.iter().enumerate() {
+            match c {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 && i + 1 != b.len() {
+                        closes_at_end = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if closes_at_end {
+            return s.to_string();
+        }
+    }
+    format!("({s})")
+}
+
+fn bin(op: B, w: W, a: &E, b: &E) -> (String, Ty) {
     let (t, s) = (ctype(w), stype(w));
-    let arith = |o: &str| format!("(({t})(({t})({a}) {o} ({t})({b})))");
+    let u = Ty::U(w);
+    let arith = |o: &str| {
+        if wide(w) {
+            (format!("({} {o} {})", exact(a, w), exact(b, w)), u)
+        } else {
+            (format!("(({t})({} {o} {}))", ex(a).0, ex(b).0), u)
+        }
+    };
+    let constant = match b {
+        E::Const(_, n) if *n < u64::from(w.bits()) => Some(*n),
+        _ => None,
+    };
     match op {
         B::Add => arith("+"),
         B::Sub => arith("-"),
@@ -156,18 +242,165 @@ fn bin(op: B, w: W, a: &str, b: &str) -> String {
         B::Xor => arith("^"),
         B::UDiv => arith("/"),
         B::URem => arith("%"),
-        B::Mul => format!("(({t})((uint64_t)({a}) * (uint64_t)({b})))"),
-        B::SDiv => format!("(({t})(({s})({a}) / ({s})({b})))"),
-        B::SRem => format!("(({t})(({s})({a}) % ({s})({b})))"),
-        B::Shl => format!("rc_shl{}({a}, (uint32_t)({b}))", w.bits()),
-        B::Shr => format!("rc_shr{}({a}, (uint32_t)({b}))", w.bits()),
-        B::Sar => format!("rc_sar{}({a}, (uint32_t)({b}))", w.bits()),
-        B::Eq => format!("((uint8_t)(({t})({a}) == ({t})({b})))"),
-        B::Ne => format!("((uint8_t)(({t})({a}) != ({t})({b})))"),
-        B::Ult => format!("((uint8_t)(({t})({a}) < ({t})({b})))"),
-        B::Ule => format!("((uint8_t)(({t})({a}) <= ({t})({b})))"),
-        B::Slt => format!("((uint8_t)(({s})({a}) < ({s})({b})))"),
-        B::Sle => format!("((uint8_t)(({s})({a}) <= ({s})({b})))"),
+        B::Mul if wide(w) => arith("*"),
+        B::Mul => (format!("(({t})((uint32_t){} * {}))", ex(a).0, ex(b).0), u),
+        B::SDiv => (format!("(({t})(({s}){} / ({s}){}))", ex(a).0, ex(b).0), u),
+        B::SRem => (format!("(({t})(({s}){} % ({s}){}))", ex(a).0, ex(b).0), u),
+        B::Shl | B::Shr | B::Sar if constant == Some(0) => (exact(a, w), u),
+        B::Shl if constant.is_some() => {
+            let n = constant.unwrap_or(0);
+            if wide(w) {
+                (format!("({} << {n})", exact(a, w)), u)
+            } else {
+                (format!("(({t})((uint32_t){} << {n}))", ex(a).0), u)
+            }
+        }
+        B::Shr if constant.is_some() => {
+            let n = constant.unwrap_or(0);
+            if wide(w) {
+                (format!("({} >> {n})", exact(a, w)), u)
+            } else {
+                (format!("(({t})({} >> {n}))", ex(a).0), u)
+            }
+        }
+        B::Sar if constant.is_some() => {
+            let n = constant.unwrap_or(0);
+            (format!("(({t})(({s}){} >> {n}))", ex(a).0), u)
+        }
+        B::Shl => (
+            format!("rc_shl{}({}, {})", w.bits(), exact(a, w), bare(b)),
+            u,
+        ),
+        B::Shr => (
+            format!("rc_shr{}({}, {})", w.bits(), exact(a, w), bare(b)),
+            u,
+        ),
+        B::Sar => (
+            format!("rc_sar{}({}, {})", w.bits(), exact(a, w), bare(b)),
+            u,
+        ),
+        B::Eq | B::Ne | B::Ult | B::Ule => {
+            let o = match op {
+                B::Eq => "==",
+                B::Ne => "!=",
+                B::Ult => "<",
+                _ => "<=",
+            };
+            let (x, y) = if wide(w) {
+                (exact(a, w), exact(b, w))
+            } else {
+                (ex(a).0, ex(b).0)
+            };
+            (format!("({x} {o} {y})"), Ty::Int)
+        }
+        B::Slt | B::Sle => {
+            let o = if op == B::Slt { "<" } else { "<=" };
+            (format!("(({s}){} {o} ({s}){})", ex(a).0, ex(b).0), Ty::Int)
+        }
+    }
+}
+
+/// An x87 operand's value as a double.
+fn fsrc(l: &FLoc) -> String {
+    match l {
+        FLoc::St(i) => format!("RC_ST(c, {i})"),
+        FLoc::F32(a) => format!("rc_f32(rc_ld32m(m, {}))", expr(a)),
+        FLoc::F64(a) => format!("rc_f64(rc_ld64m(m, {}))", expr(a)),
+        FLoc::F80(a) => format!("rc_f80(m, {})", expr(a)),
+        FLoc::I16(a) => format!("(double)(int16_t)rc_ld16m(m, {})", expr(a)),
+        FLoc::I32(a) => format!("(double)(int32_t)rc_ld32m(m, {})", expr(a)),
+        FLoc::I64(a) => format!("(double)(int64_t)rc_ld64m(m, {})", expr(a)),
+    }
+}
+
+/// C statements for an x87 operation.
+fn fpu(f: &Fpu) -> String {
+    let pop = |p: bool| if p { " rc_fpop(c);" } else { "" };
+    match f {
+        Fpu::Load(l) => format!("rc_fpush(c, {});", fsrc(l)),
+        Fpu::Const(k) => {
+            let n = match k {
+                FConst::One => 0,
+                FConst::Zero => 1,
+                FConst::Pi => 2,
+                FConst::L2e => 3,
+                FConst::L2t => 4,
+                FConst::Lg2 => 5,
+                FConst::Ln2 => 6,
+            };
+            format!("rc_fconst(c, {n});")
+        }
+        Fpu::Store { dst, pop: p } => {
+            let st = match dst {
+                FLoc::St(i) => format!("RC_ST(c, {i}) = RC_ST(c, 0);"),
+                FLoc::F32(a) => format!("rc_st32m(m, {}, rc_f32bits(RC_ST(c, 0)));", expr(a)),
+                FLoc::F64(a) => format!("rc_st64m(m, {}, rc_f64bits(RC_ST(c, 0)));", expr(a)),
+                FLoc::F80(a) => format!("rc_st_f80(m, {}, RC_ST(c, 0));", expr(a)),
+                FLoc::I16(a) => format!("rc_st16m(m, {}, (uint16_t)rc_fist(c, 16));", expr(a)),
+                FLoc::I32(a) => format!("rc_st32m(m, {}, (uint32_t)rc_fist(c, 32));", expr(a)),
+                FLoc::I64(a) => format!("rc_st64m(m, {}, rc_fist(c, 64));", expr(a)),
+            };
+            format!("{st}{}", pop(*p))
+        }
+        Fpu::Arith {
+            op,
+            dst,
+            src,
+            pop: p,
+        } => {
+            let n = match op {
+                FArith::Add => 0,
+                FArith::Mul => 1,
+                FArith::Sub => 2,
+                FArith::SubR => 3,
+                FArith::Div => 4,
+                FArith::DivR => 5,
+            };
+            format!("rc_farith(c, {n}, {dst}, {});{}", fsrc(src), pop(*p))
+        }
+        Fpu::Unary(u) => {
+            let n = match u {
+                FUnary::Chs => 0,
+                FUnary::Abs => 1,
+                FUnary::Sqrt => 2,
+                FUnary::Sin => 3,
+                FUnary::Cos => 4,
+                FUnary::Rndint => 5,
+                FUnary::F2xm1 => 6,
+                FUnary::Tst => 7,
+                FUnary::Xam => 8,
+            };
+            format!("rc_funary(c, {n});")
+        }
+        Fpu::Binary(b) => {
+            let n = match b {
+                FBinary::Patan => 0,
+                FBinary::Yl2x => 1,
+                FBinary::Scale => 2,
+                FBinary::Prem => 3,
+                FBinary::Prem1 => 4,
+                FBinary::Ptan => 5,
+            };
+            format!("rc_fbinary(c, {n});")
+        }
+        Fpu::Compare { src, pops } => {
+            let mut s = format!("rc_fcom(c, {});", fsrc(src));
+            for _ in 0..*pops {
+                s.push_str(" rc_fpop(c);");
+            }
+            s
+        }
+        Fpu::Xch(i) => format!("rc_fxch(c, {i});"),
+        Fpu::Free(i) => format!("rc_ffree(c, {i});"),
+        Fpu::IncStp => "c->top = (uint8_t)((c->top + 1) & 7);".into(),
+        Fpu::DecStp => "c->top = (uint8_t)((c->top - 1) & 7);".into(),
+        Fpu::Init => "rc_finit(c);".into(),
+        Fpu::Clex => "c->fpu_status &= 0x7f00u;".into(),
+        Fpu::Ldcw(v) => format!("c->fpu_control = {};", expr(v)),
+        Fpu::Stenv(a) => format!("rc_fstenv(c, m, {});", expr(a)),
+        Fpu::Ldenv(a) => format!("rc_fldenv(c, m, {});", expr(a)),
+        Fpu::Save(a) => format!("rc_fsave(c, m, {});", expr(a)),
+        Fpu::Rstor(a) => format!("rc_frstor(c, m, {});", expr(a)),
     }
 }
 
@@ -260,12 +493,12 @@ impl Emitter<'_> {
     fn stmt(&mut self, s: &S, addr: u32) {
         match s {
             S::Let(t, e) => {
-                let l = format!("{} t{t} = {};", ctype(e.width()), expr(e));
+                let l = format!("{} t{t} = {};", ctype(e.width()), bare(e));
                 self.line(&l);
             }
             S::SetReg(r, e) => {
                 let n = REGS[usize::from(r.n)];
-                let v = expr(e);
+                let v = bare(e);
                 let l = match r.part {
                     Part::D => format!("{n} = {v};"),
                     Part::X => format!("{n} = ({n} & 0xffff0000u) | (uint16_t)({v});"),
@@ -277,15 +510,15 @@ impl Emitter<'_> {
                 self.line(&l);
             }
             S::SetFlag(f, e) => {
-                let l = format!("{} = {};", flag(*f), expr(e));
+                let l = format!("{} = {};", flag(*f), bare(e));
                 self.line(&l);
             }
             S::Store(a, v) => {
-                let l = format!("rc_st{}m(m, {}, {});", v.width().bits(), expr(a), expr(v));
+                let l = format!("rc_st{}m(m, {}, {});", v.width().bits(), expr(a), bare(v));
                 self.line(&l);
             }
             S::If(c, body) => {
-                let l = format!("if ({}) {{", expr(c));
+                let l = format!("if {} {{", paren(&expr(c)));
                 self.line(&l);
                 self.depth += 1;
                 self.stmts(body, addr);
@@ -300,11 +533,12 @@ impl Emitter<'_> {
                 self.line("}");
             }
             S::BreakIf(c) => {
-                let l = format!("if ({}) break;", expr(c));
+                let l = format!("if {} break;", paren(&expr(c)));
                 self.line(&l);
             }
             S::Helper(Helper::Cpuid) => self.line("rc_cpuid(&eax, &ebx, &ecx, &edx);"),
             S::Helper(Helper::Rdtsc) => self.line("rc_rdtsc(&eax, &edx);"),
+            S::Fpu(f) => self.line(&fpu(f)),
             S::Trap(why) => {
                 let l = format!("{}rc_trap(c, {addr:#010x}u, {});", spill_all(), cstr(why));
                 self.line(&l);
@@ -338,7 +572,7 @@ impl Emitter<'_> {
                 Term::Next => fall(self),
                 Term::Jump(t) => self.transfer(*t, ins.addr),
                 Term::Branch(c, t) => {
-                    let l = format!("if ({}) {{", expr(c));
+                    let l = format!("if {} {{", paren(&expr(c)));
                     self.line(&l);
                     self.depth += 1;
                     self.transfer(*t, ins.addr);
@@ -516,4 +750,33 @@ pub fn program(p: &Entries, functions: &[Function], opts: Options) -> Tree {
     );
     tree.insert("dispatch.c".into(), table);
     tree
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parentheses_only_when_needed() {
+        assert_eq!(paren("(a == b)"), "(a == b)");
+        assert_eq!(paren("(a) & (b)"), "((a) & (b))");
+        assert_eq!(paren("cf"), "(cf)");
+    }
+
+    #[test]
+    fn casts_only_where_c_needs_them() {
+        let t = |w, n| E::Tmp(w, n);
+        // 32-bit arithmetic on 32-bit values: no casts.
+        let e = E::bin(B::Add, W::B32, t(W::B32, 0), E::c32(4));
+        assert_eq!(expr(&e), "(t0 + 0x4u)");
+        // 8-bit arithmetic: one cast for the result.
+        let e = E::bin(B::Add, W::B8, t(W::B8, 0), t(W::B8, 1));
+        assert_eq!(expr(&e), "((uint8_t)(t0 + t1))");
+        // A left shift of a narrow value goes through 32 bits.
+        let e = E::bin(B::Shl, W::B16, t(W::B16, 0), E::c(W::B16, 3));
+        assert_eq!(expr(&e), "((uint16_t)((uint32_t)t0 << 3))");
+        // Variable shift counts use the helpers.
+        let e = E::bin(B::Shr, W::B32, t(W::B32, 0), t(W::B8, 1));
+        assert_eq!(expr(&e), "rc_shr32(t0, t1)");
+    }
 }

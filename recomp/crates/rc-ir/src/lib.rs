@@ -177,6 +177,10 @@ pub enum Expr {
     Flag(Flag),
     /// The base address of the `fs` segment.
     FsBase,
+    /// The x87 status word, with the current top of stack (B16).
+    FpuStatus,
+    /// The x87 control word (B16).
+    FpuControl,
     /// `width` bits of guest memory at a 32-bit address.
     Load(W, Box<Expr>),
     Bin(BinOp, W, Box<Expr>, Box<Expr>),
@@ -208,6 +212,7 @@ impl Expr {
             Expr::Reg(r) => r.part.width(),
             Expr::Flag(_) => W::B8,
             Expr::FsBase => W::B32,
+            Expr::FpuStatus | Expr::FpuControl => W::B16,
             Expr::Bin(op, w, _, _) => match op {
                 BinOp::Eq | BinOp::Ne | BinOp::Ult | BinOp::Ule | BinOp::Slt | BinOp::Sle => W::B8,
                 _ => *w,
@@ -304,8 +309,124 @@ pub enum Stmt {
     /// Leave the innermost [`Stmt::Loop`] if the condition is non-zero.
     BreakIf(Expr),
     Helper(Helper),
+    /// An x87 operation.
+    Fpu(Fpu),
     /// Stop with a fatal error naming the reason.
     Trap(String),
+}
+
+/// An x87 operand: a stack register, or memory of a format at an address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FLoc {
+    /// `st(i)`.
+    St(u8),
+    F32(Expr),
+    F64(Expr),
+    /// The 80-bit extended format.
+    F80(Expr),
+    I16(Expr),
+    I32(Expr),
+    I64(Expr),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FArith {
+    Add,
+    Mul,
+    Sub,
+    /// `src - dst`.
+    SubR,
+    Div,
+    /// `src / dst`.
+    DivR,
+}
+
+/// Operations on `st(0)` alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FUnary {
+    Chs,
+    Abs,
+    Sqrt,
+    Sin,
+    Cos,
+    /// Round to an integer by the control word's rounding mode.
+    Rndint,
+    /// `2^x - 1`.
+    F2xm1,
+    /// Compare with 0.0 (sets C0, C2, C3).
+    Tst,
+    /// Classify (sets C0 to C3).
+    Xam,
+}
+
+/// Operations on `st(0)` and `st(1)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FBinary {
+    /// `st(1) = atan2(st(1), st(0))`, pop.
+    Patan,
+    /// `st(1) = st(1) * log2(st(0))`, pop.
+    Yl2x,
+    /// `st(0) = st(0) * 2^trunc(st(1))`.
+    Scale,
+    /// Partial remainder, truncating (`fprem`) or rounding (`fprem1`).
+    Prem,
+    Prem1,
+    /// `st(0) = tan(st(0))`, push 1.0.
+    Ptan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FConst {
+    One,
+    Zero,
+    Pi,
+    L2e,
+    L2t,
+    Lg2,
+    Ln2,
+}
+
+/// One x87 operation. Values are host doubles in the fast mode; results
+/// are rounded to single precision when the control word asks for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fpu {
+    /// Push a value (read before the push, so `fld st(0)` duplicates).
+    Load(FLoc),
+    Const(FConst),
+    /// Store `st(0)` (integer formats round by the control word), then pop
+    /// if asked.
+    Store {
+        dst: FLoc,
+        pop: bool,
+    },
+    /// `st(dst) = st(dst) op src` (or reversed), then pop if asked.
+    Arith {
+        op: FArith,
+        dst: u8,
+        src: FLoc,
+        pop: bool,
+    },
+    Unary(FUnary),
+    Binary(FBinary),
+    /// Compare `st(0)` with `src` into C0, C2, C3; then pop `pops` times.
+    Compare {
+        src: FLoc,
+        pops: u8,
+    },
+    Xch(u8),
+    Free(u8),
+    IncStp,
+    DecStp,
+    Init,
+    /// Clear the exception flags.
+    Clex,
+    /// Load the control word.
+    Ldcw(Expr),
+    /// The 28-byte environment, and the 108-byte state, at an address.
+    Stenv(Expr),
+    Ldenv(Expr),
+    Save(Expr),
+    Rstor(Expr),
 }
 
 /// How control leaves an instruction.

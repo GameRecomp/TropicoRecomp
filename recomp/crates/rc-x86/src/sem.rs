@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 //! The semantics of each instruction.
 
+mod x87;
+
 use iced_x86::{ConditionCode, Instruction, Mnemonic, OpKind, Register};
 use rc_discover::Flow;
 use rc_ir::{BinOp as B, Expr as E, Flag, Helper, Insn, Part, Reg, Stmt as S, Term, UnOp as U, W};
@@ -55,6 +57,8 @@ struct Cx {
     tmp: u32,
     /// The condition of a conditional branch, set by `body`.
     cond: Option<E>,
+    /// Execution does not continue after this instruction.
+    stop: bool,
 }
 
 fn reg(r: Register) -> Option<Reg> {
@@ -269,6 +273,15 @@ impl Cx {
     /// `a + b (+ carry)` with all flags; CF only if `set_cf`.
     fn add_flags(&mut self, a: E, b: E, carry: Option<E>, set_cf: bool) -> E {
         let w = a.width();
+        if carry.is_none() {
+            // Without a carry in, CF is a compare in the operand width.
+            let r = self.let_(add(w, a.clone(), b.clone()));
+            if set_cf {
+                self.set_flag(Flag::Cf, E::bin(B::Ult, w, r.clone(), a.clone()));
+            }
+            self.add_sub_flags(&a, &b, &r, true);
+            return r;
+        }
         let mut wide = add(W::B64, a.clone().zext(W::B64), b.clone().zext(W::B64));
         if let Some(c) = carry {
             wide = add(W::B64, wide, c.zext(W::B64));
@@ -278,20 +291,46 @@ impl Cx {
         if set_cf {
             self.set_flag(Flag::Cf, wide.bit(w.bits()));
         }
-        let of = and(
-            w,
-            xor(w, a.clone(), r.clone()),
-            xor(w, b.clone(), r.clone()),
-        );
-        self.set_flag(Flag::Of, of.sign());
-        self.set_flag(Flag::Af, xor(w, xor(w, a, b), r.clone()).bit(4));
-        self.szp(&r);
+        self.add_sub_flags(&a, &b, &r, true);
         r
+    }
+
+    /// OF, AF, ZF, SF, PF of `r = a + b` (`is_add`) or `r = a - b`.
+    fn add_sub_flags(&mut self, a: &E, b: &E, r: &E, is_add: bool) {
+        let w = a.width();
+        let of = if is_add {
+            and(
+                w,
+                xor(w, a.clone(), r.clone()),
+                xor(w, b.clone(), r.clone()),
+            )
+        } else {
+            and(
+                w,
+                xor(w, a.clone(), b.clone()),
+                xor(w, a.clone(), r.clone()),
+            )
+        };
+        self.set_flag(Flag::Of, of.sign());
+        self.set_flag(
+            Flag::Af,
+            xor(w, xor(w, a.clone(), b.clone()), r.clone()).bit(4),
+        );
+        self.szp(r);
     }
 
     /// `a - b (- borrow)` with all flags; CF only if `set_cf`.
     fn sub_flags(&mut self, a: E, b: E, borrow: Option<E>, set_cf: bool) -> E {
         let w = a.width();
+        if borrow.is_none() {
+            // Without a borrow in, CF is a compare in the operand width.
+            let r = self.let_(sub(w, a.clone(), b.clone()));
+            if set_cf {
+                self.set_flag(Flag::Cf, E::bin(B::Ult, w, a.clone(), b.clone()));
+            }
+            self.add_sub_flags(&a, &b, &r, false);
+            return r;
+        }
         let mut wide = sub(W::B64, a.clone().zext(W::B64), b.clone().zext(W::B64));
         if let Some(c) = borrow {
             wide = sub(W::B64, wide, c.zext(W::B64));
@@ -301,14 +340,7 @@ impl Cx {
         if set_cf {
             self.set_flag(Flag::Cf, wide.bit(w.bits()));
         }
-        let of = and(
-            w,
-            xor(w, a.clone(), b.clone()),
-            xor(w, a.clone(), r.clone()),
-        );
-        self.set_flag(Flag::Of, of.sign());
-        self.set_flag(Flag::Af, xor(w, xor(w, a, b), r.clone()).bit(4));
-        self.szp(&r);
+        self.add_sub_flags(&a, &b, &r, false);
         r
     }
 
@@ -749,8 +781,19 @@ impl Cx {
                 let a = self.let_(a);
                 self.set_reg(acc(W::B8), E::load(W::B8, a));
             }
+            M::Int | M::Into => {
+                // A software interrupt is a fault under Windows; the C
+                // runtime places them where execution must never arrive.
+                let n = if m == M::Int { ins.immediate8() } else { 4 };
+                self.stmts.push(S::Trap(format!(
+                    "software interrupt {n:#x} at {:#010x}",
+                    ins.ip32()
+                )));
+                self.stop = true;
+            }
             M::Cpuid => self.stmts.push(S::Helper(Helper::Cpuid)),
             M::Rdtsc => self.stmts.push(S::Helper(Helper::Rdtsc)),
+            _ if self.x87(ins, m)? => {}
             _ => {
                 let name = format!("{m:?}").to_ascii_lowercase();
                 return Err(if name.starts_with('f') {
