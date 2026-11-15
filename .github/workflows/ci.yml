@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+# CI has no game copy: it builds and tests the tools and the runtime on
+# fixtures, and checks that the repository follows its rules.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: tools/audit
+
+  recompiler:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: recomp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      # The pipeline must keep building for the browser.
+      - run: cargo build --target wasm32-unknown-unknown -p rc-pe -p rc-manifest -p rc-discover
+
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: configure
+        run: cmake -S . -B build/ci -DCMAKE_BUILD_TYPE=Debug -DRC_WARNINGS_AS_ERRORS=ON
+      - name: build
+        run: cmake --build build/ci --config Debug
+      - name: test
+        run: ctest --test-dir build/ci -C Debug --output-on-failure
