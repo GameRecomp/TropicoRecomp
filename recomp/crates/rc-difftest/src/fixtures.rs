@@ -290,7 +290,9 @@ pub fn instances() -> Vec<Instance> {
             Ok(vec![])
         }),
         window_ptrs,
-        0x0800,
+        // The last flag-setting instruction is a shift by cl: OF and AF are
+        // undefined (CPUs differ on AF).
+        0x0810,
     ));
 
     // Arithmetic chains: mul/div/idiv with guarded divisors.
