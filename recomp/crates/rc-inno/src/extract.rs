@@ -126,81 +126,181 @@ pub fn plan(setup: &Setup) -> Result<Plan, Error> {
     })
 }
 
-/// One file being written from a chunk.
+/// Where extracted files go, one at a time: `begin`, its bytes in order,
+/// `end`. Directories may come at any point.
+pub trait Sink {
+    fn dir(&mut self, path: &Path) -> Result<(), Error>;
+    /// A file of `size` bytes; `mtime` from the installer, if it has one.
+    fn begin(&mut self, path: &Path, size: u64, mtime: Option<SystemTime>) -> Result<(), Error>;
+    fn write(&mut self, data: &[u8]) -> Result<(), Error>;
+    /// The file is complete and its checksum matched.
+    fn end(&mut self) -> Result<(), Error>;
+}
+
+/// Files and directories under a directory of the host.
+#[derive(Debug)]
+pub struct DirSink {
+    root: PathBuf,
+    file: Option<(BufWriter<File>, Option<SystemTime>)>,
+}
+
+impl DirSink {
+    pub fn new(root: &Path) -> DirSink {
+        DirSink {
+            root: root.to_path_buf(),
+            file: None,
+        }
+    }
+}
+
+impl Sink for DirSink {
+    fn dir(&mut self, path: &Path) -> Result<(), Error> {
+        fs::create_dir_all(self.root.join(path))?;
+        Ok(())
+    }
+
+    fn begin(&mut self, path: &Path, _size: u64, mtime: Option<SystemTime>) -> Result<(), Error> {
+        let full = self.root.join(path);
+        if let Some(dir) = full.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        self.file = Some((
+            BufWriter::with_capacity(1 << 16, File::create(&full)?),
+            mtime,
+        ));
+        Ok(())
+    }
+
+    fn write(&mut self, data: &[u8]) -> Result<(), Error> {
+        if let Some((w, _)) = &mut self.file {
+            w.write_all(data)?;
+        }
+        Ok(())
+    }
+
+    fn end(&mut self) -> Result<(), Error> {
+        if let Some((w, mtime)) = self.file.take() {
+            let f = w.into_inner().map_err(|e| e.into_error())?;
+            if let Some(t) = mtime {
+                f.set_modified(t)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Collects files in memory.
+#[derive(Debug, Default)]
+pub struct MemSink {
+    pub files: Vec<(PathBuf, Vec<u8>)>,
+}
+
+impl Sink for MemSink {
+    fn dir(&mut self, _: &Path) -> Result<(), Error> {
+        Ok(())
+    }
+    fn begin(&mut self, path: &Path, size: u64, _: Option<SystemTime>) -> Result<(), Error> {
+        self.files.push((
+            path.to_path_buf(),
+            Vec::with_capacity(size.min(1 << 28) as usize),
+        ));
+        Ok(())
+    }
+    fn write(&mut self, data: &[u8]) -> Result<(), Error> {
+        if let Some((_, b)) = self.files.last_mut() {
+            b.extend_from_slice(data);
+        }
+        Ok(())
+    }
+    fn end(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+/// One file being extracted from a chunk: undoes the call filter in its
+/// blocks and checks the checksum before the sink hears `end`.
 struct Out<'a> {
     loc: &'a Location,
-    paths: &'a [PathBuf],
-    writers: Vec<BufWriter<File>>,
+    path: &'a Path,
     sha1: Sha1,
     /// Bytes of the file seen so far.
     done: u64,
     /// The block being collected for the call filter.
     block: Vec<u8>,
     filter: bool,
+    started: bool,
+    ended: bool,
 }
 
 impl Out<'_> {
-    fn emit(&mut self, data: &[u8]) -> Result<(), Error> {
+    fn emit(&mut self, data: &[u8], sink: &mut dyn Sink) -> Result<(), Error> {
         self.sha1.update(data);
-        for w in &mut self.writers {
-            w.write_all(data)?;
-        }
-        Ok(())
+        sink.write(data)
     }
 
-    fn feed(&mut self, mut data: &[u8]) -> Result<(), Error> {
+    fn feed(&mut self, mut data: &[u8], sink: &mut dyn Sink) -> Result<(), Error> {
+        if !self.started {
+            sink.begin(self.path, self.loc.size, filetime(self.loc.timestamp))?;
+            self.started = true;
+        }
         if !self.filter {
             self.done += data.len() as u64;
-            return self.emit(data);
-        }
-        while !data.is_empty() {
-            let n = (filter::BLOCK - self.block.len()).min(data.len());
-            self.block.extend_from_slice(&data[..n]);
-            data = &data[n..];
-            self.done += n as u64;
-            if self.block.len() == filter::BLOCK {
-                self.end_block()?;
+            self.emit(data, sink)?;
+        } else {
+            while !data.is_empty() {
+                let n = (filter::BLOCK - self.block.len()).min(data.len());
+                self.block.extend_from_slice(&data[..n]);
+                data = &data[n..];
+                self.done += n as u64;
+                if self.block.len() == filter::BLOCK {
+                    self.end_block(sink)?;
+                }
             }
+        }
+        if self.done == self.loc.size {
+            self.finish(sink)?;
         }
         Ok(())
     }
 
-    fn end_block(&mut self) -> Result<(), Error> {
+    fn end_block(&mut self, sink: &mut dyn Sink) -> Result<(), Error> {
         let start = self.done - self.block.len() as u64;
         let mut b = std::mem::take(&mut self.block);
         filter::decode_block(&mut b, start);
-        self.emit(&b)?;
+        self.emit(&b, sink)?;
         b.clear();
         self.block = b;
         Ok(())
     }
 
-    fn finish(mut self) -> Result<u64, Error> {
+    fn finish(&mut self, sink: &mut dyn Sink) -> Result<(), Error> {
+        if self.ended {
+            return Ok(());
+        }
+        if !self.started {
+            sink.begin(self.path, self.loc.size, filetime(self.loc.timestamp))?;
+            self.started = true;
+        }
         if self.done != self.loc.size {
             return Err(Error::Corrupt(format!(
                 "{}: {} of {} bytes in its chunk",
-                self.paths[0].display(),
+                self.path.display(),
                 self.done,
                 self.loc.size
             )));
         }
         if !self.block.is_empty() {
-            self.end_block()?;
+            self.end_block(sink)?;
         }
-        let digest: [u8; 20] = self.sha1.finalize().into();
+        let digest: [u8; 20] = std::mem::take(&mut self.sha1).finalize().into();
         if digest != self.loc.sha1 {
             return Err(Error::Corrupt(format!(
                 "{}: SHA-1 does not match",
-                self.paths[0].display()
+                self.path.display()
             )));
         }
-        for w in self.writers {
-            let f = w.into_inner().map_err(|e| e.into_error())?;
-            if let Some(t) = filetime(self.loc.timestamp) {
-                f.set_modified(t)?;
-            }
-        }
-        Ok(self.loc.size)
+        self.ended = true;
+        sink.end()
     }
 }
 
@@ -213,8 +313,8 @@ fn filetime(ft: u64) -> Option<SystemTime> {
 
 impl Installer {
     /// Extract the files of `plan` from the installer at `path` (the one
-    /// this was opened from) into `out`. `progress` is told each file as
-    /// it is finished.
+    /// this was opened from) into the directory `out`. `progress` is told
+    /// each file as it is finished.
     pub fn extract(
         &self,
         path: &Path,
@@ -222,11 +322,39 @@ impl Installer {
         out: &Path,
         progress: &mut dyn FnMut(&Path, u64),
     ) -> Result<Extracted, Error> {
+        let mut f = File::open(path)?;
+        self.extract_to(&mut f, plan, &mut DirSink::new(out), progress)
+    }
+
+    /// The contents of one stored file, by its location.
+    pub fn read_location<R: Read + Seek>(&self, input: &mut R, loc: u32) -> Result<Vec<u8>, Error> {
+        let mut plan = Plan::default();
+        plan.targets.insert(loc, vec![PathBuf::from("file")]);
+        let mut sink = MemSink::default();
+        self.extract_to(input, &plan, &mut sink, &mut |_, _| {})?;
+        sink.files
+            .pop()
+            .map(|f| f.1)
+            .ok_or_else(|| Error::Corrupt(format!("location {loc} gave no file")))
+    }
+
+    /// Extract the files of `plan` from `input` (the installer this was
+    /// opened from) into `sink`.
+    pub fn extract_to<R: Read + Seek>(
+        &self,
+        input: &mut R,
+        plan: &Plan,
+        sink: &mut dyn Sink,
+        progress: &mut dyn FnMut(&Path, u64),
+    ) -> Result<Extracted, Error> {
         let setup = &self.setup;
         // Chunks in file order, each with its files in chunk order.
         let mut chunks: BTreeMap<(u32, u32), Vec<u32>> = BTreeMap::new();
         for &loc in plan.targets.keys() {
-            let l = &setup.locations[loc as usize];
+            let l = setup
+                .locations
+                .get(loc as usize)
+                .ok_or_else(|| Error::Corrupt(format!("location {loc}")))?;
             if l.first_slice != 0 || l.last_slice != 0 {
                 return Err(Error::Unsupported(
                     "file data spread over several slices".into(),
@@ -241,93 +369,103 @@ impl Installer {
                 .push(loc);
         }
         for d in &plan.dirs {
-            fs::create_dir_all(out.join(d))?;
+            sink.dir(d)?;
         }
-        let mut f = File::open(path)?;
         let mut done = Extracted::default();
         for ((_, chunk_offset), mut locs) in chunks {
             locs.sort_by_key(|&l| setup.locations[l as usize].offset);
-            let first = &setup.locations[locs[0] as usize];
-            f.seek(SeekFrom::Start(self.data_offset + u64::from(chunk_offset)))?;
-            let mut magic = [0u8; 4];
-            f.read_exact(&mut magic)?;
-            if &magic != b"zlb\x1a" {
-                return Err(Error::Corrupt(format!("no chunk at {chunk_offset:#x}")));
-            }
-
-            let mut outs = Vec::with_capacity(locs.len());
-            for &l in &locs {
-                let loc = &setup.locations[l as usize];
-                let paths = &plan.targets[&l];
-                let mut writers = Vec::with_capacity(paths.len());
-                for p in paths {
-                    let full = out.join(p);
-                    if let Some(dir) = full.parent() {
-                        fs::create_dir_all(dir)?;
-                    }
-                    writers.push(BufWriter::with_capacity(1 << 16, File::create(&full)?));
-                }
-                outs.push(Out {
-                    loc,
-                    paths,
-                    writers,
-                    sha1: Sha1::new(),
-                    done: 0,
-                    block: Vec::new(),
-                    filter: loc.has(Location::CALL_FILTER),
-                });
-            }
-
-            // Route the decompressed chunk to the files by their offsets.
-            let mut pos = 0u64;
-            let mut route = |data: &[u8]| -> Result<(), Error> {
-                let end = pos + data.len() as u64;
-                for o in outs.iter_mut() {
-                    let (a, b) = (o.loc.offset, o.loc.offset + o.loc.size);
-                    let (s, e) = (a.max(pos), b.min(end));
-                    if s < e {
-                        o.feed(&data[(s - pos) as usize..(e - pos) as usize])?;
-                    }
-                }
-                pos = end;
-                Ok(())
-            };
-            let input = BufReader::with_capacity(1 << 20, (&mut f).take(first.chunk_size));
-            if !first.has(Location::COMPRESSED) {
-                let mut input = input;
-                let mut buf = vec![0u8; 1 << 16];
-                loop {
-                    let n = input.read(&mut buf)?;
-                    if n == 0 {
-                        break;
-                    }
-                    route(&buf[..n])?;
-                }
-            } else {
-                match setup.compression {
-                    Compression::Lzma2 => {
-                        lzma::lzma2(input, &mut route)?;
-                    }
-                    Compression::Lzma => {
-                        lzma::lzma(input, &mut route)?;
-                    }
-                    Compression::Stored => {
-                        return Err(Error::Corrupt("compressed chunk in a stored setup".into()));
-                    }
-                    c => return Err(Error::Unsupported(format!("{c:?} compression"))),
-                }
-            }
-            for o in outs {
-                let paths = o.paths;
-                let n = o.finish()?;
-                done.files += paths.len();
-                done.bytes += n * paths.len() as u64;
-                for p in paths {
-                    progress(p, n);
+            // A location written to several paths: one pass per path.
+            let rounds = locs
+                .iter()
+                .map(|l| plan.targets[l].len())
+                .max()
+                .unwrap_or(0);
+            for round in 0..rounds {
+                let mut outs: Vec<Out> = locs
+                    .iter()
+                    .filter_map(|l| plan.targets[l].get(round).map(|p| (l, p)))
+                    .map(|(&l, p)| {
+                        let loc = &setup.locations[l as usize];
+                        Out {
+                            loc,
+                            path: p,
+                            sha1: Sha1::new(),
+                            done: 0,
+                            block: Vec::new(),
+                            filter: loc.has(Location::CALL_FILTER),
+                            started: false,
+                            ended: false,
+                        }
+                    })
+                    .collect();
+                self.run_chunk(input, chunk_offset, &mut outs, sink)?;
+                for o in &mut outs {
+                    o.finish(sink)?;
+                    done.files += 1;
+                    done.bytes += o.loc.size;
+                    progress(o.path, o.loc.size);
                 }
             }
         }
         Ok(done)
+    }
+
+    /// Decompress one chunk and route its bytes to `outs` (in offset order).
+    fn run_chunk<R: Read + Seek>(
+        &self,
+        input: &mut R,
+        chunk_offset: u32,
+        outs: &mut [Out],
+        sink: &mut dyn Sink,
+    ) -> Result<(), Error> {
+        let Some(first) = outs.first().map(|o| o.loc) else {
+            return Ok(());
+        };
+        input.seek(SeekFrom::Start(self.data_offset + u64::from(chunk_offset)))?;
+        let mut magic = [0u8; 4];
+        input.read_exact(&mut magic)?;
+        if &magic != b"zlb\x1a" {
+            return Err(Error::Corrupt(format!("no chunk at {chunk_offset:#x}")));
+        }
+        let mut pos = 0u64;
+        let mut route = |data: &[u8]| -> Result<(), Error> {
+            let end = pos + data.len() as u64;
+            for o in outs.iter_mut() {
+                let (a, b) = (o.loc.offset, o.loc.offset + o.loc.size);
+                let (s, e) = (a.max(pos), b.min(end));
+                if s < e {
+                    o.feed(&data[(s - pos) as usize..(e - pos) as usize], sink)?;
+                }
+            }
+            pos = end;
+            Ok(())
+        };
+        let stream = BufReader::with_capacity(1 << 20, input.take(first.chunk_size));
+        if !first.has(Location::COMPRESSED) {
+            let mut stream = stream;
+            let mut buf = vec![0u8; 1 << 16];
+            loop {
+                let n = stream.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                route(&buf[..n])?;
+            }
+            return Ok(());
+        }
+        match self.setup.compression {
+            Compression::Lzma2 => {
+                lzma::lzma2(stream, &mut route)?;
+            }
+            Compression::Lzma => {
+                lzma::lzma(stream, &mut route)?;
+            }
+            Compression::Stored => {
+                return Err(Error::Corrupt("compressed chunk in a stored setup".into()));
+            }
+            c => return Err(Error::Unsupported(format!("{c:?} compression"))),
+        }
+        Ok(())
     }
 }
 

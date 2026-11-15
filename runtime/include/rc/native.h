@@ -44,6 +44,10 @@ bool rc_native_loaded(void);
  * NULL without a blob. */
 const char *const *rc_native_modules(void);
 
+/* This build's target name as recomp names it ("x86_64-sysv", ...), or
+ * NULL where native code cannot run. */
+const char *rc_native_target(void);
+
 /* Give `c` the fields native code needs (call for every rc_cpu). */
 void rc_native_bind(rc_cpu *c);
 

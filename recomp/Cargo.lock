@@ -450,6 +450,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "iced-x86",
+ "rc-convert",
  "rc-discover",
  "rc-emit-c",
  "rc-emit-native",
@@ -460,6 +461,20 @@ dependencies = [
  "rc-x86",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "rc-convert"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "rc-discover",
+ "rc-emit-native",
+ "rc-inno",
+ "rc-ir",
+ "rc-manifest",
+ "rc-pe",
+ "rc-x86",
 ]
 
 [[package]]

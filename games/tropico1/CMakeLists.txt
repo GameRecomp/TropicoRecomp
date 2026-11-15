@@ -1,6 +1,13 @@
 # SPDX-License-Identifier: MIT
 # The game executable: lifted code (generated locally by `recomp lift` from
 # the user's own copy), the runtime and the HLE modules.
+#
+# tropico1-shell is the same program without lifted code, built always (CI
+# builds it on every system): it runs the native code and game files it
+# finds in data/ beside it, which the converter puts there.
+add_executable(tropico1-shell main.c shell.c)
+target_link_libraries(tropico1-shell PRIVATE rc_hle rc_runtime)
+
 set(TROPICO1_GENERATED "${PROJECT_SOURCE_DIR}/generated/tropico1/c" CACHE PATH
     "Directory with the C that recomp lift generated for Tropico")
 

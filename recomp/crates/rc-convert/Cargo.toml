@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "rc-convert"
+description = "GOG installer to a runnable build: extract, identify, lift, compile to native code, package with a shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rc-pe.workspace = true
+rc-manifest.workspace = true
+rc-discover.workspace = true
+rc-ir.workspace = true
+rc-x86.workspace = true
+rc-emit-native.workspace = true
+rc-inno.workspace = true
+crc32fast.workspace = true
+
+[lints]
+workspace = true

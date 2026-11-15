@@ -33,7 +33,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-pub use extract::{Extracted, Plan, plan};
+pub use extract::{DirSink, Extracted, MemSink, Plan, Sink, output_path, plan};
 pub use header::{Compression, FileEntry, Location, Setup};
 
 #[derive(Debug)]
@@ -77,9 +77,13 @@ pub struct Installer {
 impl Installer {
     /// Read an installer's loader table and setup data.
     pub fn open(path: &Path) -> Result<Installer, Error> {
-        let mut f = File::open(path)?;
-        let table = loader::find_table(&mut f)?;
-        let len = f.metadata()?.len();
+        Installer::from_reader(&mut File::open(path)?)
+    }
+
+    /// The same, from any seekable source (a browser's `File`, say).
+    pub fn from_reader<R: Read + Seek>(f: &mut R) -> Result<Installer, Error> {
+        let table = loader::find_table(f)?;
+        let len = f.seek(SeekFrom::End(0))?;
         if len < table.total_size {
             return Err(Error::Corrupt(format!(
                 "the file is incomplete: {len} of {} bytes",
@@ -99,9 +103,9 @@ impl Installer {
             }));
         }
         let mut header = Vec::new();
-        block::read(&mut f, &mut header)?;
+        block::read(f, &mut header)?;
         let mut locations = Vec::new();
-        block::read(&mut f, &mut locations)?;
+        block::read(f, &mut locations)?;
         let setup = header::parse(&version, &header, &locations)?;
         if table.offset1 == 0 {
             return Err(Error::Unsupported(

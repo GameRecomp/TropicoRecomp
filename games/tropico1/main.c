@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rc/dispatch.h"
 #include "rc/hle_modules.h"
 #include "rc/hostfs.h"
 #include "rc/log.h"
@@ -55,14 +56,10 @@ static void setup(void)
     rc_hle_all();
 }
 
-/* RC_NATIVE=file: run the lifted code from a native-code blob (recomp lift
- * --native) instead of the C compiled into this program. */
-static void load_native(void)
+/* Load a native-code blob (recomp lift --native) to run instead of the C
+ * compiled into this program. */
+static void load_native(const char *path)
 {
-    const char *path = getenv("RC_NATIVE");
-    if (!path || !*path) {
-        return;
-    }
     uint32_t size = 0;
     uint8_t *blob = rc_host_read(path, &size);
     if (!blob) {
@@ -75,9 +72,45 @@ static void load_native(void)
     free(blob);
 }
 
+/* The data directory a converted build carries: data/ beside the program
+ * (inside an AppImage: beside the AppImage file; in a macOS bundle: in its
+ * Resources, which is where SDL places the base directory). It holds
+ * code-<target>.bin and the game's files in game/. */
+static bool find_data(char *out, size_t n)
+{
+    const char *env = getenv("TROPICO1_DATA");
+    if (env && *env) {
+        snprintf(out, n, "%s", env);
+        return true;
+    }
+    char dir[RC_PATH_MAX - 16] = "";
+    const char *appimage = getenv("APPIMAGE");
+    const char *base = rc_plat_base_dir();
+    if (appimage && *appimage) {
+        snprintf(dir, sizeof dir, "%s", appimage);
+        char *slash = strrchr(dir, '/');
+        if (slash) {
+            slash[1] = 0;
+        } else {
+            snprintf(dir, sizeof dir, "./");
+        }
+    } else if (base) {
+        snprintf(dir, sizeof dir, "%s", base);
+    } else {
+        return false;
+    }
+    char probe[RC_PATH_MAX];
+    snprintf(probe, sizeof probe, "%sdata", dir);
+    bool is_dir = false;
+    if (!rc_host_exists(probe, &is_dir, NULL) || !is_dir) {
+        return false;
+    }
+    snprintf(out, n, "%s", probe);
+    return true;
+}
+
 int main(int argc, char **argv)
 {
-    load_native();
     const char *game = getenv("TROPICO1_DIR");
     const char *user = getenv("TROPICO1_USER");
     static char args[1024];
@@ -97,6 +130,28 @@ int main(int argc, char **argv)
         }
         pos++;
     }
+    /* The lifted code: RC_NATIVE, or the data directory's blob when this
+     * program has none compiled in (the shell). */
+    static char data[RC_PATH_MAX], data_game[RC_PATH_MAX + 8];
+    bool have_data = find_data(data, sizeof data);
+    const char *native = getenv("RC_NATIVE");
+    if (native && *native) {
+        load_native(native);
+    } else if (rc_lifted_count == 0) {
+        const char *target = rc_native_target();
+        if (!have_data || !target) {
+            rc_fatal("this program holds no game code: it runs what the converter puts in a data "
+                     "folder beside it, and none was found");
+        }
+        char blob[RC_PATH_MAX + 64];
+        snprintf(blob, sizeof blob, "%s/code-%s.bin", data, target);
+        load_native(blob);
+    }
+    if (have_data && !game) {
+        snprintf(data_game, sizeof data_game, "%s/game", data);
+        game = data_game;
+    }
+
     static char found[RC_PATH_MAX];
     if (!game) {
         const char *exe_dir = rc_plat_base_dir();

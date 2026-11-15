@@ -69,6 +69,28 @@ enum Cmd {
         #[arg(long, value_delimiter = ',')]
         native: Vec<String>,
     },
+    /// Turn a GOG installer into a build for a system: the shell template
+    /// (from CI, or `recomp template`) with the game's code compiled to
+    /// native code and its files, as a zip. What the converter page does.
+    Convert {
+        installer: PathBuf,
+        /// The shell template zip for the system.
+        #[arg(long)]
+        template: PathBuf,
+        /// The zip to write.
+        #[arg(short, long)]
+        out: PathBuf,
+    },
+    /// Make a shell template zip for a system (windows, linux, macos) from
+    /// a built shell (for Linux, an AppImage).
+    Template {
+        #[arg(long)]
+        system: String,
+        #[arg(long)]
+        shell: PathBuf,
+        #[arg(short, long)]
+        out: PathBuf,
+    },
     /// Extract a GOG installer (setup_*.exe, Inno Setup) into a directory:
     /// the game lands in <out>/app.
     Unpack {
@@ -112,6 +134,18 @@ fn main() -> ExitCode {
             comments,
             native,
         } => lift(&game_dir, &game, out.as_deref(), comments, &native),
+        Cmd::Convert {
+            installer,
+            template,
+            out,
+        } => convert(&installer, &template, &out),
+        Cmd::Template { system, shell, out } => {
+            let shell = read(&shell);
+            shell.and_then(|b| {
+                let z = rc_convert::make_template(&system, &b)?;
+                fs::write(&out, z).map_err(|e| format!("{}: {e}", out.display()))
+            })
+        }
         Cmd::Unpack {
             installer,
             out,
@@ -129,6 +163,73 @@ fn main() -> ExitCode {
 }
 
 type Result<T> = std::result::Result<T, String>;
+
+fn convert(installer: &Path, template: &Path, out: &Path) -> Result<()> {
+    use std::io::Write as _;
+    let t0 = std::time::Instant::now();
+    let tbytes = read(template)?;
+    let tpl = rc_convert::template(&tbytes)?;
+    let mut input =
+        fs::File::open(installer).map_err(|e| format!("{}: {e}", installer.display()))?;
+    let inst = rc_inno::Installer::from_reader(&mut input)
+        .map_err(|e| format!("{}: {e}", installer.display()))?;
+    let id = rc_convert::identify(&inst, &mut input)?;
+    eprintln!(
+        "{} ({}): {} files, {:.0} MiB",
+        id.manifest.game.title,
+        id.manifest.game.release,
+        id.plan.files(),
+        id.game_bytes as f64 / (1u64 << 20) as f64
+    );
+    let lifted = rc_convert::lift(&id)?;
+    eprintln!(
+        "lifted {} functions ({:.1} s)",
+        lifted.functions.len(),
+        t0.elapsed().as_secs_f64()
+    );
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let mut blobs = Vec::new();
+    for &t in &tpl.targets {
+        let blob = rc_convert::compile(t, &lifted, threads, &|_| {})?;
+        eprintln!(
+            "compiled for {} ({:.1} s)",
+            t.name(),
+            t0.elapsed().as_secs_f64()
+        );
+        blobs.push((t, blob));
+    }
+    let file = fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let total = id.game_bytes.max(1);
+    let mut done = 0u64;
+    let mut shown = 0;
+    let w = rc_convert::package(
+        std::io::BufWriter::with_capacity(1 << 20, file),
+        &tpl,
+        &blobs,
+        &inst,
+        &mut input,
+        &id,
+        &mut |n| {
+            done += n;
+            let pct = (done * 100 / total) as u32;
+            if pct != shown {
+                shown = pct;
+                eprint!("\rpackaging {pct}%");
+            }
+        },
+    )?;
+    w.into_inner()
+        .map_err(|e| e.to_string())?
+        .flush()
+        .map_err(|e| e.to_string())?;
+    eprintln!(
+        "\rwrote {} ({:.0} MiB) in {:.1} s",
+        out.display(),
+        fs::metadata(out).map(|m| m.len()).unwrap_or(0) as f64 / (1u64 << 20) as f64,
+        t0.elapsed().as_secs_f64()
+    );
+    Ok(())
+}
 
 fn unpack(installer: &Path, out: Option<&Path>, list: bool, only: Option<&Path>) -> Result<()> {
     let at = |e: rc_inno::Error| format!("{}: {e}", installer.display());

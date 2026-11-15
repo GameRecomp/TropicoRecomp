@@ -259,6 +259,22 @@ static uint32_t host_target(void)
 #endif
 }
 
+const char *rc_native_target(void)
+{
+    switch (host_target()) {
+    case 1:
+        return "x86_64-sysv";
+    case 2:
+        return "x86_64-windows";
+    case 3:
+        return "arm64-apple";
+    case 4:
+        return "arm64-linux";
+    default:
+        return NULL;
+    }
+}
+
 static uint32_t rd32(const uint8_t *b) { return (uint32_t)b[0] | (uint32_t)b[1] << 8 | (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24; }
 
 /* Executable memory holding a copy of `src`. */

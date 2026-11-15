@@ -18,6 +18,7 @@ rc-x86 = { path = "crates/rc-x86" }
 rc-emit-c = { path = "crates/rc-emit-c" }
 rc-inno = { path = "crates/rc-inno" }
 rc-emit-native = { path = "crates/rc-emit-native" }
+rc-convert = { path = "crates/rc-convert" }
 iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "code_asm", "instr_info"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

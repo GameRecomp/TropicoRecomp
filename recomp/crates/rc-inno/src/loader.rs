@@ -5,8 +5,7 @@
 //! the loader's first megabytes and accepted only if its CRC matches, which
 //! is as reliable and needs no resource parser.
 
-use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 
 use crate::Error;
 
@@ -32,8 +31,9 @@ fn u32_at(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
 }
 
-pub fn find_table(f: &mut File) -> Result<Table, Error> {
+pub fn find_table<R: Read + Seek>(f: &mut R) -> Result<Table, Error> {
     let mut head = Vec::new();
+    f.seek(SeekFrom::Start(0))?;
     f.take(SEARCH).read_to_end(&mut head)?;
     if head.len() < 64 || &head[..2] != b"MZ" {
         return Err(Error::Unsupported("not a Windows executable".into()));
