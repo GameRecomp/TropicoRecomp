@@ -293,31 +293,64 @@ Everything in it is an address, a number, or a name we made up.
 
 ## The runtime
 
-`runtime/` is small and generic:
+`runtime/` is small and generic.
 
-- **Guest memory.** On a 64-bit host one 4 GiB reservation, committed on
-  demand; a guest address is an offset from its base. The PE image is copied
-  to its preferred base (Tropico 1 has relocations, but we never need to
-  move it). The guest heap, stack and every buffer the game may touch live
-  inside the arena.
-- **Loader.** Maps sections, zero-fills BSS, writes import-table slots with
-  the reserved addresses of the HLE functions, sets up the guest stack and
-  the thread information block that `fs:` addresses.
-- **Dispatch.** The address-to-function table, generated with the code.
-- **Entry.** Initialise SDL3, load the image, call the lifted entry point
-  (the CRT start-up, which calls `WinMain`).
-- **Traps and reports.** Unmodelled instruction, unknown indirect target,
-  unimplemented import, guest fault. Each prints the guest address, the
-  registers and a guest backtrace, and appends to a machine-readable log.
-- **Structured exception handling.** The `fs:[0]` handler chain is ordinary
-  guest memory, so installing and removing frames works as lifted code.
-  `RaiseException` and `RtlUnwind` walk that chain and call the guest's
-  handlers through `dispatch`. Unwinding across lifted C frames needs the
-  runtime to cut the C stack back, done with `setjmp`/`longjmp` at call
-  boundaries that are known unwind targets. How much of this Tropico 1
-  really exercises is to be measured before building more than the minimum.
+The guest address space as the runtime lays it out:
+
+| Guest address | What |
+|---|---|
+| `0x00010000` | process data: command line, module path, environment blocks |
+| `0x00110000` | the main thread's stack, 1 MiB |
+| image base (`0x00400000`) | the executable, at its preferred base |
+| `0x00700000` to `0x7f000000` | `VirtualAlloc` and the heap, first fit in 64 KiB granules |
+| `0x7ffde000`, `0x7ffdf000` | thread information block (`fs`) and a minimal PEB |
+| `0xf0000000` up | reserved import addresses, 16 bytes apart, never mapped |
+
+- **Guest memory** (`rc/mem.h`). On a 64-bit host one 4 GiB reservation; a
+  guest address is an offset from its base.
+- **Virtual memory and heap** (`rc/vm.h`). Reservations and per-page
+  commitment as `VirtualAlloc` sees them; committed pages read as zero. The
+  heap serves blocks up to 64 KiB from size classes carved out of 1 MiB
+  chunks, larger ones as reservations of their own. It is deterministic:
+  the same calls give the same addresses, which keeps runs reproducible.
+- **Loader and start-up** (`rc/process.h`). Reads the executable from the
+  game directory, copies headers and sections to the preferred base,
+  writes every import slot with the import's reserved address, builds the
+  stack and the TIB (empty exception chain, stack bounds, self pointer),
+  sets the x87 control word Windows starts threads with (53-bit precision),
+  and calls the entry point through `rc_dispatch`. A game project's
+  `setup` hook registers its HLE modules first.
+- **Imports** (`rc/hle.h`). A registry of HLE functions by DLL and name;
+  each import gets a reserved address when the loader binds it (or when
+  `GetProcAddress` asks for it), and `rc_dispatch` resolves those
+  addresses. An import without a function stops with its name and call
+  site.
+- **Host files** (`rc/hostfs.h`). Paths resolved component by component
+  without regard to case, as Windows matches them.
+- **Dispatch, traps** (`rc/dispatch.h`). The address-to-function table
+  generated with the code; unknown targets and traps are fatal with the
+  address and the registers.
+- **Diagnostics.** `RC_TRACE` (comma-separated: `imports`, `files`) logs
+  every API call with its first arguments and result, and every file
+  opened. `RC_STOP_AT=DLL!name` ends a run successfully at the first call
+  of that import: scripted scenarios use it as their goal.
+- **Structured exception handling** (planned). The `fs:[0]` handler chain
+  is ordinary guest memory, so installing and removing frames works as
+  lifted code. `RaiseException` and `RtlUnwind` will walk that chain and
+  call the guest's handlers through `rc_dispatch`; unwinding across lifted
+  C frames needs `setjmp`/`longjmp` at known unwind targets. The boot path
+  does not raise exceptions, so both are fatal for now.
 
 ## HLE
+
+An HLE function has the signature of lifted code, `void f(rc_cpu *c)`. It
+is entered like a stdcall function: ESP points at the return address with
+the arguments above it. It reads them with `RC_ARG(c, i)` and leaves with
+`RC_RETURN(c, value, nargs)`, which sets EAX and pops. A host-to-guest call
+(a window procedure, an enumeration callback) is `rc_call_guest`, which
+pushes the arguments and a return address that lifted code pops and never
+executes. Modules live in `hle/<dll>/` and register a table of
+`{dll, name, function}`; a game project registers the ones it needs.
 
 Rules for the boundary between guest and host, taken from the projects that
 got this right:
@@ -343,7 +376,7 @@ got this right:
 
 | Module | Backed by | Notes |
 |---|---|---|
-| `kernel32` | libc, SDL3 filesystem and time | Heap inside the arena; case-insensitive virtual file system rooted at the game directory, with a separate writable directory for saves and settings; TLS; critical sections as no-ops while single-threaded; `LoadLibraryA`/`GetProcAddress` answering for DirectDraw |
+| `kernel32` | libc, POSIX or Windows | Built: process and module functions, environment, TLS, critical sections and interlocked operations (one thread), time; heaps and virtual memory on the runtime's allocator; code page 1252 conversions, character types, string mapping and comparison, locale information for English (US); files, searches and paths on a virtual file system: guest paths under the guest installation directory resolve without regard to case in the user directory first, then the read-only game directory, and writing a game file copies it to the user directory first. `LoadLibraryA`/`GetProcAddress` answer for known DLLs with reserved addresses. |
 | `user32` | SDL3 video and events | One window; SDL events turned into the Windows messages the game's window procedure expects; keyboard state and `ToAscii`; cursor; menus only as far as the game uses them |
 | `gdi32` | `SDL3_ttf` | Font creation and enumeration, character widths, text drawn into the game's surfaces; a substitute font with a compatible licence |
 | `ddraw` | SDL3 renderer, later `SDL_GPU` | Tropico 1 software mode: primary and back surfaces, `Lock`/`Unlock`, `Blt`, `Flip`, pixel formats and palettes; the game's finished frame is uploaded as a texture and scaled |

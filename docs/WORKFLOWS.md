@@ -1,8 +1,9 @@
 # Workflows
 
 How the recurring jobs are done. What exists now: the git hooks, the
-ignore rules, `tools/audit`, and `recomp info`, `recomp ingest`,
-`recomp discover`, `recomp lift` and the difftest. The rest
+ignore rules, `tools/audit`, `tools/run-scenario`, the game executable,
+and `recomp info`, `recomp ingest`, `recomp discover`, `recomp lift` and
+the difftest. The rest
 (`recomp build`,
 `tools/run-scenario`) is the planned interface (see [PLAN.md](PLAN.md)) and
 arrives with the milestone that introduces it.
@@ -70,6 +71,20 @@ build/release/tropico1 --game-dir orig/t1/app
 ## 3. The bring-up loop
 
 The daily work from M5 to M9. Each turn makes the game run a little further.
+
+```sh
+recomp/target/release/recomp lift orig/t1/app --game tropico1   # once per lifter change
+cmake --preset release && cmake --build --preset release
+build/release/games/tropico1/tropico1 orig/t1/app               # run it
+RC_TRACE=imports,files build/release/games/tropico1/tropico1     # every API call and file
+tools/run-scenario tropico1 boot                                 # a scripted run
+```
+
+Scenarios are `games/<id>/scenarios/<name>.conf` (`STOP_AT`, the import
+that marks success, and `TIMEOUT`). The runner keeps the sequence of API
+calls in `build/scenarios/`, compares it with the accepted one, and
+`--accept` makes a run the reference. Traces come from running the game and
+stay out of the repository.
 
 1. Run a scripted scenario: `tools/run-scenario tropico1 boot`.
 2. It stops at the first of:
