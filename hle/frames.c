@@ -1,0 +1,109 @@
+/* SPDX-License-Identifier: MIT */
+/*
+ * What happens after each presented frame: screenshots and the end of a
+ * scripted run.
+ *
+ *   RC_SCREENSHOT=N:path.bmp   write frame N (several, separated by ',')
+ *   RC_FRAMES=N                end the run, successfully, after frame N
+ *   RC_INPUT=path              scripted input, keyed to frames:
+ *       FRAME move X Y         the mouse moves to (X, Y)
+ *       FRAME down|up BUTTON   a mouse button (1 left, 2 right, 3 middle)
+ *       FRAME key|keyup VK     a key, by Windows virtual-key code
+ *   Lines starting with '#' are comments. Keying input to frames rather
+ *   than time makes a run replay the same on a fast and a slow machine.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "ddraw/ddraw.h"
+#include "rc/log.h"
+#include "rc/platform.h"
+#include "rc/process.h"
+#include "user32/user32.h"
+
+static FILE *script;
+static unsigned next_frame;
+static char next_line[256];
+static int script_done;
+
+static bool read_line(void)
+{
+    while (fgets(next_line, sizeof next_line, script)) {
+        if (next_line[0] == '#' || next_line[0] == '\n') {
+            continue;
+        }
+        next_frame = (unsigned)strtoul(next_line, NULL, 10);
+        return true;
+    }
+    return false;
+}
+
+static void run_script(unsigned frame)
+{
+    if (script_done) {
+        return;
+    }
+    if (!script) {
+        const char *path = getenv("RC_INPUT");
+        if (!path || !(script = fopen(path, "r")) || !read_line()) {
+            script_done = 1;
+            return;
+        }
+    }
+    while (next_frame <= frame) {
+        char what[16] = {0};
+        long a = 0, b = 0;
+        sscanf(next_line, "%*u %15s %li %li", what, &a, &b);
+        rc_event e = {0};
+        if (!strcmp(what, "move")) {
+            e.type = RC_EV_MOUSE_MOVE;
+            e.x = (int)a;
+            e.y = (int)b;
+        } else if (!strcmp(what, "down") || !strcmp(what, "up")) {
+            int x, y;
+            rc_input_mouse(&x, &y);
+            e.type = RC_EV_MOUSE_BUTTON;
+            e.button = (int)a;
+            e.down = what[0] == 'd';
+            e.x = x;
+            e.y = y;
+        } else if (!strcmp(what, "key") || !strcmp(what, "keyup")) {
+            e.type = RC_EV_KEY;
+            e.vk = (int)a;
+            e.down = !strcmp(what, "key");
+        } else {
+            rc_log("RC_INPUT: cannot read \"%s\"", next_line);
+        }
+        rc_inject_event(&e);
+        if (!read_line()) {
+            script_done = 1;
+            return;
+        }
+    }
+}
+
+void rc_present_hook(unsigned frame)
+{
+    run_script(frame);
+    const char *shots = getenv("RC_SCREENSHOT");
+    if (shots) {
+        char buf[1024];
+        snprintf(buf, sizeof buf, "%s", shots);
+        for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
+            char *colon = strchr(tok, ':');
+            if (colon && (unsigned)strtoul(tok, NULL, 10) == frame) {
+                if (rc_plat_screenshot(colon + 1)) {
+                    rc_log("screenshot of frame %u: %s", frame, colon + 1);
+                } else {
+                    rc_log("screenshot of frame %u failed", frame);
+                }
+            }
+        }
+    }
+    const char *end = getenv("RC_FRAMES");
+    if (end && frame >= (unsigned)strtoul(end, NULL, 10)) {
+        rc_log("reached frame %u", frame);
+        rc_exit(0);
+    }
+}

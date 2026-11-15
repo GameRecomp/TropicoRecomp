@@ -11,15 +11,8 @@
 #include "rc/hle.h"
 #include "rc/log.h"
 #include "rc/process.h"
+#include "gdi32/gdi32.h"
 #include "user32.h"
-
-/* Until the platform layer exists: no host events, no windows. */
-void rc_pump_events(void) {}
-uint32_t rc_window_proc(uint32_t hwnd)
-{
-    (void)hwnd;
-    return 0;
-}
 
 #define U32 "USER32.dll"
 
@@ -108,98 +101,56 @@ static void k_ShowCursor(rc_cpu *c)
     RC_RETURN(c, (uint32_t)cursor_count, 1);
 }
 
-/* ---- the message queue ----
- * MSG: hwnd, message, wParam, lParam, time, pt.x, pt.y (28 bytes). */
-#define QUEUE 256
-typedef struct msg {
-    uint32_t hwnd, message, wparam, lparam;
-} msg;
-static msg queue[QUEUE];
-static uint32_t qhead, qtail;
-static uint32_t quit_code;
-static int quit_posted;
-
-void rc_post_message(uint32_t hwnd, uint32_t message, uint32_t wparam, uint32_t lparam)
-{
-    if (qtail - qhead == QUEUE) {
-        return; /* full: Windows drops too */
-    }
-    queue[qtail % QUEUE] = (msg){hwnd, message, wparam, lparam};
-    qtail++;
-}
-
-static void k_PostMessageA(rc_cpu *c)
-{
-    rc_post_message(RC_ARG(c, 0), RC_ARG(c, 1), RC_ARG(c, 2), RC_ARG(c, 3));
-    RC_RETURN(c, 1, 4);
-}
-
-static uint32_t tick_ms(void)
-{
-    /* Message times only need to increase. */
-    static uint32_t t = 1000000;
-    return t += 1;
-}
-
-static void k_PeekMessageA(rc_cpu *c)
-{
-    uint32_t out = RC_ARG(c, 0), hwnd = RC_ARG(c, 1), lo = RC_ARG(c, 2), hi = RC_ARG(c, 3);
-    uint32_t remove = RC_ARG(c, 4) & 1;
-    rc_pump_events();
-    for (uint32_t i = qhead; i != qtail; i++) {
-        msg m = queue[i % QUEUE];
-        if ((hwnd && m.hwnd != hwnd) || ((lo || hi) && (m.message < lo || m.message > hi))) {
-            continue;
-        }
-        rc_st32(out, m.hwnd);
-        rc_st32(out + 4, m.message);
-        rc_st32(out + 8, m.wparam);
-        rc_st32(out + 12, m.lparam);
-        rc_st32(out + 16, tick_ms());
-        rc_st32(out + 20, 0);
-        rc_st32(out + 24, 0);
-        if (remove) {
-            /* Close the gap: messages stay in order. */
-            for (uint32_t j = i; j + 1 != qtail; j++) {
-                queue[j % QUEUE] = queue[(j + 1) % QUEUE];
-            }
-            qtail--;
-        }
-        RC_RETURN(c, 1, 5);
-    }
-    if (quit_posted) {
-        rc_st32(out, 0);
-        rc_st32(out + 4, 0x0012); /* WM_QUIT */
-        rc_st32(out + 8, quit_code);
-        rc_st32(out + 12, 0);
-        if (remove) {
-            quit_posted = 0;
-        }
-        RC_RETURN(c, 1, 5);
-    }
-    RC_RETURN(c, 0, 5);
-}
-
-static void k_TranslateMessage(rc_cpu *c) { RC_RETURN(c, 0, 1); }
-static void k_TranslateAcceleratorA(rc_cpu *c) { RC_RETURN(c, 0, 3); }
-
-static void k_DispatchMessageA(rc_cpu *c)
-{
-    uint32_t p = RC_ARG(c, 0);
-    uint32_t hwnd = rc_ld32(p), wndproc = rc_window_proc(hwnd);
-    uint32_t r = 0;
-    if (wndproc) {
-        uint32_t args[4] = {hwnd, rc_ld32(p + 4), rc_ld32(p + 8), rc_ld32(p + 12)};
-        r = rc_call_guest(c, wndproc, 4, args);
-    }
-    RC_RETURN(c, r, 1);
-}
-
 /* Device contexts: a handle per window (0 is the screen). */
 #define DC_BASE 0x01000000u
 
-static void k_GetDC(rc_cpu *c) { RC_RETURN(c, DC_BASE + (RC_ARG(c, 0) & 0xffffu), 1); }
+uint32_t rc_window_dc(uint32_t hwnd) { return DC_BASE + (hwnd & 0xffffu); }
+
+static void k_GetDC(rc_cpu *c) { RC_RETURN(c, rc_window_dc(RC_ARG(c, 0)), 1); }
 static void k_ReleaseDC(rc_cpu *c) { RC_RETURN(c, 1, 2); }
+
+/* FillRect with a system colour brush (COLOR_* + 1), as these games use. */
+static void k_FillRect(rc_cpu *c)
+{
+    uint32_t hdc = RC_ARG(c, 0), r = RC_ARG(c, 1), brush = RC_ARG(c, 2);
+    static const uint32_t sys[31] = {
+        0xc8d0d4, 0xa56e3a, 0x6a240a, 0x808080, 0xc8d0d4, 0xffffff, 0x000000, 0x000000,
+        0x000000, 0xffffff, 0xc8d0d4, 0xc8d0d4, 0x808080, 0x6a240a, 0xffffff, 0xc8d0d4,
+        0x808080, 0x808080, 0x000000, 0xc8d0d4, 0xffffff, 0x404040, 0xc8d0d4, 0x000000,
+        0xe1ffff, 0xb5b5b5, 0x800000, 0xf0caa6, 0xc0c0c0, 0xc8d0d4, 0xc8d0d4,
+    };
+    uint32_t color = brush >= 1 && brush <= 31 ? sys[brush - 1] : 0;
+    rc_gdi_fill(hdc, (int32_t)rc_ld32(r), (int32_t)rc_ld32(r + 4), (int32_t)rc_ld32(r + 8),
+                (int32_t)rc_ld32(r + 12), color);
+    RC_RETURN(c, 1, 3);
+}
+
+/* Strings come in blocks of 16, each a length and that many UTF-16 units. */
+static void k_LoadStringA(rc_cpu *c)
+{
+    uint32_t inst = RC_ARG(c, 0), id = RC_ARG(c, 1), buf = RC_ARG(c, 2), n = RC_ARG(c, 3);
+    uint32_t data, size;
+    if (n == 0 || !rc_resource(inst, 6, (id >> 4) + 1, &data, &size)) {
+        if (n) {
+            rc_st8(buf, 0);
+        }
+        RC_RETURN(c, 0, 4);
+    }
+    uint32_t p = data;
+    for (uint32_t i = 0; i < (id & 15); i++) {
+        p += 2 + 2 * rc_ld16(p);
+    }
+    uint32_t len = rc_ld16(p);
+    if (len > n - 1) {
+        len = n - 1;
+    }
+    for (uint32_t i = 0; i < len; i++) {
+        uint16_t ch = rc_ld16(p + 2 + 2 * i);
+        rc_st8(buf + i, (uint8_t)(ch < 0x100 ? ch : '?'));
+    }
+    rc_st8(buf + len, 0);
+    RC_RETURN(c, len, 4);
+}
 
 /* Messages registered by name get values from 0xc000 up. */
 #define REGISTERED 32
@@ -278,13 +229,10 @@ const rc_import_def rc_user32_setup[] = {
     {U32, "LoadAcceleratorsA", k_LoadAcceleratorsA},
     {U32, "CreateIconIndirect", k_CreateIconIndirect},
     {U32, "RegisterWindowMessageA", k_RegisterWindowMessageA},
-    {U32, "PostMessageA", k_PostMessageA},
-    {U32, "PeekMessageA", k_PeekMessageA},
-    {U32, "TranslateMessage", k_TranslateMessage},
-    {U32, "TranslateAcceleratorA", k_TranslateAcceleratorA},
-    {U32, "DispatchMessageA", k_DispatchMessageA},
     {U32, "GetDC", k_GetDC},
     {U32, "ReleaseDC", k_ReleaseDC},
+    {U32, "LoadStringA", k_LoadStringA},
+    {U32, "FillRect", k_FillRect},
     {U32, "SetRect", k_SetRect},
     {U32, "OffsetRect", k_OffsetRect},
     {U32, "AdjustWindowRect", k_AdjustWindowRect},

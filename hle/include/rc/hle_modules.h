@@ -11,6 +11,9 @@ extern "C" {
 void rc_hle_kernel32(void);
 void rc_hle_user32(void);
 void rc_hle_gdi32(void);
+void rc_hle_ddraw(void);
+void rc_hle_mss32(void);
+void rc_hle_binkw32(void);
 
 /* Everything above. */
 void rc_hle_all(void);

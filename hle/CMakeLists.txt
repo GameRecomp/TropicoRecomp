@@ -6,7 +6,14 @@ add_library(rc_hle STATIC
     kernel32/locale.c
     kernel32/file.c
     user32/user32.c
+    user32/window.c
     gdi32/gdi32.c
+    gdi32/dc.c
+    gdi32/text.c
+    ddraw/ddraw.c
+    frames.c
+    mss32/mss32.c
+    binkw32/binkw32.c
 )
-target_include_directories(rc_hle PUBLIC include)
-target_link_libraries(rc_hle PUBLIC rc_runtime)
+target_include_directories(rc_hle PUBLIC include PRIVATE .)
+target_link_libraries(rc_hle PUBLIC rc_runtime rc_platform)
