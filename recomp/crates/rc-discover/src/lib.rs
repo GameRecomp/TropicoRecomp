@@ -53,6 +53,8 @@ pub struct Options<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum EntrySource {
     EntryPoint,
+    /// An exported function of a DLL.
+    Export,
     Manifest,
     Thunk,
     ThunkTarget,

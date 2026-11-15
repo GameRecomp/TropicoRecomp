@@ -329,19 +329,53 @@ fn discover(game_dir: &Path, arg: &GameArg, out: Option<&Path>, show: &[String])
 
 fn lift(game_dir: &Path, arg: &GameArg, out: Option<&Path>, comments: bool) -> Result<()> {
     let (m, _pe, image, map) = analyse(game_dir, arg)?;
-    let functions: Vec<rc_ir::Function> = map
+    let mut functions: Vec<rc_ir::Function> = map
         .functions
         .iter()
         .map(|f| rc_x86::lift_function(&image, &map, f))
         .collect();
+    let mut entries: std::collections::BTreeSet<u32> =
+        map.functions.iter().map(|f| f.addr).collect();
+    let mut modules = Vec::new();
+    for md in &m.modules {
+        let path = find_ci(game_dir, &md.file)
+            .ok_or_else(|| format!("{} not found in {}", md.file, game_dir.display()))?;
+        let data = read(&path)?;
+        md.check(&data)
+            .map_err(|e| format!("{} is not the expected file: {e}", md.file))?;
+        let pe = PeFile::parse(&data).map_err(|e| format!("{}: {e}", md.file))?;
+        if pe.image_base != md.image_base {
+            return Err(format!(
+                "{}: image base {:#x}, expected {:#x}",
+                md.file, pe.image_base, md.image_base
+            ));
+        }
+        let img = Image::new(&pe);
+        let mm = rc_discover::discover(&pe, &img, &rc_discover::Options::default());
+        eprintln!(
+            "{}: {} functions, {} unknown bytes",
+            md.file,
+            mm.functions.len(),
+            mm.coverage.unknown_total()
+        );
+        entries.extend(mm.functions.iter().map(|f| f.addr));
+        functions.extend(
+            mm.functions
+                .iter()
+                .map(|f| rc_x86::lift_function(&img, &mm, f)),
+        );
+        modules.push(md.file.clone());
+    }
+    functions.sort_by_key(|f| f.addr);
     report::lift(&functions);
     let names = rc_emit_c::Entries {
         prefix: "f_".into(),
-        entries: map.functions.iter().map(|f| f.addr).collect(),
+        entries,
     };
     let tree = rc_emit_c::program(
         &names,
         &functions,
+        &modules,
         rc_emit_c::Options {
             comments,
             flags_at_return: false,

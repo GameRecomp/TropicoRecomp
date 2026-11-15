@@ -225,6 +225,11 @@ impl Cx {
         Ok(match ins.op_kind(i) {
             OpKind::Register => {
                 let r = ins.op_register(i);
+                if let Some(sel) = selector(r) {
+                    // Reading a segment register: the flat model's fixed
+                    // selectors (writing one is still an error).
+                    return Ok(Loc::Imm(E::c(W::B16, sel)));
+                }
                 Loc::Reg(reg(r).ok_or_else(|| format!("register {r:?}"))?)
             }
             OpKind::Memory => {
@@ -477,6 +482,25 @@ impl Cx {
                 let b = self.get(&s);
                 self.set(&d, b)?;
                 self.set(&s, a)?;
+            }
+            M::Push
+                if ins.op0_kind() == OpKind::Register && selector(ins.op0_register()).is_some() =>
+            {
+                // A segment register: pushed as a dword holding the selector.
+                let sel = selector(ins.op0_register()).unwrap_or(0);
+                self.push(E::c(W::B32, sel));
+            }
+            M::Pop
+                if ins.op0_kind() == OpKind::Register && selector(ins.op0_register()).is_some() =>
+            {
+                // Into DS or ES: under the flat model every data selector
+                // is the same, so the value is dropped.
+                match ins.op0_register() {
+                    Register::DS | Register::ES => {
+                        let _ = self.pop(W::B32);
+                    }
+                    r => return Err(format!("pop to {r:?}")),
+                }
             }
             M::Push => {
                 let s = self.loc(ins, 0)?;
@@ -1281,4 +1305,16 @@ fn is_string(ins: &Instruction) -> bool {
                 | OpKind::MemoryESEDI
         )
     })
+}
+
+/// The selector a segment register holds in a 32-bit Windows NT process:
+/// the flat code and data segments, and FS for the thread block.
+fn selector(r: Register) -> Option<u64> {
+    match r {
+        Register::CS => Some(0x1b),
+        Register::DS | Register::ES | Register::SS => Some(0x23),
+        Register::FS => Some(0x3b),
+        Register::GS => Some(0),
+        _ => None,
+    }
 }

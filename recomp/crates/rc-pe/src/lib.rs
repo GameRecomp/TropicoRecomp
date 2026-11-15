@@ -20,4 +20,6 @@ mod read;
 pub use decorate::{CallConv, Decoration, undecorate};
 pub use error::{Error, Result};
 pub use image::Image;
-pub use parse::{DataDir, Import, ImportDll, PeFile, Reloc, RelocKind, Section, SectionFlags, dir};
+pub use parse::{
+    DataDir, Export, Import, ImportDll, PeFile, Reloc, RelocKind, Section, SectionFlags, dir,
+};

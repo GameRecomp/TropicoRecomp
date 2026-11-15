@@ -69,10 +69,10 @@ fn branches_and_tables() {
 
 #[test]
 fn traps_name_what_is_missing() {
-    // fld dword [eax]: x87 is not modelled yet.
-    let i = rc_x86::lift_insn(&dec(&[0xd9, 0x00]), Flow::Next, None);
+    // emms: MMX is not modelled.
+    let i = rc_x86::lift_insn(&dec(&[0x0f, 0x77]), Flow::Next, None);
     assert_eq!(i.term, Term::Stop);
-    assert!(trap_text(&i.stmts).is_some_and(|t| t.starts_with("x87 fld at 0x00401000")));
+    assert!(trap_text(&i.stmts).is_some_and(|t| t.contains("emms") && t.contains("0x00401000")));
     // int3 ends execution with a trap of its own.
     let i = rc_x86::lift_insn(&dec(&[0xcc]), Flow::Stop, None);
     assert_eq!(i.term, Term::Stop);
@@ -102,4 +102,16 @@ fn division_guards_trap() {
         .filter(|s| matches!(s, Stmt::If(_, b) if matches!(b.as_slice(), [Stmt::Trap(_)])))
         .count();
     assert_eq!(guards, 2, "divide by zero and divide overflow");
+}
+
+#[test]
+fn segment_registers_follow_the_flat_model() {
+    // push ds; pop es: a selector is pushed and dropped again, no trap.
+    for code in [&[0x1e][..], &[0x07][..], &[0x8c, 0xd8][..]] {
+        let i = rc_x86::lift_insn(&dec(code), Flow::Next, None);
+        assert!(trap_text(&i.stmts).is_none(), "{code:02x?}");
+    }
+    // mov ds, ax still traps: segments cannot be changed.
+    let i = rc_x86::lift_insn(&dec(&[0x8e, 0xd8]), Flow::Next, None);
+    assert!(trap_text(&i.stmts).is_some());
 }

@@ -117,6 +117,16 @@ pub struct ImportDll {
     pub entries: Vec<Import>,
 }
 
+/// One exported function.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Export {
+    pub name: Option<String>,
+    pub ordinal: u32,
+    pub rva: u32,
+    /// The RVA points into the export directory: a forwarder string.
+    pub forwarder: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum RelocKind {
     /// IMAGE_REL_BASED_HIGHLOW: a 32-bit absolute address at `rva`.
@@ -153,6 +163,7 @@ pub struct PeFile {
     pub imports: Vec<ImportDll>,
     /// Base relocations, sorted by RVA. Padding entries are dropped.
     pub relocs: Vec<Reloc>,
+    pub exports: Vec<Export>,
     #[serde(skip)]
     data: Vec<u8>,
 }
@@ -251,10 +262,12 @@ impl PeFile {
             sections,
             imports: Vec::new(),
             relocs: Vec::new(),
+            exports: Vec::new(),
             data: data.to_vec(),
         };
         pe.imports = pe.parse_imports()?;
         pe.relocs = pe.parse_relocs()?;
+        pe.exports = pe.parse_exports()?;
         Ok(pe)
     }
 
@@ -341,6 +354,48 @@ impl PeFile {
             });
         }
         Ok(dlls)
+    }
+
+    fn parse_exports(&self) -> Result<Vec<Export>> {
+        let d = self.dir(dir::EXPORT);
+        if d.rva == 0 || d.size == 0 {
+            return Ok(Vec::new());
+        }
+        let base = self.u32_rva(d.rva.wrapping_add(16), "export directory")?;
+        let nfuncs = self.u32_rva(d.rva.wrapping_add(20), "export directory")?;
+        let nnames = self.u32_rva(d.rva.wrapping_add(24), "export directory")?;
+        let funcs = self.u32_rva(d.rva.wrapping_add(28), "export directory")?;
+        let names = self.u32_rva(d.rva.wrapping_add(32), "export directory")?;
+        let ords = self.u32_rva(d.rva.wrapping_add(36), "export directory")?;
+        if nfuncs > 65536 || nnames > nfuncs.max(65536) {
+            return Err(Error::Malformed(format!("{nfuncs} exports")));
+        }
+        let mut out: Vec<Export> = Vec::with_capacity(nfuncs as usize);
+        for i in 0..nfuncs {
+            let rva = self.u32_rva(funcs.wrapping_add(4 * i), "export address table")?;
+            out.push(Export {
+                name: None,
+                ordinal: base.wrapping_add(i),
+                rva,
+                forwarder: rva >= d.rva && rva < d.rva.wrapping_add(d.size),
+            });
+        }
+        for i in 0..nnames {
+            let name_rva = self.u32_rva(names.wrapping_add(4 * i), "export name table")?;
+            let ord_off = self.off(ords.wrapping_add(2 * i), "export ordinal table")?;
+            let idx = u16_at(&self.data, ord_off, "export ordinal table")? as usize;
+            let name = cstr_at(
+                &self.data,
+                self.off(name_rva, "export name")?,
+                1024,
+                "export name",
+            )?;
+            if let Some(e) = out.get_mut(idx) {
+                e.name = Some(name);
+            }
+        }
+        out.retain(|e| e.rva != 0);
+        Ok(out)
     }
 
     fn parse_relocs(&self) -> Result<Vec<Reloc>> {

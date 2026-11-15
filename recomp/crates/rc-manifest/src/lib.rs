@@ -19,6 +19,40 @@ pub struct Manifest {
     pub ingest: Ingest,
     #[serde(default)]
     pub discover: Discover,
+    /// DLLs shipped with the game that are lifted with it.
+    #[serde(default)]
+    pub modules: Vec<Module>,
+}
+
+/// A DLL of the game's own, lifted into the same program.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Module {
+    pub id: String,
+    /// Its path inside the game directory.
+    pub file: String,
+    pub sha256: String,
+    pub size: u64,
+    pub image_base: u32,
+}
+
+impl Module {
+    pub fn check(&self, data: &[u8]) -> Result<(), Mismatch> {
+        if data.len() as u64 != self.size {
+            return Err(Mismatch::Size {
+                expected: self.size,
+                found: data.len() as u64,
+            });
+        }
+        let found = sha256_hex(data);
+        if found != self.sha256 {
+            return Err(Mismatch::Hash {
+                expected: self.sha256.clone(),
+                found,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// The one executable this project supports.

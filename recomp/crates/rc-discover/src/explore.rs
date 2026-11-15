@@ -335,7 +335,12 @@ pub(crate) fn explore(
         info: InstructionInfoFactory::new(),
     };
 
-    x.add_entry(base.wrapping_add(pe.entry_rva), EntrySource::EntryPoint);
+    if pe.entry_rva != 0 {
+        x.add_entry(base.wrapping_add(pe.entry_rva), EntrySource::EntryPoint);
+    }
+    for e in pe.exports.iter().filter(|e| !e.forwarder) {
+        x.add_entry(base.wrapping_add(e.rva), EntrySource::Export);
+    }
     for &s in opts.seeds {
         x.add_entry(s, EntrySource::Manifest);
     }
