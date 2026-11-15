@@ -1,0 +1,253 @@
+# Plan
+
+What we are building, in what order, and how we know each step is done.
+Read [TARGETS.md](TARGETS.md) for the facts this plan rests on,
+[ARCHITECTURE.md](ARCHITECTURE.md) for the design and
+[RESEARCH.md](RESEARCH.md) for where the ideas come from.
+
+## Goal
+
+1. **Tropico 1** (GOG release, `Tropico.EXE` built 2002-07-19) recompiled
+   statically and playable natively on Linux, Windows and macOS.
+2. The same pipeline running **in a browser as WebAssembly**: recompile and
+   run from the user's own game folder, with nothing uploaded.
+3. **Tropico 2** on the same recompiler, runtime and HLE.
+
+## Fixed requirements
+
+| Requirement | Consequence |
+|---|---|
+| The repository never contains copyrighted material | `orig/`, `generated/`, `build/` ignored; hooks and an audit enforce it; generated C and built game binaries are never published |
+| Commit messages never mention an AI model, vendor or session | A `commit-msg` hook rejects them; no attribution trailers |
+| The recompiler is written in Rust | Workspace under `recomp/`; pure-Rust dependencies in the pipeline |
+| Generated code and runtime are C | C11, no compiler extensions outside macros |
+| Recompiling and compiling must later work as WebAssembly | Pipeline crates build for `wasm32` from day one; no external tools (Ghidra, Python) in the pipeline; IR designed for a second, direct WebAssembly back end |
+| SDL3, and its satellite libraries where useful | All platform access through SDL3; `SDL3_ttf` for text, `SDL3_mixer` for audio |
+| Every source file carries an SPDX licence identifier | `SPDX-License-Identifier: MIT` in the first lines; checked by the `pre-commit` hook and CI |
+| GOG releases only | One manifest per game; any other executable hash is refused |
+
+## Why Tropico 1 first, and why it is a good target
+
+It has full relocations (pointers are known, not guessed), an
+incremental-link thunk table that lists its functions, a single thread, no
+network, no registry, five import DLLs, a software renderer over DirectDraw,
+almost no x87 and no SIMD. Tropico 2 is 3.5 times larger, has no
+relocations and probably needs Direct3D 7. Everything generic built for the
+first game carries over to the second.
+
+## Milestones
+
+Each milestone has an exit criterion that can be checked. A milestone is not
+done until its criterion is a test or a scripted run.
+
+### M0. Foundation
+
+- Git repository with ignore rules, hooks and audit in place.
+- Rust workspace skeleton, C runtime skeleton, CMake build, CI: build, test,
+  lint, `wasm32` build of the pipeline crates, repository audit.
+- `recomp ingest`: verify an installed game folder under `orig/` against the
+  hashes in `game.toml`. Document `innoextract` for the GOG installers.
+
+*Exit:* CI is green on an empty pipeline; the audit fails when a test binary
+is staged; `recomp ingest orig/t1/app` reports the known hash.
+
+### M1. Read the executable
+
+- `rc-pe`: headers, sections, imports (with stdcall argument sizes from
+  decorated names), relocations, resources.
+- `recomp info`: a JSON and a human report.
+- Test fixtures: tiny PE files **we build ourselves** from our own C with
+  clang targeting `i686-pc-windows-msvc`. No game bytes in tests.
+
+*Exit:* `recomp info` reproduces every number in TARGETS.md (or TARGETS.md
+is corrected); fixtures parse; fuzzing the parser finds no panics.
+
+### M2. Find the code
+
+- `rc-discover`: thunk table, relocation-seeded recursive descent, jump
+  tables, code pointers in data, no-return detection, overrides.
+- The code map (JSON) and the coverage report.
+- Resolve the open question of how hardware mode reaches Direct3D or OpenGL.
+
+*Exit:* 100% of `.text` bytes classified, with unknown bytes at zero or each
+remaining range explained in the manifest; every thunk target is a
+discovered function; every relocation into `.text` lands on a function
+entry, a jump-table target or a listed exception.
+
+### M3. Lifter, integer core
+
+- `rc-ir`, `rc-x86` for integer instructions, flags, string instructions,
+  calls, jump tables; `rc-emit-c`; the minimal `runtime/` (CPU, memory,
+  loader, dispatch, traps).
+- `rc-difftest`: run instruction sequences on a reference CPU and as lifted
+  C; compare registers, flags and memory. Hand-written cases per instruction
+  and a random generator.
+- Fixture programs (our own C compiled to PE32) run end to end as lifted
+  code with stubbed imports.
+
+*Exit:* difftests pass for every integer instruction form that occurs in
+`Tropico.EXE` (the lifter reports the list); fixtures produce the same
+output as their native builds; regenerating twice gives identical bytes.
+
+### M4. Lift the whole game
+
+- x87 (fast mode), the remaining instructions, flag liveness, x87 stack
+  depth, address-bucket output, parallel emission.
+- The generated C for the whole executable compiles.
+
+*Exit:* zero trap bodies outside listed data regions; the generated tree
+compiles without warnings we have not classified; full regeneration and
+compile times are recorded as the baseline.
+
+### M5. Boot to `WinMain`
+
+- `kernel32`: heap, virtual memory, files and the virtual file system,
+  environment and command line, TLS, critical sections, time, module
+  functions, error codes.
+- Start-up path of the MSVC 6 CRT, including the exception-handling frames
+  it installs.
+- Generated stubs for every import; an import trace (`--trace-imports`).
+
+*Exit:* a scripted run reaches the game's first window creation call with no
+trap; the trace of imports called up to that point is stored as a regression
+reference.
+
+### M6. Picture and input: the main menu
+
+- `user32` window and message pump on SDL3; mouse and keyboard.
+- `ddraw` for software mode (`-s`): surfaces, lock, blit, flip, palettes.
+- `gdi32` text through `SDL3_ttf`.
+- Movies skipped, audio silent.
+- Screenshot capture and frame-keyed input replay for tests.
+
+*Exit:* a scripted run reaches the main menu, and its screenshot matches a
+stored reference within a tolerance. (Reference screenshots show the game's
+art, so they are stored outside the repository.)
+
+### M7. In game
+
+- Whatever the path from menu to a running island needs: more file and
+  memory API, timing, the save directory.
+- First performance profile.
+
+*Exit:* a scripted run starts a new game and simulates ten game-years
+without a trap; a save written by the port loads in the port; a save from
+the original loads in the port.
+
+### M8. Sound and video
+
+- `mss32` on `SDL3_mixer`: samples, streams, MP3 decoding, volume,
+  callbacks.
+- `binkw32`: our own Bink 1 decoder in C (video and audio), written from
+  the public format descriptions and tested on the user's own movies.
+
+*Exit:* music, speech and effects play; a movie plays with sound in sync;
+an audio capture test checks that the mixer output is not silent and not
+clipped.
+
+### M9. Playable release
+
+- Long-run stability (hours), every menu and dialog visited, settings and
+  saves, window modes and scaling, clean exit.
+- Windows and macOS builds. ARM64 builds.
+- User documentation and the build-it-yourself flow: one command from
+  "installed game folder" to "native executable".
+- Hardware-accelerated mode if M2 showed it is worth having; otherwise
+  software mode with good scaling is the release.
+
+*Exit:* a test campaign scenario is played to its end by a person on each
+platform; the scripted suite passes on all of them.
+
+### M10. Performance and native replacements
+
+- Profile inside lifted code; apply optimisations in the order measurements
+  justify (flags across calls, registers in locals, CRT functions bound to
+  native ones, hot loops replaced by hand-written C).
+- The replacement framework: a function replaced by address, tested against
+  its lifted original.
+
+*Exit:* a fixed benchmark scene with a recorded before and after; every
+replacement has a difference test.
+
+### M11. WebAssembly
+
+- Stage 1: the native C build compiled with Emscripten, to shake out the
+  runtime, SDL3 and the main-loop yield in a browser. (A development build
+  only; a compiled game is never published.)
+- Stage 2: `rc-web`, the recompiler in a Web Worker.
+- Stage 3: `rc-emit-wasm`, direct module emission, with the difftests run
+  against it.
+- Stage 4: the page: pick a game folder, verify, recompile, run; saves in
+  browser storage.
+
+*Exit:* from a clean browser profile, choosing the game folder leads to the
+main menu with no server involved beyond static files, in a measured time
+that we publish.
+
+### Tropico 2
+
+Begins when M9 is done; M10 and M11 can run beside it.
+
+- T2-0 Reconnaissance with our own tools; update TARGETS.md.
+- T2-1 Discovery without relocations: operand and data scanning, RTTI and
+  vtables, overrides; unknown indirect targets collected from scripted runs.
+- T2-2 Lift and compile.
+- T2-3 New API surface: `ole32`, `VERSION`, `WINMM`, DirectDraw 7 and
+  probably Direct3D 7 on `SDL_GPU`.
+- T2-4 Menu, in game, sound, video, release: as M6 to M9.
+
+## Order of work and what can run in parallel
+
+```
+M0 ─ M1 ─ M2 ─ M3 ─ M4 ─ M5 ─ M6 ─ M7 ─┬─ M8 ─ M9 ─┬─ M10
+                │                       │           ├─ M11
+                └ difftests grow        │           └─ Tropico 2
+                  continuously          └ M8 audio can start after M5
+```
+
+The HLE modules are independent of the lifter once M3's fixtures run, so
+`kernel32` and the virtual file system can be developed against fixture
+programs while M4 is under way.
+
+## Risks
+
+| Risk | Likelihood | Effect | Answer |
+|---|---|---|---|
+| A wrong lift of one instruction corrupts state far from the cause | Certain to happen | Days lost per bug | Differential tests before the game ever runs; instruction comments in generated code; a guest-level trace that can be compared between two builds |
+| Exception handling is used more than expected | Medium | M5 grows | Measure in M2 how many functions install handlers; implement only what a run reaches |
+| x87 differences change the simulation | Medium | Saves or random maps differ from the original | Exact mode per function; compare game state against the original at fixed points |
+| GDI text metrics differ and layouts break | High | Misplaced or clipped text | Match the original font's metrics with a substitute; allow the user's own font file |
+| Our own Bink decoder takes longer than expected | Medium | No movies for a while | The game runs with movies skipped from M6 on, so M8 blocks nothing else |
+| `SDL3_mixer` does not fit a Miles feature the game uses (stream callbacks, file callbacks, speed changes) | Medium | Extra glue or a custom stream source | Check the 23 imported functions against the mixer's model at the start of M8; fall back to raw SDL3 audio streams for that feature only |
+| Hardware mode turns out to be the only good-looking mode | Low | A Direct3D or OpenGL layer is needed for Tropico 1 | Decide after M2 and M6 with the software path on screen |
+| Compile time of generated C | Medium | Slow iteration | Address buckets, parallel build, unoptimised debug configuration, cache |
+| Generated C in a browser is too slow to compile | High | Path A unusable for users | Path B (direct emission) is the plan of record |
+| Tropico 2 without relocations | High | Wrong pointers, missing functions | Planned for: overrides, run-time reports, RTTI |
+| Legal exposure | Low while the rules hold | Project taken down | No game material in the repository or releases; tools only; hooks and audit |
+
+## Decisions taken
+
+Decided by the project owner on 2026-11-15.
+
+| Question | Decision |
+|---|---|
+| Licence | MIT |
+| Language of generated code and runtime | C. No hand-written decompilation of the games is kept in the repository |
+| Bink video | Our own Bink 1 decoder in C; no FFmpeg |
+| Audio | `SDL3_mixer` under the Miles reimplementation (mixing and MP3 decoding) |
+| Game versions | GOG releases only; other builds are refused by hash |
+
+## Open decisions
+
+1. **Fonts.** Which freely licensed font stands in for the Windows fonts the
+   game asks for; to be chosen when M6 shows what it asks for.
+2. **Repository host and CI provider.**
+
+## Definition of done, for any change
+
+- Tests for the change exist and pass, with the lint and format checks.
+- The pipeline crates still build for `wasm32`.
+- If the lifter changed: difftests pass and the report of a full
+  regeneration is compared with the previous one (function count, traps).
+- The repository audit passes.
+- Documentation changed where behaviour changed.

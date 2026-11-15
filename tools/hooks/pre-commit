@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Refuse to commit game material: protected paths, game and media file
+# types, executables (by content), large files, personal data, and source
+# files without an SPDX identifier.
+# Enable with: git config core.hooksPath tools/hooks
+
+max_bytes=524288   # 512 KiB; nothing we write by hand is larger
+fail=0
+
+reject() {
+    echo "pre-commit: refusing '$1': $2" >&2
+    fail=1
+}
+
+# Staged files that are added, copied, modified or renamed.
+git diff --cached --name-only --diff-filter=ACMR -z |
+{
+    while IFS= read -r -d '' path; do
+        case "$path" in
+            orig/*|generated/*|build/*|out/*)
+                reject "$path" "protected directory"; continue ;;
+        esac
+
+        lower=$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')
+        case "$lower" in
+            *.exe|*.dll|*.asi|*.m3d|*.flt|*.pk2|*.bik|*.imb|*.xdt|*.mp2|*.mp3|\
+            *.lng|*.bin|*.iso|*.png|*.jpg|*.jpeg|*.bmp|*.wav|*.avi|*.mp4|*.ogg|\
+            *.o|*.obj|*.a|*.so|*.dylib|*.wasm|*.pdb|*.gpr|*.i64|*.idb|*.dis)
+                reject "$path" "file type is never committed"; continue ;;
+        esac
+
+        size=$(git cat-file -s ":$path" 2>/dev/null || echo 0)
+        if [ "$size" -gt "$max_bytes" ]; then
+            reject "$path" "larger than $max_bytes bytes"; continue
+        fi
+
+        # Executable formats by magic number: MZ (PE), ELF, Mach-O, wasm.
+        magic=$(git cat-file blob ":$path" 2>/dev/null | head -c 4 | od -An -tx1 | tr -d ' \n')
+        case "$magic" in
+            4d5a*|7f454c46|feedface|feedfacf|cefaedfe|cffaedfe|cafebabe|0061736d)
+                reject "$path" "executable content"; continue ;;
+        esac
+
+        # Source files must carry an SPDX identifier in their first lines.
+        base=${lower##*/}
+        is_source=0
+        case "$base" in
+            *.rs|*.c|*.h|*.cc|*.cpp|*.hpp|*.py|*.sh|*.js|*.mjs|*.ts|*.toml|\
+            *.cmake|cmakelists.txt|*.yml|*.yaml|makefile)
+                is_source=1 ;;
+        esac
+        first=$(git cat-file blob ":$path" 2>/dev/null | head -n 5)
+        case "$first" in
+            '#!'*) is_source=1 ;;
+        esac
+        if [ "$is_source" -eq 1 ]; then
+            case "$first" in
+                *SPDX-License-Identifier:*) ;;
+                *) reject "$path" "no SPDX-License-Identifier in the first five lines" ;;
+            esac
+        fi
+    done
+
+    # Personal data in added lines: home-directory paths and the login name
+    # of whoever is committing.
+    user=$(id -un 2>/dev/null)
+    pattern='/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/|[A-Za-z]:\\Users\\[A-Za-z0-9._-]+'
+    if [ -n "$user" ] && [ ${#user} -ge 3 ]; then
+        pattern="$pattern|$user"
+    fi
+    hits=$(git diff --cached -U0 --diff-filter=ACMR |
+           grep -E '^\+' | grep -vE '^\+\+\+ ' |
+           grep -iE "$pattern" |
+           grep -vE '/home/<|/Users/<|Users\\<')
+    if [ -n "$hits" ]; then
+        echo "pre-commit: personal data (home path or login name) in staged lines:" >&2
+        printf '%s\n' "$hits" | cut -c1-160 >&2
+        fail=1
+    fi
+
+    exit $fail
+}

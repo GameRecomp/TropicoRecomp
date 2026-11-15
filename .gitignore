@@ -1,0 +1,48 @@
+# The user's game copies, generated code and build trees never enter git.
+/orig/
+/generated/
+/build/
+/out/
+target/
+
+# Game and installer file types, wherever they turn up.
+*.exe
+*.EXE
+*.dll
+*.DLL
+*.asi
+*.m3d
+*.flt
+*.pk2
+*.PK2
+*.bik
+*.imb
+*.xdt
+*.mp2
+*.MP2
+*.mp3
+*.lng
+*.bin
+*.iso
+
+# Reference captures contain game art and sound.
+*.png
+*.jpg
+*.bmp
+*.wav
+*.avi
+*.mp4
+
+# Analysis databases and dumps.
+*.gpr
+*.rep/
+*.i64
+*.idb
+*.dis
+*.asm.txt
+
+# Editors and OS.
+.vscode/
+.idea/
+*.swp
+.DS_Store

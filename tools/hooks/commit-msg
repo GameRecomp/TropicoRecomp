@@ -1,0 +1,27 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Reject commit messages that name an AI model, its vendor or a session.
+# Enable with: git config core.hooksPath tools/hooks
+
+msg_file="$1"
+
+# Comment lines are not part of the message.
+if grep -v '^#' "$msg_file" | grep -qiE \
+    'claude|anthropic|chatgpt|openai|copilot|🤖|(fable|sonnet|haiku|opus) [0-9]'
+then
+    echo "commit-msg: the message names an AI model, vendor or session." >&2
+    echo "Describe the change in plain technical terms and remove the reference." >&2
+    exit 1
+fi
+
+# Reject personal data: home-directory paths and the committer's login name.
+user=$(id -un 2>/dev/null)
+pattern='/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/|[A-Za-z]:\\Users\\[A-Za-z0-9._-]+'
+if [ -n "$user" ] && [ ${#user} -ge 3 ]; then
+    pattern="$pattern|$user"
+fi
+if grep -v '^#' "$msg_file" | grep -qiE "$pattern"; then
+    echo "commit-msg: the message contains a home-directory path or a login name." >&2
+    exit 1
+fi
+exit 0
