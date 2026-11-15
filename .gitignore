@@ -3,6 +3,8 @@
 /generated/
 /build/
 /out/
+# What a recompiled game writes (it may copy game files there).
+*-user/
 target/
 
 # Game and installer file types, wherever they turn up.

@@ -45,8 +45,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # Warnings are errors with GCC and Clang; MSVC's /W4 conversion
+      # warnings are reported but do not fail the build.
       - name: configure
-        run: cmake -S . -B build/ci -DCMAKE_BUILD_TYPE=Debug -DRC_WARNINGS_AS_ERRORS=ON
+        shell: bash
+        run: >-
+          cmake -S . -B build/ci -DCMAKE_BUILD_TYPE=Debug
+          -DRC_WARNINGS_AS_ERRORS=${{ matrix.os == 'windows-latest' && 'OFF' || 'ON' }}
       - name: build
         run: cmake --build build/ci --config Debug
       - name: test

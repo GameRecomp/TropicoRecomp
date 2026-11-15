@@ -27,3 +27,5 @@ if(RC_BUILD_TESTS)
 endif()
 
 add_subdirectory(runtime)
+add_subdirectory(hle)
+add_subdirectory(games/tropico1)

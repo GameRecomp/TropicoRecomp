@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Run a scripted scenario of a game and check it.
+#
+#   tools/run-scenario GAME SCENARIO [--accept]
+#
+# Reads games/GAME/scenarios/SCENARIO.conf (STOP_AT, TIMEOUT), runs
+# build/release/games/GAME/GAME on the game in $<GAME>_DIR (default
+# orig/t1/app for tropico1) with a fresh user directory, and passes if the
+# run reaches STOP_AT. The sequence of API calls (names only) is kept in
+# build/scenarios/GAME-SCENARIO.trace and compared with the accepted one,
+# build/scenarios/GAME-SCENARIO.ref; --accept makes the current run the
+# reference. Traces come from running the game, so they stay in build/.
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 2
+game=${1:?game}
+scenario=${2:?scenario}
+accept=${3:-}
+conf="games/$game/scenarios/$scenario.conf"
+[ -f "$conf" ] || { echo "no scenario $conf" >&2; exit 2; }
+STOP_AT=
+TIMEOUT=60
+# shellcheck disable=SC1090
+. "$conf"
+
+bin="build/release/games/$game/$game"
+[ -x "$bin" ] || { echo "build $bin first (cmake --build --preset release)" >&2; exit 2; }
+var=$(printf '%s_DIR' "$game" | tr '[:lower:]' '[:upper:]')
+case "$game" in
+    tropico1) default_dir=orig/t1/app ;;
+    tropico2) default_dir=orig/t2/app ;;
+    *) default_dir= ;;
+esac
+dir=${!var:-$default_dir}
+
+out=build/scenarios
+mkdir -p "$out"
+user=$(mktemp -d)
+log="$out/$game-$scenario.log"
+RC_STOP_AT="$STOP_AT" RC_TRACE=imports timeout "$TIMEOUT" "$bin" "$dir" "$user" > "$log" 2>&1
+status=$?
+rm -rf "$user"
+
+grep -o '^\[import\] [^ (]*' "$log" | sed 's/^\[import\] //' > "$out/$game-$scenario.trace"
+calls=$(wc -l < "$out/$game-$scenario.trace")
+
+if [ $status -eq 0 ] && grep -q "^reached $STOP_AT" "$log"; then
+    result=PASS
+else
+    result=FAIL
+fi
+echo "$game/$scenario: $result after $calls API calls (exit $status)"
+[ "$result" = FAIL ] && tail -3 "$log"
+
+ref="$out/$game-$scenario.ref"
+if [ "$accept" = --accept ]; then
+    cp "$out/$game-$scenario.trace" "$ref"
+    echo "accepted as the reference"
+elif [ -f "$ref" ]; then
+    if cmp -s "$ref" "$out/$game-$scenario.trace"; then
+        echo "API call sequence matches the reference"
+    else
+        echo "API call sequence differs from the reference:"
+        diff "$ref" "$out/$game-$scenario.trace" | head -20
+        result=FAIL
+    fi
+fi
+[ "$result" = PASS ]
