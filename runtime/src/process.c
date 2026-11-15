@@ -142,8 +142,9 @@ int rc_run(const rc_config *cfg)
     }
 
     char path[RC_PATH_MAX];
-    if (!rc_host_resolve(cfg->game_dir, cfg->exe, false, path)) {
-        rc_fatal("%s not found in %s", cfg->exe, cfg->game_dir);
+    if (!rc_host_resolve(cfg->game_dir, cfg->exe, false, path) || !rc_host_exists(path, NULL, NULL)) {
+        rc_fatal("%s not found in \"%s\": pass the installed game's directory as the first argument",
+                 cfg->exe, cfg->game_dir);
     }
     uint32_t size = 0;
     uint8_t *file = rc_host_read(path, &size);

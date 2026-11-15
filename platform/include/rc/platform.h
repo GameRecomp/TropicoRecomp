@@ -59,6 +59,14 @@ void rc_plat_cursor_visible(bool visible);
  * size, or NULL before the first. */
 const uint32_t *rc_plat_last_frame(int *width, int *height);
 
+/* The directory the program's executable is in, ending in a separator, or
+ * NULL if unknown. */
+const char *rc_plat_base_dir(void);
+
+/* A per-user directory for what a program writes (created if needed), or
+ * NULL if there is none. */
+const char *rc_plat_user_dir(const char *org, const char *app);
+
 /* Write the last frame to a 24-bit BMP file. */
 bool rc_plat_screenshot(const char *path);
 

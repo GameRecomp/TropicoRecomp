@@ -31,3 +31,12 @@ void rc_plat_present(const uint32_t *pixels, int width, int height, int pitch)
 }
 
 void rc_plat_cursor_visible(bool visible) { (void)visible; }
+
+const char *rc_plat_base_dir(void) { return 0; }
+
+const char *rc_plat_user_dir(const char *org, const char *app)
+{
+    (void)org;
+    (void)app;
+    return 0;
+}

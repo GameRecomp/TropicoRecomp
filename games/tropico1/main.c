@@ -4,9 +4,14 @@
  *
  *   tropico1 [GAME_DIR [USER_DIR]] [-- GAME_ARGS...]
  *
- * GAME_DIR is the installed game (default: orig/t1/app, or TROPICO1_DIR).
- * USER_DIR receives what the game writes (default: tropico1-user, or
- * TROPICO1_USER). Set RC_TRACE=imports to log every API call.
+ * GAME_DIR is the installed game (or TROPICO1_DIR). Without one, orig/t1/app
+ * is looked for in the working directory, the directory of the executable,
+ * and the directories above them, so it runs from any build directory and
+ * from a debugger.
+ * USER_DIR receives what the game writes (or TROPICO1_USER; default: the
+ * platform's per-user data directory, e.g. ~/.local/share/tropicorecomp/
+ * tropico1, else tropico1-user). Set RC_TRACE=imports to log every API
+ * call.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +22,29 @@
 #include "rc/log.h"
 #include "rc/platform.h"
 #include "rc/process.h"
+
+/* Whether `dir` holds the game. */
+static bool has_game(const char *dir)
+{
+    char p[RC_PATH_MAX];
+    return rc_host_resolve(dir, "Tropico.EXE", false, p) && rc_host_exists(p, NULL, NULL);
+}
+
+/* orig/t1/app in `start` or a directory above it. */
+static bool find_up(const char *start, char *out, size_t n)  /* n >= RC_PATH_MAX */
+{
+    char base[RC_PATH_MAX - 64]; /* room for the suffix in `out` */
+    snprintf(base, sizeof base, "%s", start);
+    for (int up = 0; up < 8; up++) {
+        snprintf(out, n, "%s/orig/t1/app", base);
+        if (has_game(out)) {
+            return true;
+        }
+        size_t len = strlen(base);
+        snprintf(base + len, sizeof base - len, "%s..", len && base[len - 1] == '/' ? "" : "/");
+    }
+    return false;
+}
 
 static void setup(void)
 {
@@ -47,8 +75,17 @@ int main(int argc, char **argv)
         }
         pos++;
     }
+    static char found[RC_PATH_MAX];
     if (!game) {
-        game = "orig/t1/app";
+        const char *exe_dir = rc_plat_base_dir();
+        if (find_up(".", found, sizeof found) || (exe_dir && find_up(exe_dir, found, sizeof found))) {
+            game = found;
+        } else {
+            game = "orig/t1/app";
+        }
+    }
+    if (!user) {
+        user = rc_plat_user_dir("tropicorecomp", "tropico1");
     }
     if (!user) {
         user = "tropico1-user";

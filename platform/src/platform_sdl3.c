@@ -238,3 +238,14 @@ bool rc_plat_poll(rc_event *e)
     }
     return false;
 }
+
+const char *rc_plat_base_dir(void) { return SDL_GetBasePath(); }
+
+const char *rc_plat_user_dir(const char *org, const char *app)
+{
+    static char *dir;
+    if (!dir) {
+        dir = SDL_GetPrefPath(org, app);
+    }
+    return dir;
+}
