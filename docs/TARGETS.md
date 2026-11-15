@@ -87,6 +87,12 @@ where execution must never arrive. The generated C is 62.2 MB in 23 files
 and compiles with clang `-O1 -Wall -Wextra`, without warnings, in 21 s on
 16 cores (3 min 40 s of CPU).
 
+Running (2026-11-16): the recompiled game plays its intro, shows its menus,
+and starts a game on a random island; the software renderer draws the
+island, its people and the interface at 1024x768 through the HLE
+DirectDraw. Headless on one core it presents about 165 frames a second,
+menus and intro included.
+
 The instruction forms (iced `Code`s) the lifter models in this executable:
 281 that do not branch, all covered by the differential tests.
 

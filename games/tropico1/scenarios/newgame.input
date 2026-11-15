@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+# Main menu: GAME. Game menu: random map. Then OK on the map settings,
+# OK on the game settings, and OK on El Presidente's dossier: the game
+# starts and shows its first letter.
+2900 move 320 228
+3300 down 1
+3320 up 1
+3800 move 320 260
+3900 down 1
+3920 up 1
+6100 move 535 400
+6200 down 1
+6220 up 1
+9100 move 535 400
+9200 down 1
+9220 up 1
+11000 move 535 400
+11100 down 1
+11120 up 1

@@ -45,6 +45,7 @@ first game carries over to the second.
 | M3 Lifter, integer core | Done: all 196 integer instruction forms the game uses are lifted and agree with the real CPU; fixtures agree; lifting is deterministic |
 | M4 Lift the whole game | Done: every instruction lifts (x87 in the fast mode); all 281 instruction forms the game uses agree with the real CPU; 62 MB of C, no warnings |
 | M5 Boot to `WinMain` | Done: the C runtime's start-up and the game's initialisation run as lifted code to `CreateWindowExA` (8,888 API calls, the same sequence every run) |
+| M7 In game | Started: a scripted run (`newgame`) goes from the main menu through the random map and game settings into a running game on a new island at 1024x768; the simulation runs (letters, the annual report) without traps. Open: ten game years, saving and loading |
 | M6 Picture and input | Mostly done: window, DirectDraw software rendering, GDI text, mouse and keyboard on SDL3; the intro plays (black: no Bink decoder yet), the main menu renders and responds, GAME opens the game menu. Scripted scenarios (`boot`, `menu`, `submenu`) replay exactly on the virtual clock, screenshots included. Open: the game menu's items are part of its background movie, so they need the Bink decoder (M8) to be seen |
 
 Known issue: `recomp discover` on Tropico 2 (no relocations) does not finish
