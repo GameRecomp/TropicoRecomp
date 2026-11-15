@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: MIT
+# Tropico 2: Pirate Cove, GOG release (installer setup_tropico2_2.1.0.14.exe).
+
+[game]
+id = "tropico2"
+title = "Tropico 2: Pirate Cove"
+release = "GOG 2.1.0.14"
+exe = "Tropico2.exe"
+sha256 = "623f22f0766967ae1c6ac793bef671bd89fa33620eacfeb8a68dde3fbe120ec4"
+size = 5959680
+image_base = 0x00400000
+
+[ingest]
+required = [
+    "binkw32.dll",
+    "Mss32.dll",
+    "Data/data.{}",
+    "Data/font.{}",
+]
+
+[discover]
+seeds = []
+data = []
+noreturn = []

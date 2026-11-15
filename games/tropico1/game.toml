@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: MIT
+# Tropico, GOG release (installer setup_tropico_2.1.0.14.exe).
+# The executable is the last retail patch with the Paradise Island expansion.
+
+[game]
+id = "tropico1"
+title = "Tropico"
+release = "GOG 2.1.0.14"
+exe = "Tropico.EXE"
+sha256 = "402432c20b0f664a72dba997dff4bdb10eaaa0dc8ae16ab96debfddf18890432"
+size = 1916928
+image_base = 0x00400000
+
+[ingest]
+required = [
+    "binkw32.dll",
+    "Mss32.dll",
+    "data/px.PK2",
+    "data/px2.PK2",
+    "data/px3.PK2",
+    "data/px4.PK2",
+    "data2/TROPICO.CFG",
+    "data2/Tropico.lng",
+    "data2/bldgtype.dat",
+    "data2/unittype.dat",
+]
+
+[discover]
+seeds = []
+data = []
+noreturn = []
+
+# The statically linked CRT's memcpy and memmove copy a short tail with
+# `sub ecx, 4; jb tail; ...; tail: jmp [ecx*4 + table]`, indexing the table
+# with -4..-1. Nothing bounds that for the analysis.
+tables = [
+    { jump = 0x0054d814, first = -4, count = 4 },
+    { jump = 0x005507a4, first = -4, count = 4 },
+]

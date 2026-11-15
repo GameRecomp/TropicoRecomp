@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "rc-pe"
+description = "PE32 parsing: headers, sections, imports, relocations; and a writer for test fixtures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[lints]
+workspace = true

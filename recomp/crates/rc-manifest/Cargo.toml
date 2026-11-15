@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "rc-manifest"
+description = "Per-game manifests (game.toml): identity of one exact executable and what the tools cannot derive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true
