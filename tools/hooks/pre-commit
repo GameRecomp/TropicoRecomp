@@ -64,10 +64,17 @@ git diff --cached --name-only --diff-filter=ACMR -z |
 
     # Personal data in added lines: home-directory paths and the login name
     # of whoever is committing.
+    # The login name counts only when it is a person's: in CI, and for the
+    # generic accounts of runners and containers, it is not, and words such
+    # as "runner" are ordinary text. It must match as a whole word.
     user=$(id -un 2>/dev/null)
+    case "$user" in
+        runner | root | build | builder | ci | user | ubuntu | admin | vagrant | docker | jenkins | gitlab-runner) user= ;;
+    esac
+    [ -n "${CI:-}" ] && user=
     pattern='/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/|[A-Za-z]:\\Users\\[A-Za-z0-9._-]+'
     if [ -n "$user" ] && [ ${#user} -ge 3 ]; then
-        pattern="$pattern|$user"
+        pattern="$pattern|(^|[^A-Za-z0-9_])$user([^A-Za-z0-9_]|\$)"
     fi
     hits=$(git diff --cached -U0 --diff-filter=ACMR |
            grep -E '^\+' | grep -vE '^\+\+\+ ' |

@@ -15,10 +15,17 @@ then
 fi
 
 # Reject personal data: home-directory paths and the committer's login name.
+# The login name counts only when it is a person's: in CI, and for the
+# generic accounts of runners and containers, it is not, and words such
+# as "runner" are ordinary text. It must match as a whole word.
 user=$(id -un 2>/dev/null)
+case "$user" in
+    runner | root | build | builder | ci | user | ubuntu | admin | vagrant | docker | jenkins | gitlab-runner) user= ;;
+esac
+[ -n "${CI:-}" ] && user=
 pattern='/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/|[A-Za-z]:\\Users\\[A-Za-z0-9._-]+'
 if [ -n "$user" ] && [ ${#user} -ge 3 ]; then
-    pattern="$pattern|$user"
+    pattern="$pattern|(^|[^A-Za-z0-9_])$user([^A-Za-z0-9_]|\$)"
 fi
 if grep -v '^#' "$msg_file" | grep -qiE "$pattern"; then
     echo "commit-msg: the message contains a home-directory path or a login name." >&2
