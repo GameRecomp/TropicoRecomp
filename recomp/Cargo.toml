@@ -13,6 +13,9 @@ rust-version = "1.88"
 rc-pe = { path = "crates/rc-pe" }
 rc-manifest = { path = "crates/rc-manifest" }
 rc-discover = { path = "crates/rc-discover" }
+rc-ir = { path = "crates/rc-ir" }
+rc-x86 = { path = "crates/rc-x86" }
+rc-emit-c = { path = "crates/rc-emit-c" }
 iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "code_asm", "instr_info"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

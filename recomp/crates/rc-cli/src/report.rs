@@ -140,3 +140,41 @@ pub fn show(image: &Image, map: &CodeMap, addr: u32, count: usize) {
     }
     println!();
 }
+
+/// What the lifter could not model, by reason.
+pub fn lift(functions: &[rc_ir::Function]) {
+    fn traps(s: &[rc_ir::Stmt], out: &mut BTreeMap<String, u32>) {
+        for s in s {
+            match s {
+                rc_ir::Stmt::Trap(why) => {
+                    // "x87 fld at 0x..." -> "x87 fld"
+                    let k = why.split(" at ").next().unwrap_or(why).to_string();
+                    *out.entry(k).or_default() += 1;
+                }
+                rc_ir::Stmt::If(_, b) | rc_ir::Stmt::Loop(b) => traps(b, out),
+                _ => {}
+            }
+        }
+    }
+    let mut by = BTreeMap::new();
+    let mut insns = 0;
+    for f in functions {
+        insns += f.insns.len();
+        for i in &f.insns {
+            traps(&i.stmts, &mut by);
+        }
+    }
+    let expected = ["int3", "divide by zero", "divide overflow", "hlt", "ud2"];
+    let unmodelled: u32 = by
+        .iter()
+        .filter(|(k, _)| !expected.contains(&k.as_str()))
+        .map(|(_, v)| v)
+        .sum();
+    println!("lifted {} functions, {insns} instructions", functions.len());
+    println!("instructions not modelled: {unmodelled}");
+    let mut v: Vec<_> = by.into_iter().collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    for (k, n) in v.iter().take(40) {
+        println!("  {k:<28} {n:>7}");
+    }
+}

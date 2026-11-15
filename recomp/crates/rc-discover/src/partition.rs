@@ -158,6 +158,7 @@ pub(crate) fn partition(ex: &Explored, noreturn: &BTreeSet<u32>) -> Partition {
             extent,
             returns: !nr.contains(&e),
             tail_calls: b.tails.iter().copied().collect(),
+            body: b.insns.clone(),
         });
     }
     for (&a, &n) in &owners {

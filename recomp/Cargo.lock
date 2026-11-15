@@ -250,10 +250,25 @@ dependencies = [
  "clap",
  "iced-x86",
  "rc-discover",
+ "rc-emit-c",
+ "rc-ir",
  "rc-manifest",
  "rc-pe",
+ "rc-x86",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "rc-difftest"
+version = "0.1.0"
+dependencies = [
+ "iced-x86",
+ "rc-discover",
+ "rc-emit-c",
+ "rc-ir",
+ "rc-pe",
+ "rc-x86",
 ]
 
 [[package]]
@@ -265,6 +280,17 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "rc-emit-c"
+version = "0.1.0"
+dependencies = [
+ "rc-ir",
+]
+
+[[package]]
+name = "rc-ir"
+version = "0.1.0"
 
 [[package]]
 name = "rc-manifest"
@@ -280,6 +306,16 @@ name = "rc-pe"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "rc-x86"
+version = "0.1.0"
+dependencies = [
+ "iced-x86",
+ "rc-discover",
+ "rc-ir",
+ "rc-pe",
 ]
 
 [[package]]

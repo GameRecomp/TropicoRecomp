@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "rc-emit-c"
+description = "IR to C: one C function per guest function, and the generated tree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rc-ir.workspace = true
+
+[lints]
+workspace = true

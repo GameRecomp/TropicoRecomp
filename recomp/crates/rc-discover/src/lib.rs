@@ -176,6 +176,9 @@ pub struct Function {
     pub returns: bool,
     /// Entries this function jumps to (tail calls), ascending.
     pub tail_calls: Vec<u32>,
+    /// Addresses of the instructions owned by this function, ascending.
+    #[serde(skip)]
+    pub body: Vec<u32>,
 }
 
 /// Counts for the report.

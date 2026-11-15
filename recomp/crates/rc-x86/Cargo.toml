@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "rc-x86"
+description = "x86 instruction semantics: decoded instructions to IR, functions from the code map"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rc-ir.workspace = true
+rc-pe.workspace = true
+rc-discover.workspace = true
+iced-x86 = { workspace = true, features = ["intel"] }
+
+[lints]
+workspace = true

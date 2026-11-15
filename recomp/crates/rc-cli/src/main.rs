@@ -52,6 +52,18 @@ enum Cmd {
         #[arg(long, value_name = "ADDR:COUNT")]
         show: Vec<String>,
     },
+    /// Discover and lift the whole executable to C. Writes generated/<id>/c.
+    Lift {
+        game_dir: PathBuf,
+        #[command(flatten)]
+        game: GameArg,
+        /// Output directory (default: generated/<id>/c in the repository).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Put each guest instruction as a comment above its C.
+        #[arg(long)]
+        comments: bool,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -75,6 +87,12 @@ fn main() -> ExitCode {
             out,
             show,
         } => discover(&game_dir, &game, out.as_deref(), &show),
+        Cmd::Lift {
+            game_dir,
+            game,
+            out,
+            comments,
+        } => lift(&game_dir, &game, out.as_deref(), comments),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,
@@ -259,7 +277,11 @@ fn info(exe: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn discover(game_dir: &Path, arg: &GameArg, out: Option<&Path>, show: &[String]) -> Result<()> {
+/// Ingest, parse and discover.
+fn analyse(
+    game_dir: &Path,
+    arg: &GameArg,
+) -> Result<(Manifest, PeFile, Image, rc_discover::CodeMap)> {
     let (m, exe) = ingest(game_dir, arg)?;
     let pe = PeFile::parse(&exe).map_err(|e| e.to_string())?;
     let image = Image::new(&pe);
@@ -276,6 +298,11 @@ fn discover(game_dir: &Path, arg: &GameArg, out: Option<&Path>, show: &[String])
         tables: &tables,
     };
     let map = rc_discover::discover(&pe, &image, &opts);
+    Ok((m, pe, image, map))
+}
+
+fn discover(game_dir: &Path, arg: &GameArg, out: Option<&Path>, show: &[String]) -> Result<()> {
+    let (m, _pe, image, map) = analyse(game_dir, arg)?;
     if !show.is_empty() {
         for spec in show {
             let (a, n) = spec.split_once(':').unwrap_or((spec, "16"));
@@ -297,5 +324,53 @@ fn discover(game_dir: &Path, arg: &GameArg, out: Option<&Path>, show: &[String])
     let json = serde_json::to_string(&map).map_err(|e| e.to_string())?;
     fs::write(&path, json).map_err(|e| format!("{}: {e}", path.display()))?;
     eprintln!("wrote generated/{}/codemap.json", m.game.id);
+    Ok(())
+}
+
+fn lift(game_dir: &Path, arg: &GameArg, out: Option<&Path>, comments: bool) -> Result<()> {
+    let (m, _pe, image, map) = analyse(game_dir, arg)?;
+    let functions: Vec<rc_ir::Function> = map
+        .functions
+        .iter()
+        .map(|f| rc_x86::lift_function(&image, &map, f))
+        .collect();
+    report::lift(&functions);
+    let names = rc_emit_c::Entries {
+        prefix: "f_".into(),
+        entries: map.functions.iter().map(|f| f.addr).collect(),
+    };
+    let tree = rc_emit_c::program(
+        &names,
+        &functions,
+        rc_emit_c::Options {
+            comments,
+            flags_at_return: false,
+        },
+    );
+    let out = match out {
+        Some(o) => o.to_path_buf(),
+        None => repo_root()?.join("generated").join(&m.game.id).join("c"),
+    };
+    // Replace the tree: stale files from an earlier run would be compiled.
+    if out.is_dir() {
+        for e in fs::read_dir(&out).map_err(|e| e.to_string())?.flatten() {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "c" || x == "h") {
+                fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+            }
+        }
+    }
+    fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let mut bytes = 0;
+    for (name, src) in &tree {
+        bytes += src.len();
+        fs::write(out.join(name), src).map_err(|e| format!("{name}: {e}"))?;
+    }
+    eprintln!(
+        "wrote {} files, {:.1} MB of C, to generated/{}/c",
+        tree.len(),
+        bytes as f64 / 1e6,
+        m.game.id
+    );
     Ok(())
 }

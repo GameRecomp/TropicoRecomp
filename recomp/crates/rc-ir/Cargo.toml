@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "rc-ir"
+description = "The lifter's intermediate representation, shared by every back end"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
