@@ -85,27 +85,49 @@ import table, the relocation list, the resources.
 
 **Discover.** Produce the *code map*: every function entry, its basic
 blocks, every jump table, and every address that is taken as a pointer.
-Sources, in order of trust:
+Sources of function entries, in order of trust:
 
-1. The entry point.
-2. The incremental-link thunk table (Tropico 1): each thunk is a function
-   and names another.
-3. Relocations. A fixup inside an instruction marks an absolute operand; a
-   fixup in data that points into `.text` is a code pointer (function
-   pointer, vtable slot or jump-table entry).
-4. Recursive descent from all of the above, following direct `call` and
-   `jmp` targets (tail calls leave functions that no `call` names).
-5. Jump tables: a `jmp [reg*4 + T]` whose table `T` holds relocated entries;
-   the bound comes from the preceding compare, and the relocation list
-   confirms where the table ends.
-6. Overrides from the manifest: extra seeds, forced table bounds, regions
-   that are data, functions that do not return.
+1. The entry point and manifest seeds.
+2. Incremental-link thunk tables (runs of `jmp rel32`): each thunk and its
+   target.
+3. Relocations in data that point into code: function pointers, vtable
+   slots, exception-handling tables.
+4. Relocated immediate operands that point into code (`push offset f`).
+5. Direct `call` targets, found by recursive descent.
+6. Cross-function jumps: an address where one function's code jumps into
+   another function's body becomes an entry of its own (hand-written CRT
+   assembly does this). A jump to an entry is a tail call.
+7. Gaps: whatever is left between known code is tried as a function and
+   kept only if it decodes cleanly: no invalid bytes, no overlap with known
+   code, never falling into the middle of another function, and, in an
+   image with relocations, every relocation inside an instruction exactly
+   on its 32-bit operand. Rejected gaps are recorded with the reason.
 
-Discovery ends with a coverage report: bytes of `.text` classified as code,
-padding, thunk, jump table, or unknown. "Unknown" should approach zero, and
-every unknown byte range is listed. For an executable without relocations
-(Tropico 2) steps 2 and 3 are replaced by operand and data scanning and by
-RTTI-located vtables, with lower trust and more overrides.
+Jump tables (`jmp [reg*4 + T]`) are bounded by what the descent knows about
+the index register along the path: a guarding `cmp` and the branch after it
+(`ja` allows the compared value, `jb` one less), `and reg, imm`, copies and
+`lea`/`add` offsets between registers, `neg` (negative indices), and the
+byte table of a two-level switch. The relocation list confirms each entry,
+and entries before the first relocated one (tables used from index 1) are
+skipped. The state at a table jump carries over to its targets. Tables the
+analysis cannot bound are given in the manifest.
+
+Exploration first assumes every call returns, then computes which
+functions cannot return (optimistically, as a fixed point over tail calls)
+and explores again without falling through calls to them, until neither
+the no-return set nor the cross-jump entries change.
+
+Discovery ends with a coverage report: every byte of each code section is
+code, padding (`int3`, `nop`, do-nothing alignment instructions), a jump or
+index table, a pointer table, valid but unreached code, or unknown, and
+every unknown range is listed. A relocation report shows where relocations
+sit and what they point at. For an executable without relocations
+(Tropico 2) the relocation-based sources and checks are missing; operand
+and data scanning and RTTI-located vtables will have to replace them, with
+lower trust and more overrides.
+
+`recomp discover --show ADDR:COUNT` prints our decoding at an address to
+the terminal, for investigating a report.
 
 **Lift.** Decode each instruction with `iced-x86` and translate it to IR
 operations over a small typed value language: 8/16/32/64-bit integers,
@@ -199,8 +221,12 @@ sha256 = "402432c2…"
 image_base = 0x00400000
 
 [discover]
-seeds = "seeds.txt"            # extra function entries, one address per line
-overrides = "overrides.toml"   # table bounds, data regions, noreturn
+seeds = []                     # extra function entries
+data = []                      # [start, end) ranges of data inside code
+noreturn = []                  # functions that never return
+tables = [                     # jump tables the analysis cannot bound
+    { jump = 0x0054d814, first = -4, count = 4 },
+]
 
 [lift]
 exact_x87 = []                 # function addresses

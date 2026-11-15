@@ -1,9 +1,10 @@
 # Workflows
 
-How the recurring jobs are done. The `recomp` commands and the helper
-scripts (`tools/run-scenario`, `tools/audit`) are the planned interface (see
-[PLAN.md](PLAN.md)); they do not exist until the milestone that introduces
-them. The git hooks and ignore rules exist now.
+How the recurring jobs are done. What exists now: the git hooks, the
+ignore rules, `tools/audit`, and `recomp info`, `recomp ingest` and
+`recomp discover`. The rest (`recomp lift`, `recomp build`,
+`tools/run-scenario`) is the planned interface (see [PLAN.md](PLAN.md)) and
+arrives with the milestone that introduces it.
 
 ## 0. Set up a working copy
 
@@ -11,9 +12,19 @@ them. The git hooks and ignore rules exist now.
 git config core.hooksPath tools/hooks     # once per clone; enables the guardrails
 ```
 
-Needed later: a Rust toolchain with the `wasm32-unknown-unknown` target, a C
-compiler, CMake, Ninja, SDL3 development files, and `innoextract` for GOG
-installers.
+Needed: a Rust toolchain (1.88 or later) with the `wasm32-unknown-unknown`
+target, a C compiler, CMake 3.25+, Ninja, and `innoextract` for GOG
+installers. Later: SDL3, SDL3_ttf and SDL3_mixer development files.
+
+```sh
+cargo build --release --manifest-path recomp/Cargo.toml    # the recomp tool
+cmake --preset debug && cmake --build --preset debug       # the C runtime
+ctest --preset debug
+tools/audit                                                # repository rules
+```
+
+The tool is `recomp/target/release/recomp`; the examples below call it
+`recomp`.
 
 ## 1. Ingest a game copy
 
@@ -38,8 +49,8 @@ orig/
 ## 2. Recompile and build
 
 ```sh
-recomp info      --game tropico1                 # what the executable is
-recomp discover  --game tropico1                 # code map + coverage report
+recomp info      orig/t1/app/Tropico.EXE         # what the executable is
+recomp discover  orig/t1/app --game tropico1     # code map + coverage report
 recomp lift      --game tropico1 --out generated/tropico1
 cmake --preset release -DGAME=tropico1 && cmake --build --preset release
 build/release/tropico1 --game-dir orig/t1/app

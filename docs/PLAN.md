@@ -35,6 +35,19 @@ almost no x87 and no SIMD. Tropico 2 is 3.5 times larger, has no
 relocations and probably needs Direct3D 7. Everything generic built for the
 first game carries over to the second.
 
+## Progress
+
+| Milestone | State |
+|---|---|
+| M0 Foundation | Done, except that CI has not run yet (nothing pushed) |
+| M1 Read the executable | Done: `recomp info` reproduces the measured facts |
+| M2 Find the code | Done for Tropico 1: all of `.text` classified, every relocation accounted for |
+| M3 Lifter, integer core | Next |
+
+Known issue: `recomp discover` on Tropico 2 (no relocations) does not finish
+in reasonable time; the gap pass has nothing to reject bad decodes with.
+Belongs to T2-1.
+
 ## Milestones
 
 Each milestone has an exit criterion that can be checked. A milestone is not
@@ -56,8 +69,9 @@ is staged; `recomp ingest orig/t1/app` reports the known hash.
 - `rc-pe`: headers, sections, imports (with stdcall argument sizes from
   decorated names), relocations, resources.
 - `recomp info`: a JSON and a human report.
-- Test fixtures: tiny PE files **we build ourselves** from our own C with
-  clang targeting `i686-pc-windows-msvc`. No game bytes in tests.
+- Test fixtures: tiny PE files **we build ourselves**, written by the PE
+  builder in `rc-pe` from code assembled in the test with `iced-x86`. No
+  game bytes in tests, and no Windows linker needed.
 
 *Exit:* `recomp info` reproduces every number in TARGETS.md (or TARGETS.md
 is corrected); fixtures parse; fuzzing the parser finds no panics.

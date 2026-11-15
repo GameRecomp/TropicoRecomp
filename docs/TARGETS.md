@@ -2,10 +2,10 @@
 
 Facts measured on the two executables from the GOG installers
 (`setup_tropico_2.1.0.14.exe`, `setup_tropico2_2.1.0.14.exe`), and what each
-fact means for the recompilation. Measured with `objdump` and `strings` on
-2026-11-15; the instruction counts come from a linear sweep and are
-approximate. Every number here is to be re-derived by our own tools in
-milestone M1 and this file corrected where they differ.
+fact means for the recompilation. First measured with `objdump` and `strings`
+on 2026-11-15, then re-derived with our own tools (`recomp info`,
+`recomp discover`); where the two differed, this file gives our tools'
+numbers.
 
 Only metadata is recorded here: hashes, sizes, addresses, counts and import
 names. No code or text from the games.
@@ -20,7 +20,8 @@ names. No code or text from the games.
 | PE timestamp | 2002-07-19 (the last retail patch, with the expansion) |
 | Linker | 6.0 (Microsoft Visual C++ 6), CRT linked statically |
 | Image base, size | `0x00400000`, `0x243000` |
-| Relocations | **present** (`.reloc`, about 94 KiB of directory, roughly 45,000 fixups) |
+| Entry point | `0x0054E5FA` (the CRT's start-up) |
+| Relocations | **present**: 45,258, all HIGHLOW, in a `0x16DF4`-byte directory |
 | Packing or DRM | none visible: plain sections, normal import table |
 
 | Section | VA | Size |
@@ -50,17 +51,43 @@ network), `WINMM`, `DSOUND`, `DINPUT`, `OLE32`.
 
 ### Code shape
 
-- **Incremental-link thunk table.** `.text` starts with a table of 5-byte
-  `jmp` thunks from `0x00401005` to about `0x00404AA0`, roughly 3,000 entries,
-  and the section carries large `int3` padding (about 314,000 bytes, 20% of
-  the section). This is what an incrementally linked MSVC build looks like.
-  Each thunk names the start of one function.
-- About 375,000 instructions outside the padding.
-- x87: about 17,600 instructions (under 5%). MMX and SSE: a handful of
-  decodings, probably data or CPU detection. No hand-written SIMD renderer.
-- About 3,200 indirect calls and about 600 jump tables (`jmp [reg*4+table]`).
+- **Incremental-link thunk table.** `.text` starts with a table of 1,500
+  five-byte `jmp` thunks at `0x00401005`, and the section carries large
+  `int3` padding (314,367 bytes, 20% of the section). This is what an
+  incrementally linked MSVC build looks like. Each thunk names the start of
+  one function.
+- x87: about 17,600 instructions (under 5%, from a linear sweep). MMX and
+  SSE: a handful of decodings, probably data or CPU detection. No
+  hand-written SIMD renderer.
 - 44 uses of the `fs:` segment (structured exception handling frames).
 - No RTTI class names found.
+
+What `recomp discover` finds (2026-11-15):
+
+| | Count |
+|---|---|
+| Functions | 4,814, of which 1,510 thunks and 187 import thunks (`jmp [slot]`); 9 never return |
+| Instructions | 359,672 |
+| Jump tables | 609, of which 153 two-level (a byte table selects the entry) |
+| Indirect calls / calls through the import table / other indirect jumps | 2,745 / 445 / 5 |
+| Function entries by source | thunk 1,500, thunk target 1,500, direct call 968, gap 559, pointer in data 212, relocated operand 39, cross-function jump 35, entry point 1 |
+
+All 1,550,184 bytes of `.text` are classified: code 76.2%, `int3` padding
+20.3%, `nop` and do-nothing alignment instructions 1.3%, jump and index
+tables 2.2%, and 13 bytes of valid but unreached code. Every relocation
+inside `.text` sits on an instruction operand or a jump-table entry, and
+every relocation pointing into `.text` lands on a function entry, a jump
+target, a table, or the base of an indexed operand. The whole run takes
+under two seconds.
+
+The 559 "gap" functions are code nothing visibly refers to (probably dead
+code the linker kept). They are lifted anyway; it costs little and protects
+against a reference discovery missed.
+
+The statically linked CRT has hand-written assembly that analysis has to
+treat specially: `memcpy` and `memmove` index jump tables with negative
+values (two of them need a manifest override, `games/tropico1/game.toml`),
+and the x87 helpers jump into each other's middle.
 
 ### Renderers
 
@@ -92,7 +119,7 @@ case-insensitive and accept both slash directions.
 | Fact | Consequence |
 |---|---|
 | Relocations present | Every absolute address in code and data is known exactly. The hardest problem of x86 static recompilation, telling a pointer from a number, is solved for this binary. Function pointers in data and jump tables are found from fixups, not guessed. |
-| Thunk table | A near-complete list of function entry points for free. Cross-checking it against recursive descent measures discovery quality. Indirect calls through thunk addresses must be dispatchable, so thunks are functions too. |
+| Thunk table | 1,500 function entry points for free. Indirect calls through thunk addresses must be dispatchable, so thunks are functions too. |
 | No `CreateThread` | The game is single-threaded. No guest thread scheduler, no atomics, and the WebAssembly build needs no shared memory. (Miles and Bink ran their own threads inside their DLLs; our replacements own that.) |
 | Five import DLLs, about 190 functions | A small HLE surface. No registry, network or COM activation. |
 | DirectDraw software path | A first renderer is a locked 2D surface copied to an SDL3 texture. No 3D API is needed to reach gameplay. |
