@@ -42,7 +42,8 @@ first game carries over to the second.
 | M0 Foundation | Done, except that CI has not run yet (nothing pushed) |
 | M1 Read the executable | Done: `recomp info` reproduces the measured facts |
 | M2 Find the code | Done for Tropico 1: all of `.text` classified, every relocation accounted for |
-| M3 Lifter, integer core | Next |
+| M3 Lifter, integer core | Done: all 196 integer instruction forms the game uses are lifted and agree with the real CPU; fixtures agree; lifting is deterministic |
+| M4 Lift the whole game | Next: x87 (17,474 instructions still trap), size of the generated C |
 
 Known issue: `recomp discover` on Tropico 2 (no relocations) does not finish
 in reasonable time; the gap pass has nothing to reject bad decodes with.
@@ -93,11 +94,10 @@ entry, a jump-table target or a listed exception.
 - `rc-ir`, `rc-x86` for integer instructions, flags, string instructions,
   calls, jump tables; `rc-emit-c`; the minimal `runtime/` (CPU, memory,
   loader, dispatch, traps).
-- `rc-difftest`: run instruction sequences on a reference CPU and as lifted
-  C; compare registers, flags and memory. Hand-written cases per instruction
-  and a random generator.
-- Fixture programs (our own C compiled to PE32) run end to end as lifted
-  code with stubbed imports.
+- `rc-difftest`: run instruction sequences on a reference CPU (the real
+  one in 32-bit mode) and as lifted C; compare registers, flags and memory.
+  Every modelled instruction form, from random states.
+- Fixture programs (assembled in the test) run end to end as lifted code.
 
 *Exit:* difftests pass for every integer instruction form that occurs in
 `Tropico.EXE` (the lifter reports the list); fixtures produce the same

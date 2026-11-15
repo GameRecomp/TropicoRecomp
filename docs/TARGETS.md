@@ -80,6 +80,12 @@ every relocation pointing into `.text` lands on a function entry, a jump
 target, a table, or the base of an indexed operand. The whole run takes
 under two seconds.
 
+What `recomp lift` makes of it (2026-11-15): all 359,672 instructions
+lift; 17,474 of them trap because they are x87 (milestone M4), plus 16
+`int` instructions. The generated C is 108.8 MB in 23 files and compiles
+with clang `-O1` in 23 s on 16 cores (3 min 24 s of CPU), without
+warnings.
+
 The 559 "gap" functions are code nothing visibly refers to (probably dead
 code the linker kept). They are lifted anyway; it costs little and protects
 against a reference discovery missed.

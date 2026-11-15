@@ -36,15 +36,15 @@ recomp/                 Rust workspace: the recompiler
     rc-pe/              PE32 parsing: headers, sections, imports, relocations, resources
     rc-discover/        function and jump-table discovery, code map
     rc-x86/             decoding (iced-x86) and instruction semantics → IR
-    rc-ir/              the IR, CFG, per-function container
-    rc-analysis/        flag liveness, x87 stack depth, stack deltas, call contracts
+    rc-ir/              the IR: statements, expressions, terminators
+    rc-analysis/        x87 stack depth, stack deltas, call contracts (later)
     rc-emit-c/          IR → C
     rc-emit-wasm/       IR → WebAssembly module (later)
     rc-manifest/        game.toml and override files
     rc-report/          JSON reports
     rc-cli/             the `recomp` command
     rc-web/             wasm-bindgen front end for the browser (later)
-    rc-difftest/        differential tests against a reference CPU (dev only)
+    rc-difftest/        differential tests against the real CPU (dev only)
 runtime/                C: CPU state, guest memory, PE image loading, dispatch, traps
 hle/                    C: one directory per reimplemented DLL
   kernel32/ user32/ gdi32/ ddraw/ mss32/ binkw32/
@@ -160,37 +160,78 @@ and profiling.
 ### Generated-code contract
 
 ```c
-/* generated/tropico1/b_0045.c */
-void f_00451230(Cpu *c);            /* one per guest function, named by address */
+/* generated/tropico1/c/code_0045.c: the functions in 0x00450000..0x0045ffff */
+void f_00451230(rc_cpu *c);         /* one per guest function, named by address */
 ```
 
-- **CPU state** is a struct passed by pointer: eight 32-bit registers, the
-  flags, the x87 stack with its control and status words, and `eip` for
-  diagnostics. Passing it explicitly keeps the code re-entrant, which window
-  procedures and other callbacks from host to guest need.
-- **Guest memory** is reached only through accessors (`ld32(c, a)`,
-  `st8(c, a, v)`), which add the arena base and use `memcpy` for unaligned
-  access. The accessors are the one place to change for a different memory
-  model, bounds checking in debug builds, or a write watch.
+The IR (`rc-ir`) sits between the semantics and the emitter: per guest
+instruction a list of statements over fixed-width expressions (registers
+and their parts, flags as 0/1 values, loads, stores, `If`, `Loop` and
+`BreakIf` for `rep` string instructions, traps) and one terminator (next,
+jump, branch, call, indirect call, return, indirect jump, jump table,
+stop). Nothing in it is specific to C.
+
+- **CPU state** is `rc_cpu` (`runtime/include/rc/cpu.h`), passed by
+  pointer: eight 32-bit registers, the six arithmetic flags and DF one byte
+  each, the x87 state, the `fs` base and `eip` for diagnostics. Passing it
+  explicitly keeps the code re-entrant, which window procedures and other
+  callbacks from host to guest need.
+- **Inside a function the registers and arithmetic flags are C locals**,
+  loaded from `c` at entry. The compiler keeps them in host registers and
+  removes flag computations nobody reads, which is the flag-liveness
+  analysis done for free. Registers go back to `c` before every call and
+  return; flags go back only at tail transfers to other functions and
+  before traps, because compiled code does not pass flags through calls and
+  returns. DF stays in `c`.
+- **Guest memory** is reached only through `rc_ld32m(m, a)`,
+  `rc_st8m(m, a, v)` and friends (`rc/lifted.h`), where `m` is a local copy
+  of the arena base, so that the compiler need not reload a global after
+  every store. They use `memcpy` for unaligned access. They are the one
+  place to change for another memory model, bounds checks or write watches.
 - **The guest stack lives in guest memory.** `push`, `pop`, `call` and `ret`
   really move `esp` and really store values, return addresses included.
   This is what makes arbitrary compiler output work: arguments read through
   `ebp`, structures on the stack, `alloca`, mixed calling conventions,
   functions that read their return address.
-- **Direct calls** are C calls: `f_00451230(c)`. The callee's `ret` pops the
-  return address and the C function returns.
-- **Indirect calls and jumps** go through `dispatch(c, target)`: a table
-  indexed by guest address gives the C function. A target that is not a
-  known function entry is a **fatal error that reports the address, the call
-  site and a guest backtrace**, and writes the address to a seeds file ready
-  to be added to the manifest. There is no slow path.
-- **Imports** are addresses in a reserved range. Calling one dispatches to
-  an HLE function that reads its arguments from the guest stack and pops
-  them as the calling convention requires.
-- **Jump tables** become C `switch` statements over the known cases.
-- **Naming**: `f_<address>` always. Human names from the manifest appear as
-  comments and in a separate symbols file, never in the function's linkage
-  name, so renaming something never changes generated code.
+- **Direct calls** are C calls: push the return address, store the
+  registers, `f_00451230(c)`, reload them. The callee's `ret` adds 4 (plus
+  its operand) to `esp` and returns. The return address is not checked.
+- **Jumps** inside the function are `goto`; a jump or fall-through to
+  another function's entry is a tail call (`f_X(c); return;`).
+- **Indirect calls and jumps** go through `rc_dispatch(c, target)`: a
+  sorted table from guest address to C function, generated with the code
+  (`dispatch.c`). A target that is not a lifted function and not an import
+  is a **fatal error naming the address**; the plan is to also record it
+  in a seeds file ready for the manifest. There is no slow path.
+- **Imports** are calls through import-table slots, i.e. indirect calls
+  to whatever the loader put in the slot: reserved addresses that
+  `rc_dispatch` resolves to HLE functions (`rc_set_import_resolver`).
+- **Jump tables** read the target from the table in guest memory, exactly
+  as the instruction does, then `switch` over the known targets.
+- **Traps** (`rc_trap`) name the reason and address: unmodelled
+  instructions, `int3`, divide errors, transfers to unknown addresses.
+- **Naming**: `f_<address>` always. Human names from the manifest will
+  appear as comments and in a separate symbols file, never in the
+  function's linkage name, so renaming something never changes generated
+  code.
+- **Output**: `funcs.h` (declarations), `code_XXXX.c` (one file per 64 KiB
+  of guest addresses), `dispatch.c`. Deterministic: two runs give
+  identical bytes.
+
+### Testing the lifter
+
+`rc-difftest` runs lifted code against the real CPU. Every iced
+instruction code the lifter models is instantiated (operands chosen at
+random, memory operands as absolute addresses inside a 4 KiB window), plus
+all string instructions with their prefixes and a set of whole-program
+fixtures (loops, recursion, switches through jump and byte tables,
+frames, indirect and stdcall calls, flags through the stack). Each runs
+from random states on a freestanding 32-bit program
+(`tools/difftest/ref32.c`) and as lifted C (`tools/difftest/harness.c`);
+registers, defined flags and the memory window must agree. Flags x86
+leaves undefined (from iced's tables, plus OF after shifts by more than
+one) are masked. With `--coverage EXE` it also checks that every modelled
+instruction form the executable uses is among those tested.
 
 ### Floating point
 

@@ -1,8 +1,9 @@
 # Workflows
 
 How the recurring jobs are done. What exists now: the git hooks, the
-ignore rules, `tools/audit`, and `recomp info`, `recomp ingest` and
-`recomp discover`. The rest (`recomp lift`, `recomp build`,
+ignore rules, `tools/audit`, and `recomp info`, `recomp ingest`,
+`recomp discover`, `recomp lift` and the difftest. The rest
+(`recomp build`,
 `tools/run-scenario`) is the planned interface (see [PLAN.md](PLAN.md)) and
 arrives with the milestone that introduces it.
 
@@ -51,7 +52,7 @@ orig/
 ```sh
 recomp info      orig/t1/app/Tropico.EXE         # what the executable is
 recomp discover  orig/t1/app --game tropico1     # code map + coverage report
-recomp lift      --game tropico1 --out generated/tropico1
+recomp lift      orig/t1/app --game tropico1     # C into generated/tropico1/c
 cmake --preset release -DGAME=tropico1 && cmake --build --preset release
 build/release/tropico1 --game-dir orig/t1/app
 ```
@@ -92,12 +93,23 @@ logs once when called.
 
 ## 4. Changing the lifter
 
+```sh
+recomp/target/release/difftest                       # all forms, 12 states each
+recomp/target/release/difftest --only shld --states 200
+recomp/target/release/difftest --coverage orig/t1/app/Tropico.EXE
+```
+
+The difftest needs an x86 Linux host that runs 32-bit programs, and clang.
+It works in `build/difftest/`.
+
 1. Write or extend the difftest cases first; watch them fail.
-2. Make the change in `rc-x86`, `rc-analysis` or the emitter.
-3. `cargo test`, then the difftests.
-4. Regenerate the whole game. Compare `report.json` with the previous run:
-   the function count must not change unexpectedly and traps must not
-   increase. Regenerate a second time and confirm identical bytes.
+2. Make the change in `rc-x86` or the emitter.
+3. `cargo test`, then the difftest, then the difftest with `--coverage`
+   on the game: every modelled form the game uses must be tested.
+4. Regenerate the whole game (`recomp lift`). Compare its report with the
+   previous run: the function count must not change unexpectedly and
+   unmodelled instructions must not increase. Regenerate a second time and
+   confirm identical bytes.
 5. For an optimisation: run the benchmark scenario before and after, and
    keep the numbers in the commit message. An optimisation without a
    measured gain is reverted.
