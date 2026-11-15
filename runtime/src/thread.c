@@ -1,10 +1,40 @@
 /* SPDX-License-Identifier: MIT */
-/* Cooperative guest threads on host fibers; see rc/thread.h. */
-#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
-#define _XOPEN_SOURCE 700
-#if defined(__APPLE__)
-#define _DARWIN_C_SOURCE
+/*
+ * Cooperative guest threads; see rc/thread.h. One of three host backends
+ * carries them, and in each exactly one thread runs at a time:
+ *
+ * - Windows: fibers.
+ * - Linux and other POSIX systems: ucontext.
+ * - macOS (or with RC_THREADS_PTHREAD): one POSIX thread per guest thread,
+ *   handing a baton (a mutex and a condition variable) to the one that is
+ *   to run. macOS has deprecated ucontext.
+ *
+ * Under Emscripten there is none yet, and no thread can be started.
+ */
+#if defined(_WIN32)
+#define BACKEND_FIBERS 1
+#define BACKEND_PTHREAD 0
+#define BACKEND_UCONTEXT 0
+#define BACKEND_NONE 0
+#elif defined(__EMSCRIPTEN__)
+#define BACKEND_FIBERS 0
+#define BACKEND_PTHREAD 0
+#define BACKEND_UCONTEXT 0
+#define BACKEND_NONE 1
+#elif defined(__APPLE__) || defined(RC_THREADS_PTHREAD)
+#define BACKEND_FIBERS 0
+#define BACKEND_PTHREAD 1
+#define BACKEND_UCONTEXT 0
+#define BACKEND_NONE 0
+#else
+#define BACKEND_FIBERS 0
+#define BACKEND_PTHREAD 0
+#define BACKEND_UCONTEXT 1
+#define BACKEND_NONE 0
 #endif
+
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+#define _XOPEN_SOURCE 700
 #endif
 
 #include "rc/thread.h"
@@ -20,20 +50,18 @@
 #include "rc/vm.h"
 #include "rc/x87.h"
 
-#if defined(_WIN32)
+#if BACKEND_FIBERS
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#define HAVE_FIBERS 1
-#elif defined(__EMSCRIPTEN__)
-#define HAVE_FIBERS 0
-#else
+#elif BACKEND_PTHREAD
+#include <pthread.h>
+#elif BACKEND_UCONTEXT
 #include <ucontext.h>
-#define HAVE_FIBERS 1
 #endif
 
 #define THREADS 16
 #define HANDLE_BASE 0x00003000u
-/* Lifted functions keep many locals; give each fiber a generous stack. */
+/* Lifted functions keep many locals; give each thread a generous stack. */
 #define HOST_STACK (16u << 20)
 #define GUEST_STACK_MIN (64u << 10)
 
@@ -46,9 +74,9 @@ typedef struct thread {
     uint32_t start, param;
     uint32_t exit_code;
     uint64_t wake; /* runs again from this time on */
-#if defined(_WIN32)
+#if BACKEND_FIBERS
     void *fiber;
-#elif HAVE_FIBERS
+#elif BACKEND_UCONTEXT
     ucontext_t ctx;
     void *host_stack;
 #endif
@@ -58,6 +86,13 @@ static thread threads[THREADS];
 static uint32_t current;
 static uint32_t nthreads;
 
+#if BACKEND_PTHREAD
+static pthread_mutex_t baton_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t baton_moved = PTHREAD_COND_INITIALIZER;
+/* The thread that may run. */
+static uint32_t baton;
+#endif
+
 void rc_thread_init_main(rc_cpu *c, uint32_t tib)
 {
     threads[0].state = T_RUNNING;
@@ -65,6 +100,9 @@ void rc_thread_init_main(rc_cpu *c, uint32_t tib)
     threads[0].tib = tib;
     current = 0;
     nthreads = 1;
+#if BACKEND_PTHREAD
+    baton = 0;
+#endif
 }
 
 uint32_t rc_thread_id(void) { return current + 1; }
@@ -86,26 +124,47 @@ bool rc_thread_handle(uint32_t h, bool *ended, uint32_t *exit_code)
     return true;
 }
 
+/* ---- the backends: run `next` now ---- */
+
+#if BACKEND_PTHREAD
+/* Hand the baton to `next`; with `wait`, block until it comes back. */
+static void pass_baton(uint32_t next, bool wait)
+{
+    uint32_t me = current;
+    pthread_mutex_lock(&baton_lock);
+    current = next;
+    baton = next;
+    pthread_cond_broadcast(&baton_moved);
+    while (wait && baton != me) {
+        pthread_cond_wait(&baton_moved, &baton_lock);
+    }
+    pthread_mutex_unlock(&baton_lock);
+}
+#endif
+
+/* Run `next`; return when this thread is chosen again. */
 static void switch_to(uint32_t next)
 {
     if (next == current) {
         return;
     }
+#if BACKEND_FIBERS
+    current = next;
+    SwitchToFiber(threads[next].fiber);
+#elif BACKEND_PTHREAD
+    pass_baton(next, true);
+#elif BACKEND_UCONTEXT
     uint32_t prev = current;
     current = next;
-#if defined(_WIN32)
-    (void)prev;
-    SwitchToFiber(threads[next].fiber);
-#elif HAVE_FIBERS
     if (swapcontext(&threads[prev].ctx, &threads[next].ctx) != 0) {
         rc_fatal("cannot switch threads");
     }
 #endif
 }
 
-/* Run the next thread that is due, round-robin from the current one; if
- * none is (the current one sleeps too), wait for the earliest. */
-static void schedule(void)
+/* The next thread that is due, round-robin from the current one; if none
+ * is (the current one sleeps too), wait for the earliest. */
+static uint32_t pick(void)
 {
     for (;;) {
         uint64_t now = rc_ticks_peek_ms();
@@ -116,8 +175,7 @@ static void schedule(void)
                 continue;
             }
             if (threads[i].wake <= now) {
-                switch_to(i);
-                return;
+                return i;
             }
             if (threads[i].wake < earliest) {
                 earliest = threads[i].wake;
@@ -129,6 +187,8 @@ static void schedule(void)
         rc_sleep_ms((uint32_t)(earliest - now));
     }
 }
+
+static void schedule(void) { switch_to(pick()); }
 
 void rc_thread_yield(void)
 {
@@ -165,7 +225,8 @@ void rc_thread_sleep(uint32_t ms)
     schedule();
 }
 
-/* The body of every thread but the main one. */
+/* The body of every thread but the main one. Returns only with the
+ * pthread backend, after handing on the baton. */
 static void thread_main(void)
 {
     thread *t = &threads[current];
@@ -175,21 +236,38 @@ static void thread_main(void)
     if (rc_trace("threads")) {
         rc_log("[thread] %u ended with %#x", current + 1, t->exit_code);
     }
-    schedule();
+    uint32_t next = pick();
+#if BACKEND_PTHREAD
+    pass_baton(next, false);
+#else
+    switch_to(next);
     rc_fatal("an ended thread ran again");
+#endif
 }
 
-#if defined(_WIN32)
+#if BACKEND_FIBERS
 static void CALLBACK fiber_entry(void *p)
 {
     (void)p;
     thread_main();
 }
+#elif BACKEND_PTHREAD
+static void *pthread_entry(void *p)
+{
+    uint32_t me = (uint32_t)(uintptr_t)p;
+    pthread_mutex_lock(&baton_lock);
+    while (baton != me) {
+        pthread_cond_wait(&baton_moved, &baton_lock);
+    }
+    pthread_mutex_unlock(&baton_lock);
+    thread_main();
+    return NULL;
+}
 #endif
 
 uint32_t rc_thread_create(uint32_t start, uint32_t param, uint32_t stack_size, uint32_t *id)
 {
-#if !HAVE_FIBERS
+#if BACKEND_NONE
     (void)start;
     (void)param;
     (void)stack_size;
@@ -235,8 +313,8 @@ uint32_t rc_thread_create(uint32_t start, uint32_t param, uint32_t stack_size, u
     t->param = param;
     t->wake = 0;
 
-    /* The host side: a fiber. */
-#if defined(_WIN32)
+    /* The host side. */
+#if BACKEND_FIBERS
     if (!threads[0].fiber) {
         threads[0].fiber = ConvertThreadToFiber(NULL);
         if (!threads[0].fiber) {
@@ -245,6 +323,19 @@ uint32_t rc_thread_create(uint32_t start, uint32_t param, uint32_t stack_size, u
     }
     t->fiber = CreateFiber(HOST_STACK, fiber_entry, NULL);
     if (!t->fiber) {
+        return 0;
+    }
+#elif BACKEND_PTHREAD
+    pthread_attr_t attr;
+    pthread_t pt;
+    if (pthread_attr_init(&attr) != 0) {
+        return 0;
+    }
+    pthread_attr_setstacksize(&attr, HOST_STACK);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    int err = pthread_create(&pt, &attr, pthread_entry, (void *)(uintptr_t)i);
+    pthread_attr_destroy(&attr);
+    if (err != 0) {
         return 0;
     }
 #else

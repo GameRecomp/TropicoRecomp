@@ -349,7 +349,9 @@ The guest address space as the runtime lays it out:
   generated with the code; unknown targets and traps are fatal with the
   address and the registers.
 - **Threads** (`rc/thread.h`). Guest threads run cooperatively, one at a
-  time, each on a host fiber (`ucontext` on POSIX, fibers on Windows) with
+  time, each on a host fiber (fibers on Windows, `ucontext` on Linux; on
+  macOS, which has deprecated `ucontext`, a POSIX thread per guest thread
+  that runs only while it holds a baton) with
   its own CPU state, guest stack and TIB. A thread gives way only in
   `Sleep`, the message pump and the clock functions, so a run with threads
   replays as exactly as one without. Critical sections need no locking.

@@ -9,6 +9,7 @@ int main(void)
     test_cpu();
     test_x87();
     test_vm();
+    test_thread();
     if (rc_test_failures) {
         fprintf(stderr, "%d check(s) failed\n", rc_test_failures);
         return 1;
