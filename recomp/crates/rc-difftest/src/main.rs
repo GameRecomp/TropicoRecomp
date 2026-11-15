@@ -335,7 +335,7 @@ fn build(root: &Path, work: &Path, c_files: &[PathBuf]) -> Result<(), String> {
     };
     let mut objs = Vec::new();
     let mut sources: Vec<PathBuf> = c_files.to_vec();
-    for s in ["mem.c", "log.c", "dispatch.c"] {
+    for s in ["mem.c", "log.c", "dispatch.c", "x87.c"] {
         sources.push(root.join("runtime/src").join(s));
     }
     sources.push(td.join("harness.c"));
@@ -363,6 +363,7 @@ fn build(root: &Path, work: &Path, c_files: &[PathBuf]) -> Result<(), String> {
     }
     run(Command::new(&cc)
         .args(&objs)
+        .arg("-lm")
         .arg("-o")
         .arg(work.join("harness")))
 }
@@ -407,7 +408,10 @@ fn u32_at(b: &[u8], i: usize) -> u32 {
 fn compare(inst: &Instance, s: &State, r: &[u8], l: &[u8]) -> Option<String> {
     let mut d = String::new();
     for (n, name) in REG_NAMES.iter().enumerate() {
-        let (a, b) = (u32_at(r, n * 4), u32_at(l, n * 4));
+        let (a, b) = (
+            u32_at(r, n * 4) & s.reg_mask[n],
+            u32_at(l, n * 4) & s.reg_mask[n],
+        );
         if a != b {
             let _ = writeln!(
                 d,
@@ -428,11 +432,34 @@ fn compare(inst: &Instance, s: &State, r: &[u8], l: &[u8]) -> Option<String> {
     }
     let slot = (STACK - WINDOW) as usize;
     let mut diffs = 0;
+    let approx = cases::X87_OUT..cases::X87_OUT + 64;
+    if s.approx {
+        for j in 0..8 {
+            let at = 36 + cases::X87_OUT + 8 * j;
+            let x = f64::from_bits(u64::from_le_bytes(
+                r[at..at + 8].try_into().unwrap_or([0; 8]),
+            ));
+            let y = f64::from_bits(u64::from_le_bytes(
+                l[at..at + 8].try_into().unwrap_or([0; 8]),
+            ));
+            let close = (x.is_nan() && y.is_nan())
+                || x == y
+                || (x - y).abs() <= 1e-12 * x.abs().max(y.abs());
+            if !close {
+                let _ = writeln!(d, "  st result {j}: cpu {x:e} lifted {y:e}");
+            }
+        }
+    }
     for i in 0..WINDOW_SIZE {
-        if (slot..slot + 4).contains(&i) {
+        if (slot..slot + 4).contains(&i) || (s.approx && approx.contains(&i)) {
             continue;
         }
-        let (a, b) = (r[36 + i], l[36 + i]);
+        let mask = s
+            .byte_mask
+            .iter()
+            .find(|(o, _)| *o == i)
+            .map_or(0xff, |(_, m)| *m);
+        let (a, b) = (r[36 + i] & mask, l[36 + i] & mask);
         if a != b {
             if diffs < 6 {
                 let _ = writeln!(

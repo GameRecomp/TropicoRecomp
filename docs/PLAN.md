@@ -43,7 +43,8 @@ first game carries over to the second.
 | M1 Read the executable | Done: `recomp info` reproduces the measured facts |
 | M2 Find the code | Done for Tropico 1: all of `.text` classified, every relocation accounted for |
 | M3 Lifter, integer core | Done: all 196 integer instruction forms the game uses are lifted and agree with the real CPU; fixtures agree; lifting is deterministic |
-| M4 Lift the whole game | Next: x87 (17,474 instructions still trap), size of the generated C |
+| M4 Lift the whole game | Done: every instruction lifts (x87 in the fast mode); all 281 instruction forms the game uses agree with the real CPU; 62 MB of C, no warnings |
+| M5 Boot to `WinMain` | Next |
 
 Known issue: `recomp discover` on Tropico 2 (no relocations) does not finish
 in reasonable time; the gap pass has nothing to reject bad decodes with.

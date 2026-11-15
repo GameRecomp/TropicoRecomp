@@ -235,19 +235,31 @@ instruction form the executable uses is among those tested.
 
 ### Floating point
 
-Tropico 1 has little x87 code and no SIMD. The plan is two modes:
+Tropico 1 has about 17,500 x87 instructions (56 different mnemonics) and
+no SIMD. Two modes are planned; the fast one is built:
 
-- **Fast** (default): x87 values are host `double`. The x87 control word is
-  tracked; rounding mode changes are honoured (the usual case is the
-  float-to-integer conversion sequence, which is recognised and emitted as a
-  truncation). MSVC's start-up sets 53-bit precision, under which `double`
-  arithmetic matches x87 results except in rare exponent-range cases.
-- **Exact** (per function, from the manifest): 80-bit values through a
-  software floating-point library, bit for bit.
+- **Fast** (default): the x87 register stack lives in `rc_cpu` as host
+  `double`s, with its top, a tag word (empty or valid) and the condition
+  codes. In the IR an x87 instruction is one `Fpu` statement (load, store,
+  arithmetic, compare, unary and binary operations, stack and control
+  operations), and the emitter turns each into a call of a small inline
+  helper (`runtime/include/rc/x87.h`; the rare ones in `runtime/src/x87.c`).
+  The control word's precision is honoured (24-bit precision rounds each
+  result through `float`), and so is its rounding mode for conversions to
+  integers and `frndint`. Not modelled: 80-bit precision and exponent
+  range, the rounding mode for arithmetic, sticky exception flags, C1, and
+  unmasked exceptions. Windows starts threads with 53-bit precision, under
+  which `double` arithmetic matches the x87 for the operations the game
+  uses, outside extreme exponents.
+- **Exact** (per function, from the manifest; not built yet): 80-bit values
+  through a software floating-point library, bit for bit, for code where a
+  difference matters.
 
-The differential tests decide which functions need exact mode. A game that
-enters a Direct3D mode may run with 24-bit precision; the control-word
-tracking covers that.
+The differential tests run each x87 form on the real FPU from a prepared
+stack and control word and compare the stack, the condition codes and
+memory exactly, except the transcendental functions, whose results are
+compared within 1e-12 relative (the host's `libm` and the x87 differ by an
+ulp).
 
 ### The manifest
 

@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 
 use iced_x86::{
     Code, Decoder, DecoderOptions, Encoder, EncodingKind, FlowControl, Formatter, Instruction,
-    IntelFormatter, MemoryOperand, Mnemonic, OpKind, Register, RflagsBits,
+    IntelFormatter, MemoryOperand, MemorySize, Mnemonic, OpKind, Register, RflagsBits,
 };
 use rc_discover::{Flow, Options};
 use rc_ir::Stmt;
@@ -55,7 +55,21 @@ pub struct State {
     pub window: Vec<u8>,
     /// Flags (EFLAGS bits) the result leaves undefined.
     pub undefined: u32,
+    /// Bits of each register to compare.
+    pub reg_mask: [u32; 8],
+    /// Window bytes to compare only partly: (offset, bits to compare).
+    pub byte_mask: Vec<(usize, u8)>,
+    /// Compare the x87 results (doubles at X87_OUT) with a tolerance.
+    pub approx: bool,
 }
+
+/// Where x87 tests keep their control word, their input stack and their
+/// output stack, as window offsets.
+pub const X87_CW: usize = 0x7f0;
+pub const X87_IN: usize = 0x780;
+pub const X87_OUT: usize = 0x700;
+/// Values on the x87 stack before the instruction under test.
+pub const X87_DEPTH: u8 = 6;
 
 /// How states for an instance are made.
 #[derive(Debug, Clone)]
@@ -67,6 +81,8 @@ pub enum Kind {
     /// A fixture program: fixes up a random state, and says which flags
     /// its result leaves undefined.
     Fixture(fn(&mut State, &mut Rng), u32),
+    /// One x87 instruction, run on a prepared stack.
+    X87(Box<Instruction>),
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +133,17 @@ const EXCLUDE: &[Mnemonic] = &[
     Mnemonic::Rdtsc,
     Mnemonic::Pause,
     Mnemonic::Hlt,
+    // x87 state handling: the tests' own prologue and epilogue need a sane
+    // stack; a fixture covers these.
+    Mnemonic::Fninit,
+    Mnemonic::Finit,
+    Mnemonic::Fnsave,
+    Mnemonic::Frstor,
+    Mnemonic::Fnstenv,
+    Mnemonic::Fldenv,
+    Mnemonic::Ffree,
+    Mnemonic::Fincstp,
+    Mnemonic::Fdecstp,
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -182,8 +209,28 @@ fn operand(kind: &str, as_mem: bool, shift: bool, rng: &mut Rng) -> Option<Op> {
         "imm16" => Op::I(rng.below(0x10000) as i32),
         "imm32" => Op::I(rng.interesting() as i32),
         "imm8_const_1" => Op::I(1),
+        "st0" => Op::R(Register::ST0),
+        "sti_opcode" => Op::R(st(1 + rng.below(u32::from(X87_DEPTH) - 1))),
         _ => return None,
     })
+}
+
+fn st(i: u32) -> Register {
+    [
+        Register::ST0,
+        Register::ST1,
+        Register::ST2,
+        Register::ST3,
+        Register::ST4,
+        Register::ST5,
+        Register::ST6,
+        Register::ST7,
+    ][i as usize & 7]
+}
+
+pub fn is_x87(m: Mnemonic) -> bool {
+    let n = format!("{m:?}");
+    n.starts_with('F') && !matches!(m, Mnemonic::Femms)
 }
 
 fn is_shift(m: Mnemonic) -> bool {
@@ -233,6 +280,31 @@ fn wrap(body: &[u8], delta: i32) -> Vec<u8> {
     v.extend_from_slice(body);
     v.extend_from_slice(&[0x8d, 0x64, 0x24, (0x40 - delta) as u8]);
     v.push(0xc3);
+    v
+}
+
+fn disp32(v: u32) -> [u8; 4] {
+    v.to_le_bytes()
+}
+
+/// `lea esp,[esp-0x40]; fninit; fldcw [cw]; fld qword [in + 8j]` for the
+/// input stack, the instruction, then `fnstsw ax; fstp qword [out + 8j]`
+/// for what is left, `lea esp,[esp+0x40]; ret`.
+fn wrap_x87(body: &[u8], depth_after: u8) -> Vec<u8> {
+    let w = WINDOW;
+    let mut v = vec![0x8d, 0x64, 0x24, 0xc0, 0xdb, 0xe3, 0xd9, 0x2d];
+    v.extend(disp32(w + X87_CW as u32));
+    for j in 0..u32::from(X87_DEPTH) {
+        v.extend([0xdd, 0x05]);
+        v.extend(disp32(w + X87_IN as u32 + 8 * j));
+    }
+    v.extend_from_slice(body);
+    v.extend([0xdf, 0xe0]);
+    for j in 0..u32::from(depth_after) {
+        v.extend([0xdd, 0x1d]);
+        v.extend(disp32(w + X87_OUT as u32 + 8 * j));
+    }
+    v.extend([0x8d, 0x64, 0x24, 0x40, 0xc3]);
     v
 }
 
@@ -302,11 +374,26 @@ pub fn instances(rng: &mut Rng) -> Vec<Instance> {
                 if !seen.insert(t.clone()) {
                     continue;
                 }
+                let x87 = is_x87(d.mnemonic());
+                let code = if x87 {
+                    let inc = d.fpu_stack_increment_info().increment();
+                    let after = i32::from(X87_DEPTH) - inc;
+                    if !(0..=8).contains(&after) {
+                        continue;
+                    }
+                    wrap_x87(&bytes, after as u8)
+                } else {
+                    wrap(&bytes, delta)
+                };
                 out.push(Instance {
                     mnemonic: format!("{:?}", d.mnemonic()).to_ascii_lowercase(),
                     text: t,
-                    code: wrap(&bytes, delta),
-                    kind: Kind::Single(Box::new(d)),
+                    code,
+                    kind: if x87 {
+                        Kind::X87(Box::new(d))
+                    } else {
+                        Kind::Single(Box::new(d))
+                    },
                 });
             }
         }
@@ -371,7 +458,45 @@ fn base_state(rng: &mut Rng) -> State {
         eflags: (rng.u32() & ARITH_FLAGS) | 2,
         window,
         undefined: 0,
+        reg_mask: [u32::MAX; 8],
+        byte_mask: Vec::new(),
+        approx: false,
     }
+}
+
+/// A double that is exact, moderate and often an edge case.
+pub fn nice(rng: &mut Rng) -> f64 {
+    let sign = if rng.below(2) == 0 { 1.0 } else { -1.0 };
+    sign * match rng.below(10) {
+        0 => 0.0,
+        1 => f64::from(rng.below(200)),
+        2 => f64::from(rng.below(4096)) / 8.0,
+        3 => 0.5,
+        4 => f64::from(rng.u32()) * 1e-3,
+        5 => f64::from(rng.below(1_000_000)) * 1e3,
+        _ => (rng.next() >> 11) as f64 / (1u64 << 53) as f64 * 10f64.powi(rng.below(8) as i32 - 3),
+    }
+}
+
+/// The 80-bit extended encoding of a finite double.
+fn f80(v: f64) -> [u8; 10] {
+    let b = v.to_bits();
+    let sign = ((b >> 63) as u16) << 15;
+    let exp = ((b >> 52) & 0x7ff) as i32;
+    let frac = b & ((1 << 52) - 1);
+    let (sig, e) = if exp == 0 && frac == 0 {
+        (0u64, 0u16)
+    } else {
+        ((1u64 << 63) | (frac << 11), (exp - 1023 + 16383) as u16)
+    };
+    let mut o = [0u8; 10];
+    o[..8].copy_from_slice(&sig.to_le_bytes());
+    o[8..].copy_from_slice(&(sign | e).to_le_bytes());
+    o
+}
+
+fn put(w: &mut [u8], off: usize, b: &[u8]) {
+    w[off..off + b.len()].copy_from_slice(b);
 }
 
 fn reg_value(s: &State, r: Register) -> u64 {
@@ -495,6 +620,7 @@ impl Instance {
                     fix(&mut s, rng);
                     s.undefined = *undefined;
                 }
+                Kind::X87(ins) => x87_state(&mut s, ins, rng),
             }
             return Some(s);
         }
@@ -593,4 +719,105 @@ pub fn lift_program(inst: &Instance, k: usize) -> (String, String, usize) {
     table.push_str("};\n");
     defs.push_str(&table);
     (decls, defs, map.functions.len())
+}
+
+/// Inputs for an x87 test: control word, input stack, memory operand.
+fn x87_state(s: &mut State, ins: &Instruction, rng: &mut Rng) {
+    use Mnemonic as M;
+    let m = ins.mnemonic();
+    // Exceptions masked, precision double or (for arithmetic) single,
+    // rounding to nearest except where rounding is what is tested.
+    let rounding = matches!(m, M::Fist | M::Fistp | M::Frndint);
+    let arith = matches!(
+        m,
+        M::Fadd
+            | M::Faddp
+            | M::Fsub
+            | M::Fsubp
+            | M::Fsubr
+            | M::Fsubrp
+            | M::Fmul
+            | M::Fmulp
+            | M::Fdiv
+            | M::Fdivp
+            | M::Fdivr
+            | M::Fdivrp
+    );
+    let cw = |rng: &mut Rng, rc: bool, single: bool| -> u16 {
+        let pc: u16 = if single && rng.below(3) == 0 { 0 } else { 2 };
+        let rcb = if rc { rng.below(4) as u16 } else { 0 };
+        0x007f | (pc << 8) | (rcb << 10)
+    };
+    let control = cw(rng, rounding, arith);
+    put(&mut s.window, X87_CW, &control.to_le_bytes());
+
+    let d = usize::from(X87_DEPTH);
+    let mut vals: Vec<f64> = (0..d).map(|_| nice(rng)).collect();
+    // st(0) is the last value pushed, st(1) the one before.
+    let (s0, s1) = (d - 1, d - 2);
+    match m {
+        M::Fsin | M::Fcos | M::Fptan => vals[s0] = nice(rng) % 10.0,
+        M::F2xm1 => vals[s0] = (nice(rng) % 1.0).abs() * if rng.below(2) == 0 { 1.0 } else { -1.0 },
+        M::Fyl2x => vals[s0] = nice(rng).abs() + 0.25,
+        M::Fscale => vals[s1] = (nice(rng) % 20.0).trunc(),
+        M::Fprem | M::Fprem1 => {
+            vals[s1] = nice(rng) % 100.0 + 1.5;
+            vals[s0] = nice(rng) % 1e6;
+        }
+        _ => {}
+    }
+    s.approx = matches!(
+        m,
+        M::Fsin | M::Fcos | M::Fptan | M::Fpatan | M::F2xm1 | M::Fyl2x
+    );
+    // Comparisons: often equal operands.
+    let compare = matches!(
+        m,
+        M::Fcom | M::Fcomp | M::Fucom | M::Fucomp | M::Fcompp | M::Fucompp | M::Ficom | M::Ficomp
+    );
+    if compare && rng.below(4) == 0 {
+        vals[s1] = vals[s0];
+    }
+    for (j, v) in vals.iter().enumerate() {
+        put(&mut s.window, X87_IN + 8 * j, &v.to_bits().to_le_bytes());
+    }
+
+    if ins.op_kind(0) == OpKind::Memory || (ins.op_count() > 1 && ins.op_kind(1) == OpKind::Memory)
+    {
+        let off = (ins.memory_displacement32() - WINDOW) as usize;
+        let eq = compare && rng.below(3) == 0;
+        let v = if eq { vals[s0] } else { nice(rng) };
+        match ins.memory_size() {
+            MemorySize::Float32 => put(
+                &mut s.window,
+                off,
+                &(if eq { v } else { f64::from(v as f32) } as f32)
+                    .to_bits()
+                    .to_le_bytes(),
+            ),
+            MemorySize::Float64 => put(&mut s.window, off, &v.to_bits().to_le_bytes()),
+            MemorySize::Float80 => put(&mut s.window, off, &f80(v)),
+            MemorySize::Int16 => put(&mut s.window, off, &(rng.u32() as i16).to_le_bytes()),
+            MemorySize::Int32 => put(
+                &mut s.window,
+                off,
+                &((v.trunc() as i64) as i32).to_le_bytes(),
+            ),
+            MemorySize::Int64 => {
+                let n = (rng.next() as i64) >> 11;
+                put(&mut s.window, off, &n.to_le_bytes());
+            }
+            MemorySize::UInt16 if m == M::Fldcw => {
+                put(&mut s.window, off, &cw(rng, true, true).to_le_bytes());
+            }
+            _ => {}
+        }
+        if m == M::Fnstsw {
+            // C0, C2, C3 and TOP only.
+            s.byte_mask.push((off, 0x00));
+            s.byte_mask.push((off + 1, 0x7d));
+        }
+    }
+    // fnstsw ax at the end: compare C0, C2, C3 and TOP.
+    s.reg_mask[0] = 0xffff_7d00;
 }

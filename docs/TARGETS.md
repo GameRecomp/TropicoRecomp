@@ -81,10 +81,14 @@ target, a table, or the base of an indexed operand. The whole run takes
 under two seconds.
 
 What `recomp lift` makes of it (2026-11-15): all 359,672 instructions
-lift; 17,474 of them trap because they are x87 (milestone M4), plus 16
-`int` instructions. The generated C is 108.8 MB in 23 files and compiles
-with clang `-O1` in 23 s on 16 cores (3 min 24 s of CPU), without
-warnings.
+lift, x87 included. The only traps are deliberate: guards of `div`/`idiv`,
+`int3` padding, and 16 `int 6` in the C runtime's Pentium FDIV workaround,
+where execution must never arrive. The generated C is 62.2 MB in 23 files
+and compiles with clang `-O1 -Wall -Wextra`, without warnings, in 21 s on
+16 cores (3 min 40 s of CPU).
+
+The instruction forms (iced `Code`s) the lifter models in this executable:
+281 that do not branch, all covered by the differential tests.
 
 The 559 "gap" functions are code nothing visibly refers to (probably dead
 code the linker kept). They are lifted anyway; it costs little and protects

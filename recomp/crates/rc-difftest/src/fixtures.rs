@@ -325,5 +325,44 @@ pub fn instances() -> Vec<Instance> {
         0x08d5,
     ));
 
+    // x87 state through memory: fnstenv/fldenv, fnsave/frstor round trips.
+    v.push(fixture(
+        "x87env",
+        assemble(|a, _| {
+            let w = u64::from(WINDOW);
+            a.fninit()?;
+            a.fldcw(word_ptr(w + 0x7f0))?;
+            a.fld(qword_ptr(w + 0x780))?;
+            a.fld(qword_ptr(w + 0x788))?;
+            a.fnstenv(ptr(w + 0x200))?;
+            a.fldenv(ptr(w + 0x200))?;
+            a.fnsave(ptr(w + 0x240))?;
+            a.fld1()?;
+            a.frstor(ptr(w + 0x240))?;
+            a.faddp(st1, st0)?;
+            a.fstp(qword_ptr(w + 0x700))?;
+            a.fnstcw(word_ptr(w + 0x708))?;
+            a.fnstsw(ax)?;
+            a.ret()?;
+            Ok(vec![])
+        }),
+        |s, r| {
+            s.window[0x7f0..0x7f2].copy_from_slice(&0x027fu16.to_le_bytes());
+            for off in [0x780, 0x788] {
+                s.window[off..off + 8]
+                    .copy_from_slice(&crate::cases::nice(r).to_bits().to_le_bytes());
+            }
+            // The environment holds instruction pointers and exception
+            // flags the fast mode does not model; the save area also holds
+            // the six empty registers. st(0) and st(1) at 0x25c and 0x266
+            // are compared.
+            for o in (0x200..0x21c).chain(0x240..0x25c).chain(0x270..0x2ac) {
+                s.byte_mask.push((o, 0));
+            }
+            s.reg_mask[0] = 0xffff_7d00;
+        },
+        0,
+    ));
+
     v
 }
