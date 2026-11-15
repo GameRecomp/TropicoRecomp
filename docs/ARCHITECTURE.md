@@ -341,6 +341,23 @@ The guest address space as the runtime lays it out:
   C frames needs `setjmp`/`longjmp` at known unwind targets. The boot path
   does not raise exceptions, so both are fatal for now.
 
+## The platform layer
+
+`platform/` is the host side, behind `rc/platform.h` and `rc/text.h`: one
+window showing 32-bit frames scaled with letterboxing, input events in the
+frame's coordinates with Windows virtual keys and PC scan codes, the copy
+of the last frame (screenshots), and fonts. SDL3 and SDL3_ttf implement it;
+without them a null platform builds (no window, no input, no text), which
+is what CI compiles.
+
+For scripted runs (`hle/frames.c`, `runtime/src/clock.c`):
+
+- `RC_CLOCK=virtual`: time advances one millisecond per clock reading and
+  by what `Sleep` asks for, so a run depends only on what the program does
+  and replays exactly.
+- `RC_INPUT=file`: input keyed to frame numbers (`3300 down 1`).
+- `RC_SCREENSHOT=N:file.bmp`, `RC_FRAMES=N`: capture frames; end the run.
+
 ## HLE
 
 An HLE function has the signature of lifted code, `void f(rc_cpu *c)`. It
@@ -377,11 +394,11 @@ got this right:
 | Module | Backed by | Notes |
 |---|---|---|
 | `kernel32` | libc, POSIX or Windows | Built: process and module functions, environment, TLS, critical sections and interlocked operations (one thread), time; heaps and virtual memory on the runtime's allocator; code page 1252 conversions, character types, string mapping and comparison, locale information for English (US); files, searches and paths on a virtual file system: guest paths under the guest installation directory resolve without regard to case in the user directory first, then the read-only game directory, and writing a game file copies it to the user directory first. `LoadLibraryA`/`GetProcAddress` answer for known DLLs with reserved addresses. |
-| `user32` | SDL3 video and events | One window; SDL events turned into the Windows messages the game's window procedure expects; keyboard state and `ToAscii`; cursor; menus only as far as the game uses them |
-| `gdi32` | `SDL3_ttf` | Font creation and enumeration, character widths, text drawn into the game's surfaces; a substitute font with a compatible licence |
-| `ddraw` | SDL3 renderer, later `SDL_GPU` | Tropico 1 software mode: primary and back surfaces, `Lock`/`Unlock`, `Blt`, `Flip`, pixel formats and palettes; the game's finished frame is uploaded as a texture and scaled |
-| `mss32` | `SDL3_mixer` | The quick API (samples in memory), streams (music and speech from files through the game's file callbacks), volume, status. The mixer does the mixing and the MP3 decoding |
-| `binkw32` | our own Bink 1 decoder in C | Open, decode a frame into a buffer the game provides, audio through the Miles hookup. First version: report "no video" so the game skips movies |
+| `user32` | the platform layer | Built: window classes, resources (strings from the executable's resource directory), windows with the messages Windows sends on creation, showing and activation; a message queue fed by host input (mouse, keys with virtual-key codes, scan codes and key state, `TranslateMessage`/`ToAscii` for a US layout), painting, capture, `FillRect` |
+| `gdi32` | `SDL3_ttf` through the platform | Built: device contexts drawing into guest memory (DirectDraw surfaces, memory bitmaps of 1 to 32 bits), fonts by face name with substitutes, `TextOutA` without antialiasing, ABC widths, face names, font enumeration, `GetBitmapBits` |
+| `ddraw` | the platform's frame | Built: DirectDraw 1/2/4/7 and surfaces 1 to 7 as COM objects in guest memory, display modes, surfaces with pixels in guest memory (8, 16, 24, 32 bits), `Lock`, `Blt` (copy, scale, colour key, fill), `BltFast`, `Flip`, palettes, clippers, `GetDC`; presenting converts the primary surface to the platform's 32-bit frame. Direct3D is not offered, so the game takes its software renderer |
+| `mss32` | `SDL3_mixer` | For now silent: the library starts and no sound device opens. Then: the quick API (samples in memory), streams (music and speech from files through the game's file callbacks), volume, status. The mixer does the mixing and the MP3 decoding |
+| `binkw32` | our own Bink 1 decoder in C | Open, decode a frame into a buffer the game provides, audio through the Miles hookup. For now a placeholder: the movie's header gives size, frame count and rate, and every frame is black (Tropico treats a movie that fails to open as a fatal error) |
 | `msvcrt6` | libc | Native `malloc`, `memcpy`, `strlen`, `sqrt` and friends bound over the statically linked copies, located by signature |
 
 ## WebAssembly

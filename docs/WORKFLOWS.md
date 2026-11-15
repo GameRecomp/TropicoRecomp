@@ -15,8 +15,9 @@ git config core.hooksPath tools/hooks     # once per clone; enables the guardrai
 ```
 
 Needed: a Rust toolchain (1.88 or later) with the `wasm32-unknown-unknown`
-target, a C compiler, CMake 3.25+, Ninja, and `innoextract` for GOG
-installers. Later: SDL3, SDL3_ttf and SDL3_mixer development files.
+target, a C compiler, CMake 3.25+, Ninja, SDL3 and SDL3_ttf (3.2 or later)
+with their CMake packages, and `innoextract` for GOG installers. Fonts: on
+Linux the Liberation fonts (package `fonts-liberation`), or DejaVu.
 
 ```sh
 cargo build --release --manifest-path recomp/Cargo.toml    # the recomp tool
@@ -80,11 +81,18 @@ RC_TRACE=imports,files build/release/games/tropico1/tropico1     # every API cal
 tools/run-scenario tropico1 boot                                 # a scripted run
 ```
 
-Scenarios are `games/<id>/scenarios/<name>.conf` (`STOP_AT`, the import
-that marks success, and `TIMEOUT`). The runner keeps the sequence of API
-calls in `build/scenarios/`, compares it with the accepted one, and
-`--accept` makes a run the reference. Traces come from running the game and
-stay out of the repository.
+Scenarios are `games/<id>/scenarios/<name>.conf`: `STOP_AT` (the import
+that marks success) or `FRAMES` (the frame count), `INPUT` (a frame-keyed
+input script beside it), `SCREENSHOT` (a frame to compare), `TOLERANCE`
+and `TIMEOUT`. They run headless (SDL's offscreen driver) on the virtual
+clock, so they replay exactly. The runner keeps the sequence of API calls
+and the screenshot in `build/scenarios/`, compares them with the accepted
+ones, and `--accept` makes a run the reference. Traces and screenshots
+come from running the game and stay out of the repository.
+
+More switches for investigating: `RC_TRACE` also takes `messages`
+(dispatched window messages), `ddraw`, `gdi`, `bink`; `RC_SCREENSHOT`,
+`RC_FRAMES` and `RC_INPUT` work outside scenarios too.
 
 1. Run a scripted scenario: `tools/run-scenario tropico1 boot`.
 2. It stops at the first of:

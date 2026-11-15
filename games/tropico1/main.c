@@ -14,9 +14,17 @@
 
 #include "rc/hle_modules.h"
 #include "rc/hostfs.h"
+#include "rc/log.h"
+#include "rc/platform.h"
 #include "rc/process.h"
 
-static void setup(void) { rc_hle_all(); }
+static void setup(void)
+{
+    if (!rc_plat_init("Tropico")) {
+        rc_fatal("no display");
+    }
+    rc_hle_all();
+}
 
 int main(int argc, char **argv)
 {
