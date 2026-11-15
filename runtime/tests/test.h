@@ -28,5 +28,6 @@ extern int rc_test_failures;
 void test_mem(void);
 void test_cpu(void);
 void test_x87(void);
+void test_vm(void);
 
 #endif

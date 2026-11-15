@@ -19,6 +19,10 @@ extern "C" {
 #endif
 
 void rc_log(const char *fmt, ...) RC_PRINTF(1, 2);
+
+/* Whether RC_TRACE (a comma-separated list) names `what`: "imports",
+ * "files", ... */
+int rc_trace(const char *what);
 RC_NORETURN void rc_fatal(const char *fmt, ...) RC_PRINTF(1, 2);
 
 #ifdef __cplusplus
