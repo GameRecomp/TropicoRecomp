@@ -45,6 +45,7 @@ recomp/                 Rust workspace: the recompiler
     rc-cli/             the `recomp` command
     rc-web/             wasm-bindgen front end for the browser (later)
     rc-difftest/        differential tests against the real CPU (dev only)
+    rc-inno/            reads and extracts the GOG installers (Inno Setup 5.5.0, own LZMA decoder)
 runtime/                C: CPU state, guest memory, PE image loading, dispatch, traps
 hle/                    C: one directory per reimplemented DLL
   kernel32/ user32/ gdi32/ ddraw/ mss32/ winmm/

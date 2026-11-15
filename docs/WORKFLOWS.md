@@ -16,7 +16,7 @@ git config core.hooksPath tools/hooks     # once per clone; enables the guardrai
 
 Needed: a Rust toolchain (1.88 or later) with the `wasm32-unknown-unknown`
 target, a C compiler, CMake 3.25+, Ninja, SDL3 and SDL3_ttf (3.2 or later)
-with their CMake packages, and `innoextract` for GOG installers. Fonts: on
+with their CMake packages. Fonts: on
 Linux the Liberation fonts (package `fonts-liberation`), or DejaVu.
 
 ```sh
@@ -34,8 +34,13 @@ The tool is `recomp/target/release/recomp`; the examples below call it
 The game never enters git. `orig/` is ignored and the hooks refuse it.
 
 1. Extract the GOG installer without running it:
-   `innoextract -d orig/t1 setup_tropico_2.1.0.14.exe`
-   (and `orig/t2` for Tropico 2). The game ends up in `orig/t1/app/`.
+   `recomp unpack setup_tropico_2.1.0.14.exe orig/t1`
+   (and `recomp unpack setup_tropico2_2.1.0.14.exe orig/t2`). The game ends
+   up in `orig/t1/app/`; `--only app` leaves out the installer's own
+   files, `--list` only lists. Every file is checked against the SHA-1 the
+   installer stores. `recomp unpack` reads the Inno Setup version of these
+   GOG releases (5.5.0, Unicode) and names any other it is given;
+   `innoextract` gives the same result and reads other versions.
 2. `recomp ingest orig/t1/app --game tropico1` checks the executable's
    SHA-256 against `games/tropico1/game.toml` and lists missing files.
 3. A different hash means a different build of the game. It needs its own

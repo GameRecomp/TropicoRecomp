@@ -64,6 +64,19 @@ enum Cmd {
         #[arg(long)]
         comments: bool,
     },
+    /// Extract a GOG installer (setup_*.exe, Inno Setup) into a directory:
+    /// the game lands in <out>/app.
+    Unpack {
+        installer: PathBuf,
+        /// Output directory, e.g. orig/t1.
+        out: Option<PathBuf>,
+        /// List the files instead of extracting them.
+        #[arg(long)]
+        list: bool,
+        /// Only files under this directory of the output (e.g. `app`).
+        #[arg(long)]
+        only: Option<PathBuf>,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -93,6 +106,12 @@ fn main() -> ExitCode {
             out,
             comments,
         } => lift(&game_dir, &game, out.as_deref(), comments),
+        Cmd::Unpack {
+            installer,
+            out,
+            list,
+            only,
+        } => unpack(&installer, out.as_deref(), list, only.as_deref()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,
@@ -104,6 +123,64 @@ fn main() -> ExitCode {
 }
 
 type Result<T> = std::result::Result<T, String>;
+
+fn unpack(installer: &Path, out: Option<&Path>, list: bool, only: Option<&Path>) -> Result<()> {
+    let at = |e: rc_inno::Error| format!("{}: {e}", installer.display());
+    let inst = rc_inno::Installer::open(installer).map_err(at)?;
+    let s = &inst.setup;
+    let mut plan = rc_inno::plan(s).map_err(at)?;
+    if let Some(prefix) = only {
+        plan.retain_under(prefix);
+    }
+    let total: u64 = plan
+        .targets
+        .iter()
+        .map(|(&l, p)| s.locations[l as usize].size * p.len() as u64)
+        .sum();
+    eprintln!(
+        "{} {} ({}): {} files, {:.1} MiB",
+        s.app_name,
+        s.app_version,
+        s.version,
+        plan.files(),
+        total as f64 / (1u64 << 20) as f64
+    );
+    if list {
+        let mut all: Vec<(&PathBuf, u64)> = plan
+            .targets
+            .iter()
+            .flat_map(|(&l, ps)| ps.iter().map(move |p| (p, l)))
+            .map(|(p, l)| (p, s.locations[l as usize].size))
+            .collect();
+        all.sort();
+        for (p, size) in all {
+            println!("{size:>12}  {}", p.display());
+        }
+        for d in &plan.dirs {
+            println!("{:>12}  {}/", "", d.display());
+        }
+        return Ok(());
+    }
+    let out = out.ok_or("unpack: give an output directory, or --list")?;
+    fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let mut n = 0usize;
+    let files = plan.files();
+    let done = inst
+        .extract(installer, &plan, out, &mut |_, _| {
+            n += 1;
+            if n.is_multiple_of(50) || n == files {
+                eprint!("\r{n}/{files} files");
+            }
+        })
+        .map_err(at)?;
+    eprintln!(
+        "\rextracted {} files, {:.1} MiB, every one matching its SHA-1, into {}",
+        done.files,
+        done.bytes as f64 / (1u64 << 20) as f64,
+        out.display()
+    );
+    Ok(())
+}
 
 fn read(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).map_err(|e| format!("{}: {e}", path.display()))

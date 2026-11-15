@@ -1,4 +1,4 @@
-# tropicorecomp
+# TropicoRecomp
 
 A static recompilation of **Tropico** (PopTop Software, 2001) and, after it,
 **Tropico 2: Pirate Cove** (Frog City, 2003): the 32-bit x86 Windows machine

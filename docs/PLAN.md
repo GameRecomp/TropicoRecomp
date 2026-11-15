@@ -64,7 +64,8 @@ done until its criterion is a test or a scripted run.
 - Rust workspace skeleton, C runtime skeleton, CMake build, CI: build, test,
   lint, `wasm32` build of the pipeline crates, repository audit.
 - `recomp ingest`: verify an installed game folder under `orig/` against the
-  hashes in `game.toml`. Document `innoextract` for the GOG installers.
+  hashes in `game.toml`. `recomp unpack` extracts the GOG installers (our
+  own Inno Setup reader, so no other tool is needed).
 
 *Exit:* CI is green on an empty pipeline; the audit fails when a test binary
 is staged; `recomp ingest orig/t1/app` reports the known hash.
