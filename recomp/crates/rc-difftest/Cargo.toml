@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "rc-difftest"
+description = "Differential tests: lifted C against the real CPU in 32-bit mode (development only)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "difftest"
+path = "src/main.rs"
+
+[dependencies]
+rc-pe.workspace = true
+rc-discover.workspace = true
+rc-ir.workspace = true
+rc-x86.workspace = true
+rc-emit-c.workspace = true
+iced-x86 = { workspace = true, features = ["encoder", "op_code_info", "intel"] }
+
+[lints]
+workspace = true

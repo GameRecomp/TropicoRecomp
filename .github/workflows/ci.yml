@@ -31,7 +31,11 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       # The pipeline must keep building for the browser.
-      - run: cargo build --target wasm32-unknown-unknown -p rc-pe -p rc-manifest -p rc-discover
+      - run: >-
+          cargo build --target wasm32-unknown-unknown
+          -p rc-pe -p rc-manifest -p rc-discover -p rc-ir -p rc-x86 -p rc-emit-c
+      # Lifted C against the real CPU in 32-bit mode.
+      - run: cargo run --release -p rc-difftest
 
   runtime:
     strategy:
