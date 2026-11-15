@@ -1,0 +1,87 @@
+/* SPDX-License-Identifier: MIT */
+#include "rc/dispatch.h"
+
+#include <time.h>
+
+static const rc_fn_entry *table;
+static uint32_t table_count;
+static rc_import_resolver import_resolver;
+
+void rc_set_lifted(const rc_fn_entry *t, uint32_t count)
+{
+    table = t;
+    table_count = count;
+}
+
+void rc_set_import_resolver(rc_import_resolver r) { import_resolver = r; }
+
+rc_fn rc_lookup(uint32_t addr)
+{
+    uint32_t lo = 0, hi = table_count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (table[mid].addr < addr) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return (lo < table_count && table[lo].addr == addr) ? table[lo].fn : NULL;
+}
+
+void rc_dispatch(rc_cpu *c, uint32_t target)
+{
+    rc_fn f = rc_lookup(target);
+    if (f == NULL && import_resolver != NULL) {
+        f = import_resolver(target);
+    }
+    if (f == NULL) {
+        c->eip = target;
+        rc_fatal("indirect transfer to %#010x, which is not a lifted function "
+                 "(esp %#010x, return address %#010x)",
+                 target, c->r[RC_ESP], rc_ld32(c->r[RC_ESP]));
+    }
+    f(c);
+}
+
+void rc_trap(rc_cpu *c, uint32_t addr, const char *why)
+{
+    c->eip = addr;
+    rc_fatal("%s (at %#010x; eax %#x ecx %#x edx %#x ebx %#x esp %#x ebp %#x esi %#x edi %#x)", why,
+             addr, c->r[0], c->r[1], c->r[2], c->r[3], c->r[4], c->r[5], c->r[6], c->r[7]);
+}
+
+/* A fixed CPU: a P6-class Intel processor with the features the games of
+ * the time check for (FPU, TSC, CX8, CMOV, MMX), and nothing newer. */
+void rc_cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx)
+{
+    switch (*eax) {
+    case 0:
+        *eax = 1;
+        *ebx = 0x756e6547; /* "Genu" */
+        *edx = 0x49656e69; /* "ineI" */
+        *ecx = 0x6c65746e; /* "ntel" */
+        break;
+    case 1:
+        *eax = 0x00000683; /* family 6, model 8, stepping 3 */
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0x00808111;
+        break;
+    default:
+        *eax = *ebx = *ecx = *edx = 0;
+        break;
+    }
+}
+
+/* Nanoseconds since an arbitrary start: a 1 GHz time-stamp counter. */
+void rc_rdtsc(uint32_t *eax, uint32_t *edx)
+{
+    struct timespec ts;
+    uint64_t t = 0;
+    if (timespec_get(&ts, TIME_UTC) == TIME_UTC) {
+        t = (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+    }
+    *eax = (uint32_t)t;
+    *edx = (uint32_t)(t >> 32);
+}

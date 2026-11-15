@@ -2,6 +2,7 @@
 add_library(rc_runtime STATIC
     src/mem.c
     src/log.c
+    src/dispatch.c
 )
 target_include_directories(rc_runtime PUBLIC include)
 
