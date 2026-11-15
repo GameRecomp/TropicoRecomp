@@ -41,6 +41,19 @@ void rc_track_gain(rc_track *t, float gain);
 /* Playback speed relative to the sound's own rate. */
 void rc_track_speed(rc_track *t, float ratio);
 
+/* A stream of raw PCM the caller feeds (Miles' streamed samples). */
+typedef struct rc_pcm rc_pcm;
+
+/* 8-bit samples are unsigned, 16-bit signed, as in WAV. */
+rc_pcm *rc_pcm_open(int rate, int channels, int bits);
+void rc_pcm_free(rc_pcm *p);
+void rc_pcm_put(rc_pcm *p, const void *data, uint32_t size);
+/* Bytes queued and not yet played. */
+uint32_t rc_pcm_queued(rc_pcm *p);
+void rc_pcm_pause(rc_pcm *p, bool paused);
+void rc_pcm_gain(rc_pcm *p, float gain);
+void rc_pcm_clear(rc_pcm *p);
+
 #ifdef __cplusplus
 }
 #endif

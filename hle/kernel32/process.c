@@ -13,6 +13,7 @@
 
 #include "k32.h"
 #include "rc/log.h"
+#include "rc/thread.h"
 #include "rc/vm.h"
 
 #if defined(_WIN32)
@@ -88,6 +89,10 @@ static void k_GetModuleHandleA(rc_cpu *c)
     if (name == 0) {
         RC_RETURN(c, rc_proc.image_base, 1);
     }
+    const rc_module *lm = rc_module_find(rc_str(name));
+    if (lm) {
+        RC_RETURN(c, lm->base, 1);
+    }
     int i = module_index(rc_str(name));
     if (i >= 0) {
         RC_RETURN(c, MODULE_BASE + 0x100000u * (uint32_t)i, 1);
@@ -98,6 +103,10 @@ static void k_GetModuleHandleA(rc_cpu *c)
 
 static void k_LoadLibraryA(rc_cpu *c)
 {
+    const rc_module *lm = rc_module_find(rc_str(RC_ARG(c, 0)));
+    if (lm) {
+        RC_RETURN(c, lm->base, 1);
+    }
     int i = module_index(rc_str(RC_ARG(c, 0)));
     if (i >= 0) {
         RC_RETURN(c, MODULE_BASE + 0x100000u * (uint32_t)i, 1);
@@ -112,6 +121,18 @@ static void k_FreeLibrary(rc_cpu *c) { RC_RETURN(c, 1, 1); }
 static void k_GetProcAddress(rc_cpu *c)
 {
     uint32_t h = RC_ARG(c, 0), name = RC_ARG(c, 1);
+    const rc_module *lm = rc_module_at(h);
+    if (lm) {
+        char ord[16];
+        if (name < 0x10000) {
+            snprintf(ord, sizeof ord, "#%u", name);
+        }
+        uint32_t a = rc_module_export(lm, name < 0x10000 ? ord : rc_str(name));
+        if (!a) {
+            rc_last_error = 127;
+        }
+        RC_RETURN(c, a, 2);
+    }
     const char *dll = NULL;
     if (h >= MODULE_BASE && (h - MODULE_BASE) % 0x100000u == 0 && (h - MODULE_BASE) / 0x100000u < NMODULES) {
         dll = known_modules[(h - MODULE_BASE) / 0x100000u];
@@ -127,8 +148,50 @@ static void k_GetProcAddress(rc_cpu *c)
 
 static void k_GetModuleFileNameA(rc_cpu *c)
 {
-    uint32_t buf = RC_ARG(c, 1), n = RC_ARG(c, 2);
+    uint32_t h = RC_ARG(c, 0), buf = RC_ARG(c, 1), n = RC_ARG(c, 2);
+    const rc_module *lm = h ? rc_module_at(h) : NULL;
+    if (lm && h != rc_proc.image_base) {
+        char path[300];
+        snprintf(path, sizeof path, "%s\\%s", rc_cfg->guest_dir, lm->name);
+        RC_RETURN(c, rc_put_str(buf, n, path), 3);
+    }
     RC_RETURN(c, rc_put_str(buf, n, rc_str(rc_proc.module_path)), 3);
+}
+
+static void k_GetWindowsDirectoryA(rc_cpu *c) { RC_RETURN(c, rc_put_str(RC_ARG(c, 0), RC_ARG(c, 1), "C:\\WINDOWS"), 2); }
+
+static void k_GetSystemDirectoryA(rc_cpu *c)
+{
+    RC_RETURN(c, rc_put_str(RC_ARG(c, 0), RC_ARG(c, 1), "C:\\WINDOWS\\system32"), 2);
+}
+
+static uint32_t error_mode;
+
+static void k_SetErrorMode(rc_cpu *c)
+{
+    uint32_t old = error_mode;
+    error_mode = RC_ARG(c, 0);
+    RC_RETURN(c, old, 1);
+}
+
+static void k_GetCurrentProcessId(rc_cpu *c) { RC_RETURN(c, 1, 0); }
+
+/* The performance counter runs at 1 MHz on the process clock (virtual in
+ * scripted runs). */
+static void k_QueryPerformanceFrequency(rc_cpu *c)
+{
+    rc_st32(RC_ARG(c, 0), 1000000u);
+    rc_st32(RC_ARG(c, 0) + 4, 0);
+    RC_RETURN(c, 1, 1);
+}
+
+static void k_QueryPerformanceCounter(rc_cpu *c)
+{
+    rc_thread_yield();
+    uint64_t us = rc_ticks_ms() * 1000u;
+    rc_st32(RC_ARG(c, 0), (uint32_t)us);
+    rc_st32(RC_ARG(c, 0) + 4, (uint32_t)(us >> 32));
+    RC_RETURN(c, 1, 1);
 }
 
 static void k_ExitProcess(rc_cpu *c) { rc_exit(RC_ARG(c, 0)); }
@@ -149,7 +212,25 @@ static void k_FatalAppExitA(rc_cpu *c)
 
 static void k_GetCurrentProcess(rc_cpu *c) { RC_RETURN(c, 0xffffffffu, 0); }
 static void k_GetCurrentThread(rc_cpu *c) { RC_RETURN(c, 0xfffffffeu, 0); }
-static void k_GetCurrentThreadId(rc_cpu *c) { RC_RETURN(c, 1, 0); }
+static void k_GetCurrentThreadId(rc_cpu *c) { RC_RETURN(c, rc_thread_id(), 0); }
+
+static void k_CreateThread(rc_cpu *c)
+{
+    uint32_t stack = RC_ARG(c, 1), start = RC_ARG(c, 2), param = RC_ARG(c, 3);
+    uint32_t flags = RC_ARG(c, 4), id_out = RC_ARG(c, 5);
+    if (flags & 4) { /* CREATE_SUSPENDED: nothing here resumes threads */
+        rc_fatal("CreateThread: suspended threads are not supported");
+    }
+    uint32_t id = 0;
+    uint32_t h = rc_thread_create(start, param, stack, &id);
+    if (!h) {
+        rc_last_error = 8; /* ERROR_NOT_ENOUGH_MEMORY */
+    }
+    if (h && id_out) {
+        rc_st32(id_out, id);
+    }
+    RC_RETURN(c, h, 6);
+}
 
 static void k_GetLastError(rc_cpu *c) { RC_RETURN(c, rc_last_error, 0); }
 
@@ -161,14 +242,15 @@ static void k_SetLastError(rc_cpu *c)
 
 /* ---- thread-local storage ---- */
 #define TLS_SLOTS 64u
-static uint32_t tls_used[TLS_SLOTS], tls_value[TLS_SLOTS];
+static uint32_t tls_used[TLS_SLOTS];
+#define TLS_SLOT(i) (rc_thread_tib() + 0xe10u + 4u * (i))
 
 static void k_TlsAlloc(rc_cpu *c)
 {
     for (uint32_t i = 0; i < TLS_SLOTS; i++) {
         if (!tls_used[i]) {
             tls_used[i] = 1;
-            tls_value[i] = 0;
+            rc_st32(TLS_SLOT(i), 0);
             RC_RETURN(c, i, 0);
         }
     }
@@ -188,14 +270,14 @@ static void k_TlsGetValue(rc_cpu *c)
 {
     uint32_t i = RC_ARG(c, 0);
     rc_last_error = ERROR_SUCCESS;
-    RC_RETURN(c, i < TLS_SLOTS ? tls_value[i] : 0, 1);
+    RC_RETURN(c, i < TLS_SLOTS ? rc_ld32(TLS_SLOT(i)) : 0, 1);
 }
 
 static void k_TlsSetValue(rc_cpu *c)
 {
     uint32_t i = RC_ARG(c, 0);
     if (i < TLS_SLOTS) {
-        tls_value[i] = RC_ARG(c, 1);
+        rc_st32(TLS_SLOT(i), RC_ARG(c, 1));
     }
     RC_RETURN(c, i < TLS_SLOTS, 2);
 }
@@ -233,11 +315,17 @@ static void k_CreateEventA(rc_cpu *c)
 }
 
 /* ---- time ---- */
-static void k_GetTickCount(rc_cpu *c) { RC_RETURN(c, (uint32_t)rc_ticks_ms(), 0); }
+/* Reading the clock lets other threads run: code waiting for a thread
+ * typically looks at the time while it waits. */
+static void k_GetTickCount(rc_cpu *c)
+{
+    rc_thread_yield();
+    RC_RETURN(c, (uint32_t)rc_ticks_ms(), 0);
+}
 
 static void k_Sleep(rc_cpu *c)
 {
-    rc_sleep_ms(RC_ARG(c, 0));
+    rc_thread_sleep(RC_ARG(c, 0));
     RC_RETURN(c, 0, 1);
 }
 
@@ -412,12 +500,19 @@ const rc_import_def rc_k32_process[] = {
     {K32, "FreeLibrary", k_FreeLibrary},
     {K32, "GetProcAddress", k_GetProcAddress},
     {K32, "GetModuleFileNameA", k_GetModuleFileNameA},
+    {K32, "GetWindowsDirectoryA", k_GetWindowsDirectoryA},
+    {K32, "GetSystemDirectoryA", k_GetSystemDirectoryA},
+    {K32, "SetErrorMode", k_SetErrorMode},
+    {K32, "GetCurrentProcessId", k_GetCurrentProcessId},
+    {K32, "QueryPerformanceFrequency", k_QueryPerformanceFrequency},
+    {K32, "QueryPerformanceCounter", k_QueryPerformanceCounter},
     {K32, "ExitProcess", k_ExitProcess},
     {K32, "TerminateProcess", k_TerminateProcess},
     {K32, "FatalAppExitA", k_FatalAppExitA},
     {K32, "GetCurrentProcess", k_GetCurrentProcess},
     {K32, "GetCurrentThread", k_GetCurrentThread},
     {K32, "GetCurrentThreadId", k_GetCurrentThreadId},
+    {K32, "CreateThread", k_CreateThread},
     {K32, "GetLastError", k_GetLastError},
     {K32, "SetLastError", k_SetLastError},
     {K32, "TlsAlloc", k_TlsAlloc},

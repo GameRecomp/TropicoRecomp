@@ -47,10 +47,9 @@ recomp/                 Rust workspace: the recompiler
     rc-difftest/        differential tests against the real CPU (dev only)
 runtime/                C: CPU state, guest memory, PE image loading, dispatch, traps
 hle/                    C: one directory per reimplemented DLL
-  kernel32/ user32/ gdi32/ ddraw/ mss32/ binkw32/
+  kernel32/ user32/ gdi32/ ddraw/ mss32/ winmm/
   msvcrt6/              native versions of statically linked CRT functions
 platform/               C: the SDL3 side (window, input, audio, video, files)
-codecs/bink/            C: our own Bink 1 video and audio decoder
 games/
   tropico1/             game.toml, overrides, main.c, native/ replacements, tests/
   tropico2/
@@ -284,12 +283,29 @@ tables = [                     # jump tables the analysis cannot bound
 [lift]
 exact_x87 = []                 # function addresses
 
+[[modules]]                    # a DLL the game ships, lifted with it
+id = "binkw32"
+file = "binkw32.dll"
+sha256 = "f2ad8870…"
+size = 291328
+image_base = 0x30000000
+
 [functions]                    # replacement directives, by address
 # 0x004a1b20 = { native = "crt_malloc" }      # statically linked CRT function
 # 0x00451230 = { replace = "t1_draw_tile" }   # hand-written, may call the lifted body
 ```
 
 Everything in it is an address, a number, or a name we made up.
+
+**Lifted DLLs.** A DLL listed under `[[modules]]` is checked by hash like
+the executable, discovered from its entry point and its exports, and lifted
+into the same program (its functions are in the same dispatch table; the
+generated `rc_lifted_modules` names the files). The runtime loads it at its
+preferred base before the executable, binds the executable's imports from
+it to its exports, and calls its `DllMain` before the entry point. Its own
+imports go to the HLE modules like the executable's. Tropico 1 lifts its
+Bink library this way: the user's copy, never committed, like the
+executable.
 
 ## The runtime
 
@@ -303,6 +319,7 @@ The guest address space as the runtime lays it out:
 | `0x00110000` | the main thread's stack, 1 MiB |
 | image base (`0x00400000`) | the executable, at its preferred base |
 | `0x00700000` to `0x7f000000` | `VirtualAlloc` and the heap, first fit in 64 KiB granules |
+| `0x30000000` | a lifted DLL at its preferred base (`binkw32.dll`) |
 | `0x7ffde000`, `0x7ffdf000` | thread information block (`fs`) and a minimal PEB |
 | `0xf0000000` up | reserved import addresses, 16 bytes apart, never mapped |
 
@@ -313,8 +330,8 @@ The guest address space as the runtime lays it out:
   heap serves blocks up to 64 KiB from size classes carved out of 1 MiB
   chunks, larger ones as reservations of their own. It is deterministic:
   the same calls give the same addresses, which keeps runs reproducible.
-- **Loader and start-up** (`rc/process.h`). Reads the executable from the
-  game directory, copies headers and sections to the preferred base,
+- **Loader and start-up** (`rc/process.h`). Loads the lifted DLLs, then
+  reads the executable from the game directory, copies headers and sections to the preferred base,
   writes every import slot with the import's reserved address, builds the
   stack and the TIB (empty exception chain, stack bounds, self pointer),
   sets the x87 control word Windows starts threads with (53-bit precision),
@@ -330,9 +347,22 @@ The guest address space as the runtime lays it out:
 - **Dispatch, traps** (`rc/dispatch.h`). The address-to-function table
   generated with the code; unknown targets and traps are fatal with the
   address and the registers.
-- **Diagnostics.** `RC_TRACE` (comma-separated: `imports`, `files`) logs
-  every API call with its first arguments and result, and every file
-  opened. `RC_STOP_AT=DLL!name` ends a run successfully at the first call
+- **Threads** (`rc/thread.h`). Guest threads run cooperatively, one at a
+  time, each on a host fiber (`ucontext` on POSIX, fibers on Windows) with
+  its own CPU state, guest stack and TIB. A thread gives way only in
+  `Sleep`, the message pump and the clock functions, so a run with threads
+  replays as exactly as one without. Critical sections need no locking.
+  This serves libraries that poll in a loop around `Sleep` (Bink); code
+  that spins on a flag without calling anything would never yield.
+- **Clock.** `RC_CLOCK=virtual` makes time advance by 100 µs per reading
+  (`RC_CLOCK_STEP_US`) and by what `Sleep` asks for; `Sleep(0)` counts as a
+  reading. Scripted runs use it. On the virtual clock streamed Miles
+  samples count as played as virtual time passes and are not sent to the
+  device, so picture and sound keep to one clock.
+- **Diagnostics.** `RC_TRACE` (comma-separated: `imports`, `files`,
+  `exports`, `threads`) logs every API call with its first arguments and
+  result, every file opened, every call into a lifted DLL's exports, and
+  threads starting and ending. `RC_STOP_AT=DLL!name` ends a run successfully at the first call
   of that import: scripted scenarios use it as their goal.
 - **Structured exception handling** (planned). The `fs:[0]` handler chain
   is ordinary guest memory, so installing and removing frames works as
@@ -352,9 +382,9 @@ is what CI compiles.
 
 For scripted runs (`hle/frames.c`, `runtime/src/clock.c`):
 
-- `RC_CLOCK=virtual`: time advances one millisecond per clock reading and
-  by what `Sleep` asks for, so a run depends only on what the program does
-  and replays exactly.
+- `RC_CLOCK=virtual`: time advances 100 µs per clock reading and by what
+  `Sleep` asks for, so a run depends only on what the program does and
+  replays exactly (see the runtime's clock above).
 - `RC_INPUT=file`: input keyed to frame numbers (`3300 down 1`).
 - `RC_SCREENSHOT=N:file.bmp`, `RC_FRAMES=N`: capture frames; end the run.
 
@@ -397,8 +427,9 @@ got this right:
 | `user32` | the platform layer | Built: window classes, resources (strings from the executable's resource directory), windows with the messages Windows sends on creation, showing and activation; a message queue fed by host input (mouse, keys with virtual-key codes, scan codes and key state, `TranslateMessage`/`ToAscii` for a US layout), painting, capture, `FillRect` |
 | `gdi32` | `SDL3_ttf` through the platform | Built: device contexts drawing into guest memory (DirectDraw surfaces, memory bitmaps of 1 to 32 bits), fonts by face name with substitutes, `TextOutA` without antialiasing, ABC widths, face names, font enumeration, `GetBitmapBits` |
 | `ddraw` | the platform's frame | Built: DirectDraw 1/2/4/7 and surfaces 1 to 7 as COM objects in guest memory, display modes, surfaces with pixels in guest memory (8, 16, 24, 32 bits), `Lock`, `Blt` (copy, scale, colour key, fill), `BltFast`, `Flip`, palettes, clippers, `GetDC`; presenting converts the primary surface to the platform's 32-bit frame. Direct3D is not offered, so the game takes its software renderer |
-| `mss32` | `SDL3_mixer` | For now silent: the library starts and no sound device opens. Then: the quick API (samples in memory), streams (music and speech from files through the game's file callbacks), volume, status. The mixer does the mixing and the MP3 decoding |
-| `binkw32` | our own Bink 1 decoder in C | Open, decode a frame into a buffer the game provides, audio through the Miles hookup. For now a placeholder: the movie's header gives size, frame count and rate, and every frame is black (Tropico treats a movie that fails to open as a fatal error) |
+| `mss32` | `SDL3_mixer` | Built: the quick API (samples in memory), streams (music and speech from files through the game's file callbacks), volume, status; streamed samples (`HSAMPLE` with two buffers, end-of-buffer callbacks, play positions) as Bink uses them, fed into PCM streams. The mixer does the mixing and the MP3 decoding |
+| `winmm` | the runtime's clock | Built: `timeGetTime`; wave output reports no device |
+| `binkw32` | none: lifted | The game's own DLL, lifted with the executable (see the manifest) |
 | `msvcrt6` | libc | Native `malloc`, `memcpy`, `strlen`, `sqrt` and friends bound over the statically linked copies, located by signature |
 
 ## WebAssembly
@@ -442,8 +473,10 @@ Design points specific to the browser:
   above the guest's range, would remove the base addition. Decide by
   experiment in the WebAssembly milestone.
 - **Indirect calls** map directly onto WebAssembly's function table.
-- **No threads needed**, because Tropico 1 is single-threaded. No shared
-  memory, no cross-origin isolation headers.
+- **No host threads needed.** The game is single-threaded; Bink's thread
+  is a cooperative guest thread, which needs fibers (Emscripten's
+  `emscripten_fiber_*`, not yet wired up) rather than shared memory. No
+  cross-origin isolation headers.
 - **The game owns its main loop** and a browser tab must return to the event
   loop to draw. Options: run the game in a Web Worker and present through an
   offscreen canvas, or suspend the WebAssembly stack at the message pump
@@ -452,15 +485,18 @@ Design points specific to the browser:
 - **Files.** The game folder is read through the browser's file access API
   into SDL3's filesystem layer; saves go to origin-private storage. The four
   large archives (about 1 GiB) must be read on demand, not loaded whole.
-- **Video.** FFmpeg is too large for this target, which is the main reason
-  for our own Bink 1 decoder in C.
+- **Video.** The lifted Bink library is ordinary generated C, so it builds
+  for this target like the game; FFmpeg would have been too large.
 - **Audio.** `SDL3_mixer` must be built for Emscripten with only the
   decoders we use (MP3, WAV).
 
 ## What we deliberately do not do
 
 - Parse or convert game assets. The game reads its own files.
-- Lift `mss32.dll`, `binkw32.dll` or any other third-party DLL.
+- Lift `mss32.dll`: the Miles reimplementation on `SDL3_mixer` is smaller
+  than its drivers and mixers would be. (`binkw32.dll` is lifted: a codec
+  is pure computation, and the format's tables are not published under a
+  licence we can use.)
 - Recompile code generated at run time. Tropico 1 shows no sign of any; if
   that changes, the plan changes.
 - Retype the game's data to 64-bit. Native rewrites of single functions are

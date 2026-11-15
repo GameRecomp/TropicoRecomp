@@ -358,7 +358,385 @@ static void pump(rc_cpu *c)
 static void k_service_stream(rc_cpu *c) { RC_RETURN(c, 0, 2); }
 static void k_auto_service_stream(rc_cpu *c) { RC_RETURN(c, 0, 2); }
 
-void rc_mss32_init(void) { rc_add_pump_hook(pump); }
+/* ---- streamed samples (HSAMPLE): what Bink plays its sound through ----
+ * The caller fills two buffers in turn (AIL_sample_buffer_ready says which
+ * one may be loaded next); the data goes into a PCM stream. */
+
+typedef struct sample {
+    int used;
+    uint32_t guest;
+    rc_pcm *pcm;
+    int format; /* bit 0: 16 bits, bit 1: stereo */
+    int rate;
+    float volume;
+    int status; /* SMP_FREE 1, SMP_DONE 2, SMP_PLAYING 4, SMP_STOPPED 8 */
+    int next_buffer;
+    uint32_t last_len;
+    uint32_t user[8];
+    uint32_t eob; /* end-of-buffer callback, or 0 */
+    uint32_t pending[2]; /* lengths of the buffers loaded and not played */
+    int npending;
+    uint32_t buf_len[2]; /* the last length loaded into buffer 0 and 1 */
+    int newest;          /* the buffer loaded last, or -1 */
+    /* On the virtual clock: bytes not yet played, and when that was. */
+    uint32_t vqueued;
+    uint64_t vtime;
+} sample;
+
+#define SAMPLES 32
+static sample samples[SAMPLES];
+
+static sample *sample_of(uint32_t h)
+{
+    for (int i = 0; i < SAMPLES; i++) {
+        if (samples[i].used && samples[i].guest == h) {
+            return &samples[i];
+        }
+    }
+    return NULL;
+}
+
+static void k_allocate_sample_handle(rc_cpu *c)
+{
+    for (int i = 0; i < SAMPLES; i++) {
+        if (!samples[i].used) {
+            sample *s = &samples[i];
+            memset(s, 0, sizeof *s);
+            s->used = 1;
+            s->guest = rc_heap_alloc(64, true);
+            s->format = 1;
+            s->rate = 22050;
+            s->volume = 1.0f;
+            s->status = 2;
+            RC_RETURN(c, s->guest, 1);
+        }
+    }
+    RC_RETURN(c, 0, 1);
+}
+
+static void k_release_sample_handle(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s) {
+        rc_pcm_free(s->pcm);
+        rc_heap_free(s->guest);
+        s->used = 0;
+    }
+    RC_RETURN(c, 0, 1);
+}
+
+static void k_init_sample(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s) {
+        rc_pcm_free(s->pcm);
+        s->pcm = NULL;
+        s->format = 1;
+        s->rate = 22050;
+        s->volume = 1.0f;
+        s->status = 2;
+        s->next_buffer = 0;
+        s->last_len = 0;
+        s->npending = 0;
+        s->eob = 0;
+        s->newest = -1;
+        s->buf_len[0] = s->buf_len[1] = 0;
+        s->vqueued = 0;
+    }
+    RC_RETURN(c, 0, 1);
+}
+
+/* The PCM stream for the sample's current format, made when first needed. */
+static rc_pcm *pcm_of(sample *s)
+{
+    if (!s->pcm && audio_ok) {
+        s->pcm = rc_pcm_open(s->rate, (s->format & 2) ? 2 : 1, (s->format & 1) ? 16 : 8);
+        rc_pcm_gain(s->pcm, s->volume);
+        rc_pcm_pause(s->pcm, s->status != 4);
+    }
+    return s->pcm;
+}
+
+/* Bytes per second of the sample's format. */
+static uint32_t byte_rate(const sample *s)
+{
+    return (uint32_t)s->rate * ((s->format & 1) ? 2u : 1u) * ((s->format & 2) ? 2u : 1u);
+}
+
+/* Bytes loaded and not yet played. On the virtual clock the sound is
+ * counted as played as virtual time passes, and never reaches the device,
+ * so that picture and sound keep to the same clock. */
+static uint32_t queued_of(sample *s)
+{
+    if (!rc_clock_virtual()) {
+        return audio_ok ? rc_pcm_queued(s->pcm) : 0;
+    }
+    uint64_t now = rc_ticks_peek_ms();
+    if (s->status == 4 && now > s->vtime) {
+        uint64_t played = (now - s->vtime) * byte_rate(s) / 1000u;
+        s->vqueued = played >= s->vqueued ? 0 : s->vqueued - (uint32_t)played;
+    }
+    s->vtime = now;
+    return s->vqueued;
+}
+
+static void put_data(sample *s, uint32_t data, uint32_t len)
+{
+    if (rc_clock_virtual()) {
+        queued_of(s);
+        s->vqueued += len;
+        return;
+    }
+    rc_pcm_put(pcm_of(s), rc_ptr(data), len);
+}
+
+static void k_set_sample_type(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s && (int)RC_ARG(c, 1) != s->format) {
+        s->format = (int)RC_ARG(c, 1);
+        rc_pcm_free(s->pcm);
+        s->pcm = NULL;
+    }
+    RC_RETURN(c, 0, 3);
+}
+
+static void k_set_sample_playback_rate(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s && (int)RC_ARG(c, 1) != s->rate && RC_ARG(c, 1)) {
+        s->rate = (int)RC_ARG(c, 1);
+        rc_pcm_free(s->pcm);
+        s->pcm = NULL;
+    }
+    RC_RETURN(c, 0, 2);
+}
+
+static void k_set_sample_volume(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s) {
+        s->volume = (float)RC_ARG(c, 1) / 127.0f;
+        rc_pcm_gain(s->pcm, s->volume);
+    }
+    RC_RETURN(c, 0, 2);
+}
+
+static void k_set_sample_pan(rc_cpu *c) { RC_RETURN(c, 0, 2); }
+
+static void k_start_sample(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s) {
+        queued_of(s);
+        s->status = 4;
+        rc_pcm_pause(pcm_of(s), false);
+    }
+    RC_RETURN(c, 0, 1);
+}
+
+static void k_stop_sample(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s) {
+        queued_of(s);
+        s->status = 8;
+        rc_pcm_pause(s->pcm, true);
+    }
+    RC_RETURN(c, 0, 1);
+}
+
+static void k_resume_sample(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s) {
+        queued_of(s);
+        s->status = 4;
+        rc_pcm_pause(pcm_of(s), false);
+    }
+    RC_RETURN(c, 0, 1);
+}
+
+static void k_end_sample(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s) {
+        s->status = 2;
+        s->npending = 0;
+        s->vqueued = 0;
+        rc_pcm_clear(s->pcm);
+    }
+    RC_RETURN(c, 0, 1);
+}
+
+static void k_sample_status(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s && s->status == 4 && queued_of(s) == 0 && s->last_len) {
+        /* Everything loaded has been played. */
+        RC_RETURN(c, 2, 1);
+    }
+    RC_RETURN(c, s ? (uint32_t)s->status : 1, 1);
+}
+
+/* A buffer may be loaded while less than two buffers' worth is queued. */
+static void k_sample_buffer_ready(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (!s) {
+        RC_RETURN(c, 0xffffffffu, 1);
+    }
+    uint32_t queued = queued_of(s);
+    if (s->last_len && queued >= 2 * s->last_len) {
+        RC_RETURN(c, 0xffffffffu, 1);
+    }
+    RC_RETURN(c, (uint32_t)s->next_buffer, 1);
+}
+
+static void k_load_sample_buffer(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    uint32_t data = RC_ARG(c, 2), len = RC_ARG(c, 3);
+    if (s) {
+        if (len) {
+            put_data(s, data, len);
+            s->last_len = len;
+            if (s->npending == 2) {
+                s->pending[0] += s->pending[1];
+                s->npending = 1;
+            }
+            s->pending[s->npending++] = len;
+        }
+        /* Loading into a sample that has finished starts it; a stopped
+         * (paused) one stays stopped. */
+        if (len && s->status == 2) {
+            queued_of(s);
+            s->status = 4;
+            rc_pcm_pause(pcm_of(s), false);
+        }
+        s->buf_len[RC_ARG(c, 1) & 1] = len;
+        s->newest = (int)(RC_ARG(c, 1) & 1);
+        s->next_buffer = (int)(RC_ARG(c, 1) & 1) ^ 1;
+    }
+    RC_RETURN(c, 0, 4);
+}
+
+static void k_minimum_sample_buffer_size(rc_cpu *c)
+{
+    /* About 1/8 s of sound, rounded to 1 KiB. */
+    uint32_t rate = RC_ARG(c, 1), format = RC_ARG(c, 2);
+    uint32_t bytes = rate / 8 * ((format & 1) ? 2u : 1u) * ((format & 2) ? 2u : 1u);
+    RC_RETURN(c, (bytes + 1023) & ~1023u, 3);
+}
+
+/* How far each buffer has played: the stream holds the newest buffer's
+ * data at its end and the other's before it. */
+static void k_sample_buffer_info(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    uint32_t pos[2] = {0, 0}, len[2] = {0, 0};
+    if (s) {
+        uint32_t queued = queued_of(s);
+        for (int k = 0; k < 2; k++) {
+            len[k] = s->buf_len[k];
+            uint32_t left;
+            if (k == s->newest) {
+                left = queued < len[k] ? queued : len[k];
+            } else {
+                uint32_t newer = s->newest >= 0 ? s->buf_len[s->newest] : 0;
+                left = queued > newer ? queued - newer : 0;
+                left = left < len[k] ? left : len[k];
+            }
+            pos[k] = len[k] - left;
+        }
+    }
+    if (RC_ARG(c, 1)) { rc_st32(RC_ARG(c, 1), pos[0]); }
+    if (RC_ARG(c, 2)) { rc_st32(RC_ARG(c, 2), len[0]); }
+    if (RC_ARG(c, 3)) { rc_st32(RC_ARG(c, 3), pos[1]); }
+    if (RC_ARG(c, 4)) { rc_st32(RC_ARG(c, 4), len[1]); }
+    RC_RETURN(c, 0, 5);
+}
+
+static void k_sample_playback_rate(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    RC_RETURN(c, s ? (uint32_t)s->rate : 0, 1);
+}
+
+static void k_sample_volume(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    RC_RETURN(c, s ? (uint32_t)(s->volume * 127.0f) : 0, 1);
+}
+
+static void k_mem_alloc_lock(rc_cpu *c) { RC_RETURN(c, rc_heap_alloc(RC_ARG(c, 0) ? RC_ARG(c, 0) : 1, false), 1); }
+
+static void k_mem_free_lock(rc_cpu *c)
+{
+    if (RC_ARG(c, 0)) {
+        rc_heap_free(RC_ARG(c, 0));
+    }
+    RC_RETURN(c, 0, 1);
+}
+
+static void k_set_sample_user_data(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s && RC_ARG(c, 1) < 8) {
+        s->user[RC_ARG(c, 1)] = RC_ARG(c, 2);
+    }
+    RC_RETURN(c, 0, 3);
+}
+
+static void k_sample_user_data(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    RC_RETURN(c, s && RC_ARG(c, 1) < 8 ? s->user[RC_ARG(c, 1)] : 0, 2);
+}
+
+static void k_register_EOB_callback(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    uint32_t old = s ? s->eob : 0;
+    if (s) {
+        s->eob = RC_ARG(c, 1);
+    }
+    RC_RETURN(c, old, 2);
+}
+
+/* Preferences Bink reads: everything at its default (0). */
+static void k_get_preference(rc_cpu *c) { RC_RETURN(c, 0, 1); }
+
+/* The output's latency in milliseconds. */
+static void k_digital_latency(rc_cpu *c) { RC_RETURN(c, audio_ok ? 50 : 0, 1); }
+
+static void k_serve(rc_cpu *c) { RC_RETURN(c, 0, 0); }
+
+/* Report buffers that have played out to their end-of-buffer callbacks. */
+static void sample_pump(rc_cpu *c)
+{
+    for (int i = 0; i < SAMPLES; i++) {
+        sample *s = &samples[i];
+        if (!s->used || s->status != 4) {
+            continue;
+        }
+        uint32_t queued = queued_of(s);
+        while (s->npending > 0 && queued <= (s->npending == 2 ? s->pending[1] : 0)) {
+            s->pending[0] = s->pending[1];
+            s->npending--;
+            if (s->eob) {
+                uint32_t a[1] = {s->guest};
+                rc_call_guest(c, s->eob, 1, a);
+            }
+        }
+    }
+}
+
+void rc_mss32_init(void)
+{
+    rc_add_pump_hook(pump);
+    rc_add_pump_hook(sample_pump);
+}
 
 const rc_import_def rc_mss32_defs[] = {
     {MSS, "_AIL_set_redist_directory@4", k_set_redist_directory},
@@ -384,5 +762,31 @@ const rc_import_def rc_mss32_defs[] = {
     {MSS, "_AIL_register_stream_callback@8", k_register_stream_callback},
     {MSS, "_AIL_service_stream@8", k_service_stream},
     {MSS, "_AIL_auto_service_stream@8", k_auto_service_stream},
+    {MSS, "_AIL_allocate_sample_handle@4", k_allocate_sample_handle},
+    {MSS, "_AIL_release_sample_handle@4", k_release_sample_handle},
+    {MSS, "_AIL_init_sample@4", k_init_sample},
+    {MSS, "_AIL_set_sample_type@12", k_set_sample_type},
+    {MSS, "_AIL_set_sample_playback_rate@8", k_set_sample_playback_rate},
+    {MSS, "_AIL_set_sample_volume@8", k_set_sample_volume},
+    {MSS, "_AIL_set_sample_pan@8", k_set_sample_pan},
+    {MSS, "_AIL_start_sample@4", k_start_sample},
+    {MSS, "_AIL_stop_sample@4", k_stop_sample},
+    {MSS, "_AIL_resume_sample@4", k_resume_sample},
+    {MSS, "_AIL_end_sample@4", k_end_sample},
+    {MSS, "_AIL_sample_status@4", k_sample_status},
+    {MSS, "_AIL_sample_buffer_ready@4", k_sample_buffer_ready},
+    {MSS, "_AIL_load_sample_buffer@16", k_load_sample_buffer},
+    {MSS, "_AIL_minimum_sample_buffer_size@12", k_minimum_sample_buffer_size},
+    {MSS, "_AIL_sample_buffer_info@20", k_sample_buffer_info},
+    {MSS, "_AIL_sample_playback_rate@4", k_sample_playback_rate},
+    {MSS, "_AIL_sample_volume@4", k_sample_volume},
+    {MSS, "_AIL_mem_alloc_lock@4", k_mem_alloc_lock},
+    {MSS, "_AIL_mem_free_lock@4", k_mem_free_lock},
+    {MSS, "_AIL_set_sample_user_data@12", k_set_sample_user_data},
+    {MSS, "_AIL_sample_user_data@8", k_sample_user_data},
+    {MSS, "_AIL_register_EOB_callback@8", k_register_EOB_callback},
+    {MSS, "_AIL_get_preference@4", k_get_preference},
+    {MSS, "_AIL_digital_latency@4", k_digital_latency},
+    {MSS, "_AIL_serve@0", k_serve},
 };
 const uint32_t rc_mss32_count = sizeof rc_mss32_defs / sizeof rc_mss32_defs[0];

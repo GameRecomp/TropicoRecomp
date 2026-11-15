@@ -29,8 +29,8 @@ Read [TARGETS.md](TARGETS.md) for the facts this plan rests on,
 ## Why Tropico 1 first, and why it is a good target
 
 It has full relocations (pointers are known, not guessed), an
-incremental-link thunk table that lists its functions, a single thread, no
-network, no registry, five import DLLs, a software renderer over DirectDraw,
+incremental-link thunk table that lists its functions, a single thread of
+its own (only the Bink library starts one), no network, no registry, five import DLLs, a software renderer over DirectDraw,
 almost no x87 and no SIMD. Tropico 2 is 3.5 times larger, has no
 relocations and probably needs Direct3D 7. Everything generic built for the
 first game carries over to the second.
@@ -45,8 +45,9 @@ first game carries over to the second.
 | M3 Lifter, integer core | Done: all 196 integer instruction forms the game uses are lifted and agree with the real CPU; fixtures agree; lifting is deterministic |
 | M4 Lift the whole game | Done: every instruction lifts (x87 in the fast mode); all 281 instruction forms the game uses agree with the real CPU; 62 MB of C, no warnings |
 | M5 Boot to `WinMain` | Done: the C runtime's start-up and the game's initialisation run as lifted code to `CreateWindowExA` (8,888 API calls, the same sequence every run) |
+| M6 Picture and input | Done: window, DirectDraw software rendering, GDI text, mouse and keyboard on SDL3; the intro movies play, the main menu and the game menu render with their movie backgrounds and respond. Scripted scenarios (`boot`, `menu`, `submenu`, `newgame`) replay exactly on the virtual clock, screenshots included |
 | M7 In game | Started: a scripted run (`newgame`) goes from the main menu through the random map and game settings into a running game on a new island at 1024x768; the simulation runs (letters, the annual report) without traps. Open: ten game years, saving and loading |
-| M6 Picture and input | Mostly done: window, DirectDraw software rendering, GDI text, mouse and keyboard on SDL3; the intro plays (black: no Bink decoder yet), the main menu renders and responds, GAME opens the game menu. Scripted scenarios (`boot`, `menu`, `submenu`) replay exactly on the virtual clock, screenshots included. Open: the game menu's items are part of its background movie, so they need the Bink decoder (M8) to be seen |
+| M8 Sound and video | Mostly done: Miles on `SDL3_mixer` (samples, streams, music); Bink by lifting the game's own `binkw32.dll` with the executable (its threads run as cooperative fibers, its sound goes through our Miles). Open: the audio capture test, a check of sync over a whole movie |
 
 Known issue: `recomp discover` on Tropico 2 (no relocations) does not finish
 in reasonable time; the gap pass has nothing to reject bad decodes with.
@@ -155,8 +156,10 @@ the original loads in the port.
 
 - `mss32` on `SDL3_mixer`: samples, streams, MP3 decoding, volume,
   callbacks.
-- `binkw32`: our own Bink 1 decoder in C (video and audio), written from
-  the public format descriptions and tested on the user's own movies.
+- `binkw32`: the game's own copy of the DLL, lifted with the executable
+  like its own code and never committed (see the decision below). Its
+  background thread runs as a cooperative guest thread; its sound goes
+  through our Miles.
 
 *Exit:* music, speech and effects play; a movie plays with sound in sync;
 an audio capture test checks that the mixer output is not silent and not
@@ -234,7 +237,7 @@ programs while M4 is under way.
 | Exception handling is used more than expected | Medium | M5 grows | Measure in M2 how many functions install handlers; implement only what a run reaches |
 | x87 differences change the simulation | Medium | Saves or random maps differ from the original | Exact mode per function; compare game state against the original at fixed points |
 | GDI text metrics differ and layouts break | High | Misplaced or clipped text | Match the original font's metrics with a substitute; allow the user's own font file |
-| Our own Bink decoder takes longer than expected | Medium | No movies for a while | The game runs with movies skipped from M6 on, so M8 blocks nothing else |
+| The lifted Bink library needs more of Windows than it uses today (other threads, waits) | Low | Movies stall | Its imports are known (100 functions); the cooperative threads cover its polling loops |
 | `SDL3_mixer` does not fit a Miles feature the game uses (stream callbacks, file callbacks, speed changes) | Medium | Extra glue or a custom stream source | Check the 23 imported functions against the mixer's model at the start of M8; fall back to raw SDL3 audio streams for that feature only |
 | Hardware mode turns out to be the only good-looking mode | Low | A Direct3D or OpenGL layer is needed for Tropico 1 | Decide after M2 and M6 with the software path on screen |
 | Compile time of generated C | Medium | Slow iteration | Address buckets, parallel build, unoptimised debug configuration, cache |
@@ -250,7 +253,7 @@ Decided by the project owner on 2026-11-15.
 |---|---|
 | Licence | MIT |
 | Language of generated code and runtime | C. No hand-written decompilation of the games is kept in the repository |
-| Bink video | Our own Bink 1 decoder in C; no FFmpeg |
+| Bink video | Lift the game's own `binkw32.dll` together with the executable; no FFmpeg. (First decided as our own decoder; changed on 2026-11-15 because the format's tables are only published in LGPL code) |
 | Audio | `SDL3_mixer` under the Miles reimplementation (mixing and MP3 decoding) |
 | Game versions | GOG releases only; other builds are refused by hash |
 | Fonts | The host's: Arial, Times New Roman and Courier New where they exist (Windows), otherwise the metric-compatible Liberation fonts, then DejaVu; nothing is bundled |

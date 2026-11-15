@@ -37,3 +37,12 @@ tables = [
     { jump = 0x0054d814, first = -4, count = 4 },
     { jump = 0x005507a4, first = -4, count = 4 },
 ]
+
+# DLLs the game ships whose code is lifted with it: the Bink video codec of
+# this release (its own copy, as for the executable).
+[[modules]]
+id = "binkw32"
+file = "binkw32.dll"
+sha256 = "f2ad88706cf898ff489c5b3f19fac5a4d51dd59110b8e919b518c1d0f9a9b73a"
+size = 291328
+image_base = 0x30000000

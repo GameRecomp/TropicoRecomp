@@ -41,7 +41,7 @@ names. No code or text from the games.
 | `USER32.dll` | 47 | One window, message pump (`PeekMessageA`), menus and accelerators, cursor, `ToAscii` keyboard input |
 | `GDI32.dll` | 16 | Fonts and text (`CreateFontA`, `TextOutA`, `GetCharABCWidthsA`, `EnumFontFamiliesExA`), bitmaps, palette |
 | `mss32.dll` | 23 | Miles Sound System: the "quick" API, streams, file callbacks |
-| `binkw32.dll` | 12 | Bink video: open, decode a frame, copy to a buffer, Miles sound hookup |
+| `binkw32.dll` | 12 | Bink video: open, decode a frame, copy to a buffer, Miles sound hookup. The DLL itself starts a thread and imports 100 functions of its own (KERNEL32, USER32, GDI32, WINMM) |
 
 Loaded at run time through `LoadLibraryA`/`GetProcAddress`: `DDraw.dll`
 (`DirectDrawCreate`, `DirectDrawCreateEx`, `DirectDrawEnumerateExA`).

@@ -13,7 +13,7 @@ add_library(rc_hle STATIC
     ddraw/ddraw.c
     frames.c
     mss32/mss32.c
-    binkw32/binkw32.c
+    winmm/winmm.c
 )
 target_include_directories(rc_hle PUBLIC include PRIVATE .)
 target_link_libraries(rc_hle PUBLIC rc_runtime rc_platform)

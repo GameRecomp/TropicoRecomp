@@ -14,6 +14,7 @@
 
 #include "rc/hle.h"
 #include "rc/log.h"
+#include "rc/thread.h"
 #include "rc/platform.h"
 #include "rc/process.h"
 #include "rc/vm.h"
@@ -657,6 +658,7 @@ static void k_PeekMessageA(rc_cpu *c)
     for (int h = 0; h < nhooks; h++) {
         hooks[h](c);
     }
+    rc_thread_yield();
     for (uint32_t i = qhead; i != qtail; i++) {
         msg m = queue[i % QUEUE];
         if ((hwnd && m.hwnd != hwnd) || ((lo || hi) && (m.message < lo || m.message > hi))) {

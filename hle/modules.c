@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: MIT */
-#include "binkw32/binkw32.h"
 #include "ddraw/ddraw.h"
 #include "mss32/mss32.h"
 #include "gdi32/gdi32.h"
 #include "kernel32/k32.h"
 #include "rc/hle_modules.h"
 #include "user32/user32.h"
+#include "winmm/winmm.h"
 
 void rc_hle_kernel32(void)
 {
@@ -34,12 +34,13 @@ void rc_hle_mss32(void)
     rc_register_imports(rc_mss32_defs, rc_mss32_count);
     rc_mss32_init();
 }
-void rc_hle_binkw32(void) { rc_register_imports(rc_binkw32_defs, rc_binkw32_count); }
+
+void rc_hle_winmm(void) { rc_register_imports(rc_winmm_defs, rc_winmm_count); }
 
 void rc_hle_all(void)
 {
+    rc_hle_winmm();
     rc_hle_mss32();
-    rc_hle_binkw32();
     rc_hle_ddraw();
     rc_hle_kernel32();
     rc_hle_user32();

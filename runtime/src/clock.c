@@ -26,25 +26,35 @@ static uint64_t host_ms(void)
 #endif
 }
 
-/* RC_CLOCK=virtual: time advances by one millisecond per reading and by
- * what Sleep asks for, so a run depends only on what the program does and
- * replays exactly (scripted scenarios use it). */
+/* RC_CLOCK=virtual: time advances by a fixed step per reading (100 us, or
+ * RC_CLOCK_STEP_US microseconds) and by what Sleep asks for, so a run
+ * depends only on what the program does and replays exactly (scripted
+ * scenarios use it). The step is small because the game reads the clock
+ * about a hundred times a frame: at 1 ms a frame would seem to take 0.1 s,
+ * and Bink would drop frames to keep up with the sound. */
 static int virtual_clock = -1;
-static uint64_t virtual_ms = 1000000u;
+static uint64_t virtual_us = UINT64_C(1000000000);
+static uint64_t step_us = 100;
 
 static int is_virtual(void)
 {
     if (virtual_clock < 0) {
         const char *v = getenv("RC_CLOCK");
         virtual_clock = v && strcmp(v, "virtual") == 0;
+        const char *st = getenv("RC_CLOCK_STEP_US");
+        if (st && atoi(st) > 0) {
+            step_us = (uint64_t)atoi(st);
+        }
     }
     return virtual_clock;
 }
 
+bool rc_clock_virtual(void) { return is_virtual() != 0; }
+
 void rc_sleep_ms(uint32_t ms)
 {
     if (is_virtual()) {
-        virtual_ms += ms;
+        virtual_us += (uint64_t)ms * 1000u;
         return;
     }
 #if defined(_WIN32)
@@ -55,10 +65,20 @@ void rc_sleep_ms(uint32_t ms)
 #endif
 }
 
+uint64_t rc_ticks_peek_ms(void)
+{
+    if (is_virtual()) {
+        return virtual_us / 1000u;
+    }
+    return rc_ticks_ms();
+}
+
 uint64_t rc_ticks_ms(void)
 {
     if (is_virtual()) {
-        return virtual_ms++;
+        uint64_t ms = virtual_us / 1000u;
+        virtual_us += step_us;
+        return ms;
     }
     /* As if the machine had been up for a while: some code of the time
      * treats small tick counts specially. */

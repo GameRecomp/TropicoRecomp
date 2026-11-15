@@ -14,8 +14,10 @@
 # and runs build/release/games/GAME/GAME headless, on the virtual clock, on the game in $<GAME>_DIR
 # (default orig/t1/app for tropico1) with a fresh user directory.
 #
-# The sequence of API calls (names only) and the screenshot are compared
-# with the accepted ones in build/scenarios; --accept makes this run the
+# The sequence of API calls (names only, gzip-compressed: Bink alone makes
+# millions) and the screenshot are compared with the accepted ones in
+# build/scenarios; the log keeps everything else the program printed.
+# --accept makes this run the
 # reference. Traces and screenshots come from running the game, so they
 # stay in build/ and never enter the repository.
 set -u
@@ -55,12 +57,17 @@ shot=
 rm -f "$base.bmp"
 RC_CLOCK=virtual SDL_VIDEO_DRIVER=${SDL_VIDEO_DRIVER:-offscreen} RC_STOP_AT="$STOP_AT" RC_FRAMES="$FRAMES" \
     RC_INPUT="${INPUT:+$dir_s/$INPUT}" RC_SCREENSHOT="$shot" RC_TRACE=imports \
-    timeout "$TIMEOUT" "$bin" "$dir" "$user" > "$log" 2>&1
-status=$?
+    timeout "$TIMEOUT" "$bin" "$dir" "$user" 2>&1 |
+    LC_ALL=C awk -v gz="gzip -n > $base.trace.gz" -v logf="$log" '
+        BEGIN { printf "" > logf }
+        match($0, /^\[import\] [^ (]*![^ (]*/) { print substr($0, 10, RLENGTH - 9) | gz; next }
+        /^\[import\]/ { next }
+        { print > logf }
+        END { close(gz) }'
+status=${PIPESTATUS[0]}
 rm -rf "$user"
 
-grep -o '^\[import\] [^ (]*![^ (]*' "$log" | sed 's/^\[import\] //' > "$base.trace"
-calls=$(wc -l < "$base.trace")
+calls=$(gzip -dc "$base.trace.gz" | wc -l)
 
 result=FAIL
 if [ $status -eq 0 ]; then
@@ -74,16 +81,16 @@ echo "$game/$scenario: $result after $calls API calls (exit $status)"
 [ "$result" = FAIL ] && tail -3 "$log"
 
 if [ "$accept" = --accept ]; then
-    cp "$base.trace" "$base.trace.ref"
+    cp "$base.trace.gz" "$base.trace.gz.ref"
     [ -f "$base.bmp" ] && cp "$base.bmp" "$base.bmp.ref"
     echo "accepted as the reference"
 else
-    if [ -f "$base.trace.ref" ]; then
-        if cmp -s "$base.trace.ref" "$base.trace"; then
+    if [ -f "$base.trace.gz.ref" ]; then
+        if cmp -s "$base.trace.gz.ref" "$base.trace.gz"; then
             echo "API call sequence matches the reference"
         else
             echo "API call sequence differs from the reference:"
-            diff "$base.trace.ref" "$base.trace" | head -20
+            diff <(gzip -dc "$base.trace.gz.ref") <(gzip -dc "$base.trace.gz") | head -20
             result=FAIL
         fi
     fi

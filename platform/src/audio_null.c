@@ -55,3 +55,40 @@ void rc_track_speed(rc_track *t, float ratio)
     (void)t;
     (void)ratio;
 }
+
+rc_pcm *rc_pcm_open(int rate, int channels, int bits)
+{
+    (void)rate;
+    (void)channels;
+    (void)bits;
+    return 0;
+}
+
+void rc_pcm_free(rc_pcm *p) { (void)p; }
+
+void rc_pcm_put(rc_pcm *p, const void *data, uint32_t size)
+{
+    (void)p;
+    (void)data;
+    (void)size;
+}
+
+uint32_t rc_pcm_queued(rc_pcm *p)
+{
+    (void)p;
+    return 0;
+}
+
+void rc_pcm_pause(rc_pcm *p, bool paused)
+{
+    (void)p;
+    (void)paused;
+}
+
+void rc_pcm_gain(rc_pcm *p, float gain)
+{
+    (void)p;
+    (void)gain;
+}
+
+void rc_pcm_clear(rc_pcm *p) { (void)p; }

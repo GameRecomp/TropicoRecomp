@@ -45,6 +45,20 @@ typedef struct rc_process {
 
 extern rc_process rc_proc;
 
+/* A loaded image: the executable or a DLL lifted with it. */
+typedef struct rc_module {
+    char name[64];
+    uint32_t base, size, entry;
+    int is_dll;
+} rc_module;
+
+/* A loaded module by file name ("binkw32", "BINKW32.DLL"), or NULL. */
+const rc_module *rc_module_find(const char *name);
+/* The module loaded at `base`, or NULL. */
+const rc_module *rc_module_at(uint32_t base);
+/* The address of an export, by name or "#ordinal", or 0. */
+uint32_t rc_module_export(const rc_module *m, const char *name);
+
 /* Run the program; returns its exit code. */
 int rc_run(const rc_config *cfg);
 
@@ -59,6 +73,11 @@ bool rc_resource(uint32_t module, uint32_t type, uint32_t id, uint32_t *data, ui
 uint64_t rc_ticks_ms(void);
 /* Wait (Sleep); with the virtual clock, only advance it. */
 void rc_sleep_ms(uint32_t ms);
+/* Whether the clock is virtual (RC_CLOCK=virtual): time passes only as
+ * the program reads it or sleeps, not with the host's. */
+bool rc_clock_virtual(void);
+/* rc_ticks_ms without advancing the virtual clock. */
+uint64_t rc_ticks_peek_ms(void);
 
 /* A small guest allocation that lives as long as the process. */
 uint32_t rc_proc_alloc(uint32_t size);

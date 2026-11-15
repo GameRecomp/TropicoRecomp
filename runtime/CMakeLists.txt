@@ -10,6 +10,7 @@ add_library(rc_runtime STATIC
     src/process.c
     src/clock.c
     src/resource.c
+    src/thread.c
 )
 target_include_directories(rc_runtime PUBLIC include)
 if(NOT MSVC)

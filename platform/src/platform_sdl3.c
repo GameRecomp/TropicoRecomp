@@ -18,6 +18,9 @@ static char title_buf[128] = "recomp";
 bool rc_plat_init(const char *title)
 {
     SDL_strlcpy(title_buf, title, sizeof title_buf);
+    /* SIGINT and SIGTERM end the program as usual: SDL would turn them into
+     * a quit message, which a program busy elsewhere never reads. */
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         SDL_Log("SDL_Init: %s", SDL_GetError());
         return false;

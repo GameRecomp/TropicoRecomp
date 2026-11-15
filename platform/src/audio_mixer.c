@@ -140,3 +140,89 @@ void rc_track_speed(rc_track *t, float ratio)
         MIX_SetTrackFrequencyRatio(t->track, ratio);
     }
 }
+
+struct rc_pcm {
+    SDL_AudioStream *stream;
+    MIX_Track *track;
+    bool paused;
+};
+
+rc_pcm *rc_pcm_open(int rate, int channels, int bits)
+{
+    if (!mixer) {
+        return NULL;
+    }
+    SDL_AudioSpec spec = {bits == 8 ? SDL_AUDIO_U8 : SDL_AUDIO_S16, channels, rate};
+    rc_pcm *p = SDL_calloc(1, sizeof *p);
+    if (!p) {
+        return NULL;
+    }
+    p->stream = SDL_CreateAudioStream(&spec, &spec);
+    p->track = MIX_CreateTrack(mixer);
+    if (!p->stream || !p->track || !MIX_SetTrackAudioStream(p->track, p->stream) || !MIX_PlayTrack(p->track, 0)) {
+        rc_pcm_free(p);
+        return NULL;
+    }
+    return p;
+}
+
+void rc_pcm_free(rc_pcm *p)
+{
+    if (!p) {
+        return;
+    }
+    if (p->track) {
+        MIX_DestroyTrack(p->track);
+    }
+    if (p->stream) {
+        SDL_DestroyAudioStream(p->stream);
+    }
+    SDL_free(p);
+}
+
+void rc_pcm_put(rc_pcm *p, const void *data, uint32_t size)
+{
+    if (p && size) {
+        SDL_PutAudioStreamData(p->stream, data, (int)size);
+        /* A track whose stream ran dry stops; start it again. */
+        if (!p->paused && !MIX_TrackPlaying(p->track)) {
+            MIX_PlayTrack(p->track, 0);
+        }
+    }
+}
+
+uint32_t rc_pcm_queued(rc_pcm *p)
+{
+    int n = p ? SDL_GetAudioStreamQueued(p->stream) : 0;
+    return n > 0 ? (uint32_t)n : 0;
+}
+
+void rc_pcm_pause(rc_pcm *p, bool paused)
+{
+    if (!p || p->paused == paused) {
+        return;
+    }
+    p->paused = paused;
+    if (paused) {
+        MIX_PauseTrack(p->track);
+    } else if (MIX_TrackPlaying(p->track) || MIX_TrackPaused(p->track)) {
+        MIX_ResumeTrack(p->track);
+    } else {
+        /* It ran dry (or never had data) and stopped. */
+        MIX_PlayTrack(p->track, 0);
+    }
+}
+
+void rc_pcm_gain(rc_pcm *p, float gain)
+{
+    if (p) {
+        MIX_SetTrackGain(p->track, gain);
+    }
+}
+
+void rc_pcm_clear(rc_pcm *p)
+{
+    if (p) {
+        SDL_ClearAudioStream(p->stream);
+    }
+}
