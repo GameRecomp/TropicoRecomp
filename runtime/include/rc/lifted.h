@@ -13,6 +13,7 @@
 
 #include "rc/cpu.h"
 #include "rc/log.h"
+#include "rc/x87.h"
 
 #ifdef __cplusplus
 extern "C" {
