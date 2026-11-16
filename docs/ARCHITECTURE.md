@@ -1,12 +1,13 @@
 # Architecture
 
 How the project is put together: the recompiler, the code it generates, the
-runtime that code runs on, and the WebAssembly design. This is the intended
-design; nothing is implemented yet. Where a choice is still open it says so
-and the plan lists it.
+runtime that code runs on, the converter, and the WebAssembly design. Most
+of it is built; what is still planned is marked as such, and the plan lists
+what is open.
 
 Terms: the **guest** is the original 32-bit x86 Windows program. The **host**
-is whatever we run on. **Lifting** is translating guest machine code to C.
+is whatever we run on. **Lifting** is translating guest machine code to C
+(or, with the native back end, to host machine code).
 **HLE** (high-level emulation) is answering a guest API call with our own
 implementation of that API, instead of running the original DLL.
 
@@ -19,7 +20,9 @@ implementation of that API, instead of running the original DLL.
 3. **Deterministic.** The same executable and the same tool version give
    byte-identical output, whatever the thread count or host.
 4. **No emulation in the product.** No interpreter, no JIT. Every reachable
-   guest instruction is lifted ahead of time.
+   guest instruction is lifted ahead of time. (The native back end's code is
+   compiled ahead of time too; the runtime only copies it into executable
+   memory.)
 5. **Portable C.** Generated code and runtime assume only C11, a
    little-endian host and two's complement. No inline assembly, no
    compiler-specific behaviour that is not behind a macro.
@@ -37,29 +40,30 @@ recomp/                 Rust workspace: the recompiler
     rc-discover/        function and jump-table discovery, code map
     rc-x86/             decoding (iced-x86) and instruction semantics → IR
     rc-ir/              the IR: statements, expressions, terminators
-    rc-analysis/        x87 stack depth, stack deltas, call contracts (later)
     rc-emit-c/          IR → C
     rc-emit-native/     IR → x86-64 / ARM64 machine code with Cranelift (one blob per target)
-    rc-convert/         installer → identified game → lifted → native code → zip with a shell
+    rc-convert/         installer → identified game → lifted → native code → package with a shell
     rc-web/             rc-convert for the browser (wasm-bindgen), run by web/ in a worker
-    rc-emit-wasm/       IR → WebAssembly module (later)
-    rc-manifest/        game.toml and override files
-    rc-report/          JSON reports
-    rc-cli/             the `recomp` command
+    rc-manifest/        game.toml
+    rc-cli/             the `recomp` command (and its reports)
     rc-difftest/        differential tests against the real CPU (dev only)
     rc-inno/            reads and extracts the GOG installers (Inno Setup 5.5.0, own LZMA decoder)
-runtime/                C: CPU state, guest memory, PE image loading, dispatch, traps
+    (planned: rc-analysis for x87 stack depth and call contracts; rc-emit-wasm
+    for playing in the browser)
+runtime/                C: CPU state, guest memory, PE loading, dispatch, traps, threads,
+                        native-code loading
 hle/                    C: one directory per reimplemented DLL
   kernel32/ user32/ gdi32/ ddraw/ mss32/ winmm/
-  msvcrt6/              native versions of statically linked CRT functions
-platform/               C: the SDL3 side (window, input, audio, video, files)
+  frames.c              scripted input, screenshots and frame counts
+platform/               C: the SDL3 side (window, input, audio, fonts, files)
 web/                    the converter page (GitHub Pages): HTML, CSS, the worker
-android/                the Android shell's manifest, activity and icon (tools/build-android)
+android/                the Android shell's manifest, activity and icon
 games/
-  tropico1/             game.toml, overrides, main.c, native/ replacements, tests/
-  tropico2/
-web/                    browser front end (later)
-tools/                  git hooks, repository audit, helper scripts
+  tropico1/             game.toml, main.c, shell.c (the shell's empty code table), scenarios/
+  tropico2/             game.toml
+tools/                  git hooks, repository audit, difftest harness, scenario runner,
+                        builds of the shells, the AppImage, the Android APK and the site
+.github/workflows/      CI (ci.yml) and the converter site (converter.yml)
 docs/
 orig/        (ignored)  the user's game copies
 generated/   (ignored)  lifted C
@@ -73,11 +77,11 @@ build/       (ignored)  build trees
 ```
  game.toml ─┐
             ▼
- EXE ─► load ─► discover ─► lift ─► analyse ─► emit ─► write
-        rc-pe   rc-discover rc-x86  rc-analysis rc-emit-c
-                    │                               │
-                    ▼                               ▼
-               code map (JSON)              generated/<game>/ + report.json
+ EXE ─► load ─► discover ─► lift ─► emit ─────────────────► write
+        rc-pe   rc-discover rc-x86  rc-emit-c (C)            generated/<game>/c/
+                    │               rc-emit-native (blob)    generated/<game>/native/
+                    ▼
+               code map (JSON)
 ```
 
 Each stage is a library crate with a plain data interface, so each can be
@@ -142,7 +146,10 @@ indirect transfers and traps. Instruction semantics live in one place
 does not model becomes a **named trap** carrying its address and bytes, and
 the report counts it; it does not stop the run.
 
-**Analyse.** Per function at first, whole-program later:
+**Analyse.** Not a stage of its own yet. Flag liveness comes for free:
+registers and flags are locals of each function, and the C compiler (or
+Cranelift) drops flag computations nobody reads. The rest is planned, per
+function at first and whole-program later:
 
 - *Flag liveness*: compute a flag only if something reads it before it is
   overwritten. Without this, every arithmetic instruction writes six flags.
@@ -156,10 +163,10 @@ the report counts it; it does not stop the run.
   slots.
 
 **Emit.** Write C: one C function per guest function, grouped into files by
-fixed guest-address buckets so that a change rebuilds only its bucket.
-Functions are emitted in parallel and written in address order. Optionally
-each guest instruction is emitted as a comment above its C, for debugging
-and profiling.
+fixed guest-address buckets so that a change rebuilds only its bucket,
+written in address order. Optionally each guest instruction is emitted as a
+comment above its C, for debugging and profiling. Or, with
+`recomp lift --native TARGET`, compile to machine code (below).
 
 ### The native back end
 
@@ -203,7 +210,8 @@ stop). Nothing in it is specific to C.
 
 - **CPU state** is `rc_cpu` (`runtime/include/rc/cpu.h`), passed by
   pointer: eight 32-bit registers, the six arithmetic flags and DF one byte
-  each, the x87 state, the `fs` base and `eip` for diagnostics. Passing it
+  each, the x87 state, the `fs` base, `eip` for diagnostics, and two fields
+  only native code uses (the memory base and its runtime functions). Passing it
   explicitly keeps the code re-entrant, which window procedures and other
   callbacks from host to guest need.
 - **Inside a function the registers and arithmetic flags are C locals**,
@@ -311,9 +319,6 @@ tables = [                     # jump tables the analysis cannot bound
     { jump = 0x0054d814, first = -4, count = 4 },
 ]
 
-[lift]
-exact_x87 = []                 # function addresses
-
 [[modules]]                    # a DLL the game ships, lifted with it
 id = "binkw32"
 file = "binkw32.dll"
@@ -321,7 +326,9 @@ sha256 = "f2ad8870…"
 size = 291328
 image_base = 0x30000000
 
-[functions]                    # replacement directives, by address
+# Planned, not read yet:
+# [lift] exact_x87 = []        # functions with exact 80-bit x87
+# [functions]                  # replacement directives, by address
 # 0x004a1b20 = { native = "crt_malloc" }      # statically linked CRT function
 # 0x00451230 = { replace = "t1_draw_tile" }   # hand-written, may call the lifted body
 ```
@@ -362,7 +369,8 @@ The guest address space as the runtime lays it out:
   chunks, larger ones as reservations of their own. It is deterministic:
   the same calls give the same addresses, which keeps runs reproducible.
 - **Loader and start-up** (`rc/process.h`). Loads the lifted DLLs, then
-  reads the executable from the game directory, copies headers and sections to the preferred base,
+  reads the executable from the game directory, copies headers and sections
+  to the preferred base,
   writes every import slot with the import's reserved address, builds the
   stack and the TIB (empty exception chain, stack bounds, self pointer),
   sets the x87 control word Windows starts threads with (53-bit precision),
@@ -377,12 +385,16 @@ The guest address space as the runtime lays it out:
   without regard to case, as Windows matches them.
 - **Dispatch, traps** (`rc/dispatch.h`). The address-to-function table
   generated with the code; unknown targets and traps are fatal with the
-  address and the registers.
+  address and the registers. A fatal error also goes to a hook, which the
+  game sets to show it in a message box (a converted build has no terminal).
+- **Native code** (`rc/native.h`). Loads a blob from the native back end
+  (checking its target and the CPU state layout), maps it executable and
+  makes its table the one dispatch uses, instead of the C compiled in.
 - **Threads** (`rc/thread.h`). Guest threads run cooperatively, one at a
   time, each on a host fiber (fibers on Windows, `ucontext` on Linux; on
-  macOS, which has deprecated `ucontext`, a POSIX thread per guest thread
-  that runs only while it holds a baton) with
-  its own CPU state, guest stack and TIB. A thread gives way only in
+  macOS, which has deprecated `ucontext`, and Android, whose C library has
+  none, a POSIX thread per guest thread that runs only while it holds a
+  baton) with its own CPU state, guest stack and TIB. A thread gives way only in
   `Sleep`, the message pump and the clock functions, so a run with threads
   replays as exactly as one without. Critical sections need no locking.
   This serves libraries that poll in a loop around `Sleep` (Bink); code
@@ -393,10 +405,12 @@ The guest address space as the runtime lays it out:
   samples count as played as virtual time passes and are not sent to the
   device, so picture and sound keep to one clock.
 - **Diagnostics.** `RC_TRACE` (comma-separated: `imports`, `files`,
-  `exports`, `threads`) logs every API call with its first arguments and
-  result, every file opened, every call into a lifted DLL's exports, and
-  threads starting and ending. `RC_STOP_AT=DLL!name` ends a run successfully at the first call
-  of that import: scripted scenarios use it as their goal.
+  `exports`, `threads`, `messages`, `ddraw`, `gdi`, `sound`) logs every API
+  call with its first arguments and result, every file opened, every call
+  into a lifted DLL's exports, threads starting and ending, dispatched
+  window messages, and what DirectDraw, GDI and Miles do.
+  `RC_STOP_AT=DLL!name` ends a run successfully at the first call of that
+  import: scripted scenarios use it as their goal.
 - **Structured exception handling** (planned). The `fs:[0]` handler chain
   is ordinary guest memory, so installing and removing frames works as
   lifted code. `RaiseException` and `RtlUnwind` will walk that chain and
@@ -409,9 +423,12 @@ The guest address space as the runtime lays it out:
 `platform/` is the host side, behind `rc/platform.h` and `rc/text.h`: one
 window showing 32-bit frames scaled with letterboxing, input events in the
 frame's coordinates with Windows virtual keys and PC scan codes, the copy
-of the last frame (screenshots), and fonts. SDL3 and SDL3_ttf implement it;
-without them a null platform builds (no window, no input, no text), which
-is what CI compiles.
+of the last frame (screenshots), fonts, the program's and the user's
+directories, error message boxes, and on Android the data the APK carries.
+SDL3, SDL3_ttf and SDL3_mixer implement it; without them a null platform
+builds (no window, no input, no text, no sound), which CI's runtime jobs
+compile. The shells are built with SDL3 (`tools/build-shell`,
+`tools/build-android`).
 
 For scripted runs (`hle/frames.c`, `runtime/src/clock.c`):
 
@@ -448,37 +465,70 @@ got this right:
 - **Calling a guest function from the host** (a window procedure, a Miles or
   Bink callback): push the arguments and a sentinel return address on the
   guest stack and call `dispatch`.
-- **Unimplemented is loud.** Every import the executable names exists from
-  day one as a generated stub that reports its name and stops. Bring-up is
-  the work of replacing stubs in the order the game reaches them.
+- **Unimplemented is loud.** An import without an HLE function stops the
+  run with its name and call site when it is first called. Bring-up is the
+  work of implementing them in the order the game reaches them.
 - **Behaviour comes from public documentation and from observing the
   original**, never from copying another implementation's source.
 
 | Module | Backed by | Notes |
 |---|---|---|
-| `kernel32` | libc, POSIX or Windows | Built: process and module functions, environment, TLS, critical sections and interlocked operations (one thread), time; heaps and virtual memory on the runtime's allocator; code page 1252 conversions, character types, string mapping and comparison, locale information for English (US); files, searches and paths on a virtual file system: guest paths under the guest installation directory resolve without regard to case in the user directory first, then the read-only game directory, and writing a game file copies it to the user directory first. `LoadLibraryA`/`GetProcAddress` answer for known DLLs with reserved addresses. |
+| `kernel32` | libc, POSIX or Windows | Built: process and module functions, environment, TLS, critical sections and interlocked operations (one thread), time, threads (`CreateThread`, run cooperatively); heaps and virtual memory on the runtime's allocator; code page 1252 conversions, character types, string mapping and comparison, locale information for English (US); files, searches and paths on a virtual file system: guest paths under the guest installation directory resolve without regard to case in the user directory first, then the read-only game directory, and writing a game file copies it to the user directory first. `LoadLibraryA`/`GetProcAddress` answer for lifted DLLs with their exports and for others with reserved addresses. |
 | `user32` | the platform layer | Built: window classes, resources (strings from the executable's resource directory), windows with the messages Windows sends on creation, showing and activation; a message queue fed by host input (mouse, keys with virtual-key codes, scan codes and key state, `TranslateMessage`/`ToAscii` for a US layout), painting, capture, `FillRect` |
 | `gdi32` | `SDL3_ttf` through the platform | Built: device contexts drawing into guest memory (DirectDraw surfaces, memory bitmaps of 1 to 32 bits), fonts by face name with substitutes, `TextOutA` without antialiasing, ABC widths, face names, font enumeration, `GetBitmapBits` |
 | `ddraw` | the platform's frame | Built: DirectDraw 1/2/4/7 and surfaces 1 to 7 as COM objects in guest memory, display modes, surfaces with pixels in guest memory (8, 16, 24, 32 bits), `Lock`, `Blt` (copy, scale, colour key, fill), `BltFast`, `Flip`, palettes, clippers, `GetDC`; presenting converts the primary surface to the platform's 32-bit frame. Direct3D is not offered, so the game takes its software renderer |
 | `mss32` | `SDL3_mixer` | Built: the quick API (samples in memory), streams (music and speech from files through the game's file callbacks), volume, status; streamed samples (`HSAMPLE` with two buffers, end-of-buffer callbacks, play positions) as Bink uses them, fed into PCM streams. The mixer does the mixing and the MP3 decoding |
 | `winmm` | the runtime's clock | Built: `timeGetTime`; wave output reports no device |
 | `binkw32` | none: lifted | The game's own DLL, lifted with the executable (see the manifest) |
-| `msvcrt6` | libc | Native `malloc`, `memcpy`, `strlen`, `sqrt` and friends bound over the statically linked copies, located by signature |
+| `msvcrt6` | libc | Planned (M10): native `malloc`, `memcpy`, `strlen`, `sqrt` and friends bound over the statically linked copies, located by signature |
+
+## The converter
+
+A static page (`web/`, published to GitHub Pages) turns the user's GOG
+installer into a build for their system, entirely in their browser.
+
+- **The pipeline** is `rc-convert`: identify the game by the hash of its
+  executable inside the installer, lift it and its DLLs, compile to native
+  code for the targets the system needs, and package. It does no file I/O,
+  so `rc-web` runs it in a Web Worker (reading the installer in pieces with
+  `FileReaderSync`, handing the output back in pieces) and `recomp
+  convert` runs it natively. Both give byte-identical output.
+- **Shells** are the game program without lifted code (`games/tropico1/
+  shell.c` is its empty code table), with the runtime, the HLE and SDL3.
+  CI builds one per system and wraps each in a *template*: a zip with the
+  shell at its final place, a `data/` directory entry marking where the
+  game goes, and a `data/targets` file naming the code targets to compile.
+  At start a shell finds `data/` beside itself (beside the AppImage file,
+  in a macOS bundle's resources) and runs `data/code-<target>.bin` with the
+  game files in `data/game/`.
+- **Output**: Windows, Linux and macOS get a zip of the template with the
+  data filled in (stored entries, Unix modes kept). Android gets an APK:
+  the shell APK's entries aligned as zipalign does, the data under
+  `assets/data` with an index (`files.txt`), signed with APK Signature
+  Scheme v2 (ECDSA P-256 with a fixed key built into the converter, so any
+  converted APK installs over an earlier one); the app unpacks the data
+  into its own storage on its first start.
+- **The page** offers the four systems, streams the output to a file where
+  the browser can (otherwise it collects the pieces and downloads them),
+  and shows progress by stage, with functions compiled and bytes packed.
 
 ## WebAssembly
 
+WebAssembly is used twice. The converter runs the pipeline in the browser
+(above, built). Playing the game in the browser is planned (M11); the rest
+of this section is about that.
+
 The requirement is that the whole process, recompiling and compiling, can
-later happen in a browser. The user drops in their own game folder; nothing
-is uploaded anywhere; the hosting site serves only our tools.
+happen in a browser. The user drops in their own game folder; nothing is
+uploaded anywhere; the hosting site serves only our tools.
 
 That has two parts with very different difficulty.
 
 **1. The recompiler in the browser.** This is the reason for Rust and for
 the pure-Rust decoder. The pipeline crates take bytes and return bytes, do
-no file or process I/O themselves, and compile to `wasm32-unknown-unknown`.
-`rc-web` exposes "take this EXE, give me the output" through `wasm-bindgen`
-and runs in a Web Worker. To keep this true, CI builds the pipeline crates
-for `wasm32` from the first day, long before a web front end exists.
+no file or process I/O themselves, and compile to `wasm32-unknown-unknown`;
+CI builds them for `wasm32` on every push. The converter already runs them
+there.
 
 **2. Turning the result into something the browser can run.** Two ways:
 

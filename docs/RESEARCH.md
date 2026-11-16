@@ -161,7 +161,8 @@ Tycoon 3, Spore) from the user's own copy, mainly for Apple Silicon.
 
 Take: the crate layout and stage boundaries, deterministic parallel emission,
 address-bucket chunking, trap-with-reason plus report, the `game.toml`
-identity check, `innoextract` for GOG installers.
+identity check, and extracting GOG installers without running them (we
+wrote our own reader, `rc-inno`, so the pipeline needs no outside tool).
 Differences: its front end depends on Ghidra's SLEIGH through C++ FFI and on
 Capstone, which does not suit a `wasm32` build. We use a pure-Rust decoder.
 Its SSA and stack-promotion machinery is far beyond what a first version
@@ -290,12 +291,12 @@ Avoid: the Windows-only host; it does not give us Linux, macOS or the web.
 |---|---|---|---|
 | Lifter language | C, C++, Python, Rust | Rust | Required; also the only choice here that makes a browser build realistic |
 | Decoder | udis86, Zydis, Capstone, SLEIGH, iced | `iced-x86` | Pure Rust, no C dependency, compiles to `wasm32` |
-| Output | assembly, C++, C | C11 | Required; compiles with any compiler including Emscripten |
+| Output | assembly, C++, C | C11, and native code from the same IR (Cranelift) | C compiles with any compiler and is easy to read and debug; native code is what a browser can make from the user's copy in seconds |
 | Discovery | Ghidra/IDA exports, own analysis | Own analysis, no external tool | Must run in a browser; Tropico 1 gives relocations and a thunk table |
 | x87 | double, exact softfloat, mixed | Double with tracked control word, exact mode per function | Little x87 in Tropico 1; exactness has a real cost; decide by tests |
 | Fallback for unlifted code | none (fatal), interpreter, JIT | None; fatal with a report | Simpler, honest, and Tropico 1 has full relocations |
 | CPU state | global registers, CPU struct | CPU struct passed by pointer | Re-entrant (callbacks), testable; optimise register traffic later |
-| Middleware (Miles, Bink) | lift the DLLs, forward to real DLLs, HLE | HLE | Portable, and the DLLs are not ours to translate or ship |
+| Middleware (Miles, Bink) | lift the DLLs, forward to real DLLs, HLE | Miles: HLE; Bink: lifted from the user's own DLL | Miles is portable on `SDL3_mixer`; Bink is a codec (pure computation) whose format is not published under a usable licence. No DLL or lifted code is shipped |
 | Prebuilt game binaries | shipped by one project | Never shipped | They are derived from the game |
 
 ## Further reading found on the way
@@ -306,4 +307,4 @@ Avoid: the Windows-only host; it does not give us Linux, macOS or the web.
   such games in a browser. Worth a look before the WebAssembly milestone.
 - Steamless, `innoextract`: the usual tools for unwrapping DRM and
   extracting GOG installers. The GOG Tropico executables need neither DRM
-  removal nor unpacking.
+  removal nor unpacking, and `recomp unpack` extracts the installers.

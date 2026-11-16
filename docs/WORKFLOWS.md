@@ -1,12 +1,7 @@
 # Workflows
 
-How the recurring jobs are done. What exists now: the git hooks, the
-ignore rules, `tools/audit`, `tools/run-scenario`, the game executable,
-and `recomp info`, `recomp ingest`, `recomp discover`, `recomp lift` and
-the difftest. The rest
-(`recomp build`,
-`tools/run-scenario`) is the planned interface (see [PLAN.md](PLAN.md)) and
-arrives with the milestone that introduces it.
+How the recurring jobs are done. Everything named here exists unless it is
+marked as planned (see [PLAN.md](PLAN.md)).
 
 ## 0. Set up a working copy
 
@@ -15,9 +10,11 @@ git config core.hooksPath tools/hooks     # once per clone; enables the guardrai
 ```
 
 Needed: a Rust toolchain (1.88 or later) with the `wasm32-unknown-unknown`
-target, a C compiler, CMake 3.25+, Ninja, SDL3 and SDL3_ttf (3.2 or later)
-with their CMake packages. Fonts: on
-Linux the Liberation fonts (package `fonts-liberation`), or DejaVu.
+target, a C compiler, CMake 3.25+, Ninja, SDL3, SDL3_ttf and SDL3_mixer
+(3.2 or later) with their CMake packages. Fonts: on Linux the Liberation
+fonts (package `fonts-liberation`), or DejaVu. For the converter page also
+`wasm-bindgen` 0.2.130 (`cargo install wasm-bindgen-cli --version 0.2.130`);
+for the Android shell the Android SDK and NDK and a JDK.
 
 ```sh
 cargo build --release --manifest-path recomp/Cargo.toml    # the recomp tool
@@ -60,19 +57,26 @@ orig/
 recomp info      orig/t1/app/Tropico.EXE         # what the executable is
 recomp discover  orig/t1/app --game tropico1     # code map + coverage report
 recomp lift      orig/t1/app --game tropico1     # C into generated/tropico1/c
-cmake --preset release -DGAME=tropico1 && cmake --build --preset release
-build/release/tropico1 --game-dir orig/t1/app
+cmake --preset release && cmake --build --preset release
+build/release/games/tropico1/tropico1 orig/t1/app [user-dir]
 ```
 
-`recomp build --game tropico1` runs all of it. Artefacts:
+`recomp lift --native host` (or a list of targets: `x86_64-sysv`,
+`x86_64-windows`, `arm64-apple`, `arm64-linux`) compiles to native code
+instead, and `RC_NATIVE=generated/tropico1/native/code-x86_64-sysv.bin`
+makes the game run that instead of its compiled C. Without arguments the
+game looks for `orig/t1/app` above the working directory and above the
+program, and keeps what it writes in the user's data directory.
+
+Artefacts:
 
 | Path | Contents | In git |
 |---|---|---|
-| `generated/tropico1/*.c` | Lifted code, dispatch table, import stubs | never |
-| `generated/tropico1/report.json` | Function count, traps with reasons, timings | never |
+| `generated/tropico1/c/` | Lifted C: one file per 64 KiB of guest code, `funcs.h`, the dispatch table | never |
+| `generated/tropico1/native/` | Native-code blobs, one per target | never |
 | `generated/tropico1/codemap.json` | Functions, blocks, jump tables | never |
-| `build/` | Objects and executables | never |
-| `games/tropico1/` | Manifest, overrides, glue, tests | yes |
+| `build/` | Objects, executables, scenario references | never |
+| `games/tropico1/` | Manifest, `main.c`, `shell.c`, scenarios | yes |
 
 ## 3. The bring-up loop
 
@@ -96,17 +100,19 @@ ones, and `--accept` makes a run the reference. Traces and screenshots
 come from running the game and stay out of the repository.
 
 More switches for investigating: `RC_TRACE` also takes `messages`
-(dispatched window messages), `ddraw`, `gdi`, `bink`; `RC_SCREENSHOT`,
-`RC_FRAMES` and `RC_INPUT` work outside scenarios too.
+(dispatched window messages), `ddraw`, `gdi`, `sound`, `exports` (calls
+into lifted DLLs) and `threads`; `RC_SCREENSHOT`, `RC_FRAMES` and
+`RC_INPUT` work outside scenarios too. With `RC_NATIVE=blob` a scenario
+runs the native back end's code and must still match its references.
 
 1. Run a scripted scenario: `tools/run-scenario tropico1 boot`.
 2. It stops at the first of:
    - **unimplemented import** (name and guest call site): implement it in
      `hle/<dll>/` from public API documentation, with a unit test;
-   - **unknown indirect target** (address): the run appended it to
-     `build/seeds-found.txt`; find out why discovery missed it, fix
-     discovery if it is a class of miss, otherwise add it to
-     `games/tropico1/seeds.txt` with a comment saying how it is reached;
+   - **unknown indirect target** (address; recording it in a seeds file
+     is planned): find out why discovery missed it, fix discovery if it is
+     a class of miss, otherwise add it to `[discover] seeds` in
+     `games/tropico1/game.toml` with a comment saying how it is reached;
    - **unmodelled instruction** (address and bytes): add the instruction to
      the lifter with difftest cases;
    - **guest fault or wrong behaviour**: see workflow 5.
@@ -128,7 +134,9 @@ recomp/target/release/difftest --coverage orig/t1/app/Tropico.EXE
 ```
 
 The difftest needs an x86 Linux host that runs 32-bit programs, and clang.
-It works in `build/difftest/`.
+It works in `build/difftest/` and runs every case through both back ends,
+the generated C and the native code (on hosts the native back end
+targets); both must agree with the real CPU.
 
 1. Write or extend the difftest cases first; watch them fail.
 2. Make the change in `rc-x86` or the emitter.
@@ -152,11 +160,11 @@ In order of cost:
    known-good run of the same build.
 2. **Instruction comments**: regenerate with guest instructions as comments
    and read the C for the function in question.
-3. **Guest trace**: log registers at every function entry (or block entry)
+3. **Guest trace** (planned): log registers at every function entry (or block entry)
    for a chosen address range; compare two builds, for example fast against
    exact floating point, or before against after a lifter change. The first
    difference names the function.
-4. **Function difftest**: extract the function's inputs from a trace and run
+4. **Function difftest** (planned): extract the function's inputs from a trace and run
    it against the reference CPU.
 5. **The original as the oracle**: run the user's own executable under Wine
    or on Windows with API tracing, as a development aid only. Nothing from
@@ -177,7 +185,8 @@ documentation; observe behaviour.
 
 ## 7. Replacing a lifted function with native C
 
-For speed (hot spots), for correctness fixes in the game, or for features.
+Planned (M10); none of this exists yet. For speed (hot spots), for
+correctness fixes in the game, or for features.
 
 1. Identify the function by address from a profile or a bug.
 2. Declare it in `game.toml`: `0x… = { replace = "name" }`. The lifter then
@@ -223,14 +232,16 @@ not transcribed from the lifted C.
 |---|---|---|
 | Unit | Rust crates, C runtime, HLE functions | every commit |
 | Fixtures | Our own small PE programs, lifted and run | every commit |
-| Difftest | Instruction semantics against a reference CPU | every lifter change |
+| Difftest | Instruction semantics against a reference CPU, through both back ends | every lifter or back-end change |
 | Determinism | Regenerate twice, compare bytes | every lifter change |
 | Report | Function and trap counts against the last run | every lifter change |
-| Scenario | Scripted runs of the real game: boot, menu, new game, load, long run | before merging runtime or HLE work; needs a local game copy |
+| Scenario | Scripted runs of the real game (boot, menu, submenu, new game), with the C build and with `RC_NATIVE` | before merging runtime, HLE or back-end work; needs a local game copy |
 | Manual | A person plays | before a release |
 
-CI has no game copy, so it runs everything down to "Determinism" on
-fixtures. Scenario runs happen on a developer machine and their pass/fail
+CI has no game copy. It runs the unit tests, the difftest (both back
+ends), the `wasm32` builds of the pipeline, the runtime on Linux, macOS and
+Windows, and the audit; the converter workflow builds the shells and the
+site. Scenario runs happen on a developer machine and their pass/fail
 summary goes into the pull request description.
 
 Scenario inputs are keyed to game frames, not to wall-clock time, so they
@@ -239,15 +250,17 @@ recordings contain game art and stay outside the repository.
 
 ## 10. Releases
 
-A release contains the recompiler, the runtime sources or libraries, and the
-build scripts. It contains no lifted code and no executable built from it.
-The user runs one command that verifies their copy, recompiles it and builds
-the game on their machine.
+What is published is the converter site: the page, the converter in
+WebAssembly and the shells, none of which contain game code. Tagged
+releases of the sources are planned; a release would contain the
+recompiler, the runtime and the build scripts, never lifted code or a build
+of the game. The user's own copy is recompiled on their machine, by the
+page or by `recomp`.
 
 Before tagging: full test ladder, `tools/audit` over the whole tree and the
 release archive, changelog.
 
-## 11. The browser build
+## 11. Playing in the browser (planned)
 
 - Development: the native C tree compiled with Emscripten and served from
   localhost, with the game folder chosen through the browser's file picker.
@@ -260,7 +273,7 @@ release archive, changelog.
 ## 11a. The converter
 
 The converter page turns a GOG installer into a zip for Windows, Linux or
-macOS (M12). CI builds and publishes it (`.github/workflows/converter.yml`
+macOS, or an APK for Android (M12). CI builds and publishes it (`.github/workflows/converter.yml`
 to GitHub Pages); locally:
 
 ```sh
@@ -285,8 +298,8 @@ signature as Android does.
   page's WebAssembly build and the native command give byte-identical zips.
 - The shell is the game program without lifted code. It runs the native
   code and game files in `data/` beside it (on Android: in the APK's
-  `assets/data`, unpacked into the app's storage on the first start); `RC_NATIVE=blob` and
-  `TROPICO1_DATA=dir` point it elsewhere for testing.
+  `assets/data`, unpacked into the app's storage on the first start);
+  `RC_NATIVE=blob` and `TROPICO1_DATA=dir` point it elsewhere for testing.
 - The site serves only our tools and the shells, which contain no game
   code. A converted build is made in the user's browser and saved on their
   machine; it is never uploaded or offered for download.

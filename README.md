@@ -2,15 +2,19 @@
 
 A static recompilation of **Tropico** (PopTop Software, 2001) and, after it,
 **Tropico 2: Pirate Cove** (Frog City, 2003): the 32-bit x86 Windows machine
-code of each game is translated ahead of time into portable C, and that C is
-linked against a runtime that reimplements the parts of Windows and the
-middleware the game calls, on top of SDL3.
+code of each game is translated ahead of time into portable C (or straight
+into native machine code), and that code runs on a runtime that reimplements
+the parts of Windows and the middleware the game calls, on top of SDL3.
 
-The result is a native program for Linux, Windows and macOS (x86-64 and
-ARM64), and later a WebAssembly build that runs in a browser. There is no
-emulator, no interpreter and no Wine in the result.
+The result is a native program for Linux, Windows, macOS and Android
+(x86-64 and ARM64). There is no emulator, no interpreter and no Wine in the
+result.
 
-**Status: planning.** No code yet. Start with [docs/PLAN.md](docs/PLAN.md).
+**Status:** Tropico 1 runs: the intro movies, the menus, and a new game on
+a random island, with sound. Ten game years and saving are next. A
+converter page turns the GOG installer into a build for Windows, Linux,
+macOS or Android. Tropico 2 has not started. See
+[docs/PLAN.md](docs/PLAN.md).
 
 ## You bring the game
 
@@ -29,33 +33,39 @@ Put your installed game under `orig/` (ignored by git); see
 [docs/WORKFLOWS.md](docs/WORKFLOWS.md#1-ingest-a-game-copy).
 
 Or use the converter page: it runs in your browser, takes your GOG
-installer and gives you a zip that runs on Windows, Linux or macOS. The
-installer never leaves your machine, and the page serves only the tools
+installer and gives you a zip that runs on Windows, Linux or macOS, or an
+app (APK) for Android. The installer never leaves your machine, and the
+page serves only the tools
 (see [docs/WORKFLOWS.md](docs/WORKFLOWS.md#11a-the-converter)).
 
 ## How it works
 
 ```
-orig/t1/app/Tropico.EXE          your copy (PE32, x86, MSVC 6)
+orig/t1/app/Tropico.EXE          your copy (PE32, x86, MSVC 6), with its binkw32.dll
         │
         ▼
   recompiler (Rust)              load PE → discover functions → lift to IR
-        │                        → analyse (flags, x87, stack) → emit C
+        │                        → emit C, or native code (Cranelift)
         ▼
-  generated/tropico1/*.c         never committed
-        │   + runtime/ (C)       CPU state, guest memory, dispatch, PE image
+  generated/tropico1/c/*.c       never committed (or a native-code blob)
+        │   + runtime/ (C)       CPU state, guest memory, dispatch, PE loader, threads
         │   + hle/ (C)           kernel32, user32, gdi32, DirectDraw,
-        │                        Miles Sound System, Bink  →  SDL3
+        │                        Miles Sound System, WinMM  →  SDL3
         ▼
-  build/tropico1                 native executable; reads game data from orig/
+  build/release/games/tropico1/tropico1   native executable; reads game data from orig/
 ```
+
+The converter does the same in the browser: it reads the installer,
+compiles the game to native code and packs it with a prebuilt shell (the
+runtime without any game code) for the chosen system.
 
 | Part | Language | Why |
 |---|---|---|
 | Recompiler (`recomp/`) | Rust | Safe, fast, and compiles to `wasm32` so it can run in a browser |
-| Generated code | C11 | Portable, compiles everywhere including Emscripten, easy to read and diff |
+| Generated code | C11, or native code from the same IR | C compiles everywhere and is easy to read and debug; native code is what a browser can make in seconds |
 | Runtime and HLE (`runtime/`, `hle/`) | C11 | Same toolchain as the generated code; SDL3 is a C API |
 | Platform layer | SDL3 | Window, input, audio, GPU, filesystem; satellites (`SDL3_ttf`, `SDL3_mixer`) where they fit |
+| Converter (`web/`) | HTML and JavaScript around the Rust pipeline in WebAssembly | Runs in the user's browser; nothing is uploaded |
 
 ## Documents
 

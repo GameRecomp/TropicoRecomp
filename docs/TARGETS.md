@@ -87,6 +87,11 @@ where execution must never arrive. The generated C is 62.2 MB in 23 files
 and compiles with clang `-O1 -Wall -Wextra`, without warnings, in 21 s on
 16 cores (3 min 40 s of CPU).
 
+With the game's `binkw32.dll`, which is lifted with it (773 functions,
+every byte classified), the program has 5,587 functions. The native back
+end compiles all of them to 8.2 MB of x86-64 code in about a second on 16
+threads, and in 8 s on one thread as WebAssembly (2026-11-16).
+
 Running (2026-11-16): the recompiled game plays its intro, shows its menus,
 and starts a game on a random island; the software renderer draws the
 island, its people and the interface at 1024x768 through the HLE
@@ -136,14 +141,14 @@ case-insensitive and accept both slash directions.
 |---|---|
 | Relocations present | Every absolute address in code and data is known exactly. The hardest problem of x86 static recompilation, telling a pointer from a number, is solved for this binary. Function pointers in data and jump tables are found from fixups, not guessed. |
 | Thunk table | 1,500 function entry points for free. Indirect calls through thunk addresses must be dispatchable, so thunks are functions too. |
-| No `CreateThread` | The game is single-threaded. No guest thread scheduler, no atomics, and the WebAssembly build needs no shared memory. (Miles and Bink ran their own threads inside their DLLs; our replacements own that.) |
+| No `CreateThread` | The game itself is single-threaded. Only the Bink DLL starts a thread, a polling loop around `Sleep`, which the runtime runs as a cooperative guest thread: no atomics, and the WebAssembly build needs no shared memory. (Miles ran its own threads inside its DLL; our reimplementation owns that.) |
 | Five import DLLs, about 190 functions | A small HLE surface. No registry, network or COM activation. |
 | DirectDraw software path | A first renderer is a locked 2D surface copied to an SDL3 texture. No 3D API is needed to reach gameplay. |
 | MSVC 6 static CRT | A known library with a known layout. Its functions can later be bound to native implementations by signature (heap, string, math), which is both a speed-up and a simplification. |
 | Little x87, no SIMD | The lifter's floating point can start simple (host `double` with tracked control word) and be made exact only where tests show a difference. |
 | `RtlUnwind`, `RaiseException`, `fs:` frames | Structured exception handling exists and must be modelled at least as far as the CRT start-up and any `try`/`catch` the game really takes. |
 | GDI text | The game draws text through Windows fonts. We need a font rasteriser (`SDL3_ttf`) and a freely licensed substitute font with matching metrics, or the user's own fonts. |
-| Miles and Bink | Reimplemented, not lifted: their DLLs are third-party proprietary code. Audio through `SDL3_mixer`; video through our own Bink 1 decoder. |
+| Miles and Bink | Miles is reimplemented on `SDL3_mixer`. Bink is lifted: the user's own `binkw32.dll`, recompiled with the game like its own code and never shipped (a codec is pure computation, and the format is not published under a licence we can use). |
 
 ## Tropico 2: `Tropico2.exe`
 

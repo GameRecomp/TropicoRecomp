@@ -8,10 +8,12 @@ Read [TARGETS.md](TARGETS.md) for the facts this plan rests on,
 ## Goal
 
 1. **Tropico 1** (GOG release, `Tropico.EXE` built 2002-07-19) recompiled
-   statically and playable natively on Linux, Windows and macOS.
-2. The same pipeline running **in a browser as WebAssembly**: recompile and
-   run from the user's own game folder, with nothing uploaded.
-3. **Tropico 2** on the same recompiler, runtime and HLE.
+   statically and playable natively on Linux, Windows, macOS and Android.
+2. A **converter page**: the user's GOG installer turned into a native build
+   for their system, in the browser, with nothing uploaded (M12).
+3. The same pipeline **playing in a browser as WebAssembly**, from the
+   user's own game folder (M11).
+4. **Tropico 2** on the same recompiler, runtime and HLE.
 
 ## Fixed requirements
 
@@ -22,7 +24,7 @@ Read [TARGETS.md](TARGETS.md) for the facts this plan rests on,
 | The recompiler is written in Rust | Workspace under `recomp/`; pure-Rust dependencies in the pipeline |
 | Generated code and runtime are C | C11, no compiler extensions outside macros |
 | The C back end stays intact | Beside the native back end (`rc-emit-native`), `rc-emit-c` and the CMake build of generated C keep working; both back ends consume the same IR, and the difftest runs every case through both against the real CPU |
-| Recompiling and compiling must later work as WebAssembly | Pipeline crates build for `wasm32` from day one; no external tools (Ghidra, Python) in the pipeline; IR designed for a second, direct WebAssembly back end |
+| Recompiling and compiling must work as WebAssembly | Pipeline crates build for `wasm32` on every push; no external tools (Ghidra, Python) in the pipeline; the converter runs the pipeline and the native back end in the browser; the IR also suits a direct WebAssembly back end for playing in the browser |
 | SDL3, and its satellite libraries where useful | All platform access through SDL3; `SDL3_ttf` for text, `SDL3_mixer` for audio |
 | Every source file carries an SPDX licence identifier | `SPDX-License-Identifier: MIT` in the first lines; checked by the `pre-commit` hook and CI |
 | GOG releases only | One manifest per game; any other executable hash is refused |
@@ -31,8 +33,9 @@ Read [TARGETS.md](TARGETS.md) for the facts this plan rests on,
 
 It has full relocations (pointers are known, not guessed), an
 incremental-link thunk table that lists its functions, a single thread of
-its own (only the Bink library starts one), no network, no registry, five import DLLs, a software renderer over DirectDraw,
-almost no x87 and no SIMD. Tropico 2 is 3.5 times larger, has no
+its own (only the Bink library starts one), no network, no registry, five
+import DLLs, a software renderer over DirectDraw, almost no x87 and no
+SIMD. Tropico 2 is 3.5 times larger, has no
 relocations and probably needs Direct3D 7. Everything generic built for the
 first game carries over to the second.
 
@@ -40,7 +43,7 @@ first game carries over to the second.
 
 | Milestone | State |
 |---|---|
-| M0 Foundation | Done, except that CI has not run yet (nothing pushed) |
+| M0 Foundation | Done: CI (GitHub Actions) runs on every push |
 | M1 Read the executable | Done: `recomp info` reproduces the measured facts |
 | M2 Find the code | Done for Tropico 1: all of `.text` classified, every relocation accounted for |
 | M3 Lifter, integer core | Done: all 196 integer instruction forms the game uses are lifted and agree with the real CPU; fixtures agree; lifting is deterministic |
@@ -48,8 +51,8 @@ first game carries over to the second.
 | M5 Boot to `WinMain` | Done: the C runtime's start-up and the game's initialisation run as lifted code to `CreateWindowExA` (8,888 API calls, the same sequence every run) |
 | M6 Picture and input | Done: window, DirectDraw software rendering, GDI text, mouse and keyboard on SDL3; the intro movies play, the main menu and the game menu render with their movie backgrounds and respond. Scripted scenarios (`boot`, `menu`, `submenu`, `newgame`) replay exactly on the virtual clock, screenshots included |
 | M7 In game | Started: a scripted run (`newgame`) goes from the main menu through the random map and game settings into a running game on a new island at 1024x768; the simulation runs (letters, the annual report) without traps. Open: ten game years, saving and loading |
-| M8 Sound and video | Mostly done: Miles on `SDL3_mixer` (samples, streams, music); Bink by lifting the game's own `binkw32.dll` with the executable (its threads run as cooperative fibers, its sound goes through our Miles). Open: the audio capture test, a check of sync over a whole movie |
-| M12 Converter | Working end to end on Linux: the page (or `recomp convert`) turns the GOG installer into a zip in about two minutes in Firefox; the Linux AppImage from it reaches the main menu identically to the C build. CI builds the Windows and macOS shells and publishes the site (not yet run). The Android APK is made and signed (its signature verifies, checked from scratch); its shell is built by CI only. Open: the Windows, macOS and Android shells on real machines; several workers for compiling; Tropico 2 |
+| M8 Sound and video | Mostly done: Miles on `SDL3_mixer` (samples, streams, music); Bink by lifting the game's own `binkw32.dll` with the executable (its thread runs as a cooperative guest thread, its sound goes through our Miles). Open: the audio capture test, a check of sync over a whole movie |
+| M12 Converter | Working end to end on Linux: the page (or `recomp convert`) turns the GOG installer into a zip in about two minutes in Firefox; the Linux AppImage from it reaches the main menu identically to the C build. The Android APK is made and signed (its signature verifies, checked from scratch). CI builds the shells for all four systems and publishes the site. Open: the Windows, macOS and Android shells have not run on their systems yet; several workers for compiling; Tropico 2 |
 
 Known issue: `recomp discover` on Tropico 2 (no relocations) does not finish
 in reasonable time; the gap pass has nothing to reject bad decodes with.
@@ -127,7 +130,8 @@ compile times are recorded as the baseline.
   functions, error codes.
 - Start-up path of the MSVC 6 CRT, including the exception-handling frames
   it installs.
-- Generated stubs for every import; an import trace (`--trace-imports`).
+- Every import bound to its HLE function, or to a stop that names it; an
+  import trace (`RC_TRACE=imports`).
 
 *Exit:* a scripted run reaches the game's first window creation call with no
 trap; the trace of imports called up to that point is stored as a regression
@@ -235,11 +239,12 @@ serves only our tools.
   and the output streamed to disk.
 
 *Exit:* from a clean browser profile, each of the two GOG installers turns
-into a build for Windows, Linux and macOS that reaches the main menu.
+into a build for Windows, Linux, macOS and Android that reaches the main
+menu.
 
 ### Tropico 2
 
-Begins when M9 is done; M10 to M12 can run beside it.
+Begins when M9 is done; M10 and M11 can run beside it.
 
 - T2-0 Reconnaissance with our own tools; update TARGETS.md.
 - T2-1 Discovery without relocations: operand and data scanning, RTTI and
@@ -255,7 +260,8 @@ Begins when M9 is done; M10 to M12 can run beside it.
 M0 ─ M1 ─ M2 ─ M3 ─ M4 ─ M5 ─ M6 ─ M7 ─┬─ M8 ─ M9 ─┬─ M10
                 │                       │           ├─ M11
                 └ difftests grow        │           └─ Tropico 2
-                  continuously          └ M8 audio can start after M5
+                  continuously          ├ M8 audio can start after M5
+                                        └ M12 (converter) beside M7 and M8
 ```
 
 The HLE modules are independent of the lifter once M3's fixtures run, so
@@ -274,13 +280,15 @@ programs while M4 is under way.
 | `SDL3_mixer` does not fit a Miles feature the game uses (stream callbacks, file callbacks, speed changes) | Medium | Extra glue or a custom stream source | Check the 23 imported functions against the mixer's model at the start of M8; fall back to raw SDL3 audio streams for that feature only |
 | Hardware mode turns out to be the only good-looking mode | Low | A Direct3D or OpenGL layer is needed for Tropico 1 | Decide after M2 and M6 with the software path on screen |
 | Compile time of generated C | Medium | Slow iteration | Address buckets, parallel build, unoptimised debug configuration, cache |
-| Generated C in a browser is too slow to compile | High | Path A unusable for users | Path B (direct emission) is the plan of record |
+| Generated C in a browser is too slow to compile | Certain | Path A unusable for users | The converter compiles with the native back end (Cranelift in WebAssembly: seconds); playing in the browser needs Path B, direct WebAssembly emission |
+| Converted builds are unsigned | Certain | Warnings on Windows (SmartScreen) and macOS (Gatekeeper) | Instructions on the page and in the build's README; signing would need paid certificates |
+| A shell has never run on its system | High until tested | A converted build does not start | Test each shell on its system; CI builds them all on every push |
 | Tropico 2 without relocations | High | Wrong pointers, missing functions | Planned for: overrides, run-time reports, RTTI |
 | Legal exposure | Low while the rules hold | Project taken down | No game material in the repository or releases; tools only; hooks and audit |
 
 ## Decisions taken
 
-Decided by the project owner on 2026-11-15.
+Decided by the project owner on 2026-11-15 and 2026-11-16.
 
 | Question | Decision |
 |---|---|
@@ -289,11 +297,16 @@ Decided by the project owner on 2026-11-15.
 | Bink video | Lift the game's own `binkw32.dll` together with the executable; no FFmpeg. (First decided as our own decoder; changed on 2026-11-15 because the format's tables are only published in LGPL code) |
 | Audio | `SDL3_mixer` under the Miles reimplementation (mixing and MP3 decoding) |
 | Game versions | GOG releases only; other builds are refused by hash |
-| Fonts | The host's: Arial, Times New Roman and Courier New where they exist (Windows), otherwise the metric-compatible Liberation fonts, then DejaVu; nothing is bundled |
+| Fonts | The host's: Arial, Times New Roman and Courier New where they exist (Windows), otherwise the metric-compatible Liberation fonts, then DejaVu, and Android's own fonts; nothing is bundled |
+| Installers | Our own Inno Setup reader (`rc-inno`, `recomp unpack`) for the GOG installers; no outside tool |
+| Back ends | A native back end (Cranelift, `rc-emit-native`) for the converter beside the C back end, which stays intact and tested as the reference |
+| Converter output | Windows: a zip with the shell `.exe` and a `data` folder; Linux: an AppImage and `data`, built on the oldest Ubuntu runner; macOS: an unsigned `.app`; Android: an APK with the data in its assets, signed with a fixed built-in key |
 
 ## Open decisions
 
 1. **Repository host and CI provider.** (GitHub and GitHub Actions in use.)
+2. **Hosting the converter.** GitHub Pages needs a public repository or a
+   paid plan.
 
 ## Definition of done, for any change
 

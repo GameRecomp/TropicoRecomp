@@ -1,6 +1,7 @@
 # Contributing
 
-Four rules are absolute. Hooks enforce them; enable them once per clone:
+Five rules are absolute. Hooks enforce the first four; enable them once per
+clone:
 
 ```sh
 git config core.hooksPath tools/hooks
@@ -43,8 +44,10 @@ machine (`/home/<user>/…`, `/Users/<user>/…`, `C:\Users\<user>\…`).
 Within the first five lines, in that language's comment syntax:
 
 ```
-// SPDX-License-Identifier: MIT        (Rust, C, JavaScript)
-# SPDX-License-Identifier: MIT         (shell, Python, CMake, TOML)
+// SPDX-License-Identifier: MIT        (Rust, JavaScript, Java)
+/* SPDX-License-Identifier: MIT */     (C, CSS)
+# SPDX-License-Identifier: MIT         (shell, Python, CMake, TOML, YAML)
+<!-- SPDX-License-Identifier: MIT -->  (HTML, XML, SVG)
 ```
 
 This covers everything we write that is code or build configuration,
