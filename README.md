@@ -1,4 +1,10 @@
+<p align="center"><img src="docs/img/icon.svg" width="128" alt="TropicoRecomp icon"></p>
+
 # TropicoRecomp
+
+## 👉 [**Open the converter: terminshock.github.io/TropicoRecomp**](https://terminshock.github.io/TropicoRecomp/) 👈
+
+**Turn your GOG installer into a native Tropico for Windows, Linux, macOS or Android, right in your browser.**
 
 A static recompilation of **Tropico** (PopTop Software, 2001) and, after it,
 **Tropico 2: Pirate Cove** (Frog City, 2003): the 32-bit x86 Windows machine
