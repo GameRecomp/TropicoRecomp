@@ -226,7 +226,8 @@ serves only our tools.
   `data` folder with the blob and the game files), Linux (an AppImage and
   `data`) and macOS (an unsigned `.app`, arm64 and x86-64, with `data` in
   its resources); for Android an APK (arm64-v8a and x86_64) with the data
-  in its assets, signed with APK Signature Scheme v2 by the converter,
+  in its assets, signed with APK Signature Scheme v2 by the converter with
+  its built-in key (the same everywhere, so that APKs install as updates),
   which the app unpacks into its storage on the first start.
 - **The page**: `rc-web` (the installer reader, discovery, lifting and the
   native back end in WebAssembly) in Web Workers, with a progress bar per

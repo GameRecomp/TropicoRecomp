@@ -28,20 +28,6 @@ const SYSTEMS = {
   },
 };
 
-/* The key Android packages are signed with: made once and kept in this
- * browser, so that a later conversion installs as an update. */
-function apkKey() {
-  const name = 'tropico-apk-signing-key';
-  let hex = null;
-  try { hex = localStorage.getItem(name); } catch (_) { /* storage unavailable */ }
-  if (!hex || hex.length !== 64) {
-    const k = crypto.getRandomValues(new Uint8Array(32));
-    hex = [...k].map((b) => b.toString(16).padStart(2, '0')).join('');
-    try { localStorage.setItem(name, hex); } catch (_) { /* a key for this time only */ }
-  }
-  return new Uint8Array(hex.match(/../g).map((h) => parseInt(h, 16)));
-}
-
 function guessSystem() {
   const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent;
   if (/android/i.test(p) || /android/i.test(navigator.userAgent)) return 'android';
@@ -214,8 +200,7 @@ async function start() {
     await out.abort();
     finish(false, e.message || 'the converter stopped');
   };
-  const key = system === 'android' ? apkKey() : new Uint8Array(0);
-  worker.postMessage({ file, template, key }, [template]);
+  worker.postMessage({ file, template }, [template]);
 
   function finish(ok, text, url, name) {
     clearInterval(timer);

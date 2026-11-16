@@ -276,10 +276,10 @@ tools/build-web build/site build/templates               # the page, for a local
 Android: `tools/build-android build/android/Tropico-shell.apk` builds the
 shell APK (it needs the Android SDK and NDK and a JDK; CI has them), and
 `recomp template --system android` makes its template. `recomp convert`
-then writes a signed APK and needs `--apk-key FILE` (made if missing; keep
-it, so that a new APK installs over the old one); `recomp verify-apk`
-checks a signature as Android does. The page keeps its key in the
-browser.
+then writes an APK signed with the converter's built-in key (the same for
+everyone, so that any converted APK installs over an earlier one;
+`--apk-key FILE` signs with another); `recomp verify-apk` checks a
+signature as Android does.
 
 - `recomp convert` runs the same pipeline as the page (rc-convert); the
   page's WebAssembly build and the native command give byte-identical zips.

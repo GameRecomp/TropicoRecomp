@@ -5,7 +5,7 @@
 import init, { convert } from './rc_web.js';
 
 self.onmessage = async (event) => {
-  const { file, template, key } = event.data;
+  const { file, template } = event.data;
   try {
     await init();
     const reader = new FileReaderSync();
@@ -13,7 +13,7 @@ self.onmessage = async (event) => {
       new Uint8Array(reader.readAsArrayBuffer(file.slice(offset, offset + length)));
     const progress = (stage, done, total) => self.postMessage({ type: 'progress', stage, done, total });
     const output = (chunk) => self.postMessage({ type: 'data', chunk }, [chunk.buffer]);
-    const summary = convert(file.size, read, new Uint8Array(template), key, progress, output);
+    const summary = convert(file.size, read, new Uint8Array(template), progress, output);
     self.postMessage({ type: 'done', summary });
   } catch (err) {
     self.postMessage({ type: 'error', message: String(err && err.message ? err.message : err) });

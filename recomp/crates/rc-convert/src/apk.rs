@@ -129,6 +129,15 @@ impl std::fmt::Debug for ApkKey {
 }
 
 impl ApkKey {
+    /// The converter's key, the same everywhere: every converted APK is
+    /// signed with it, so that one installs over another, whoever made
+    /// them. It is derived from a fixed text and is no secret; it vouches
+    /// only for "made by this converter".
+    pub fn builtin() -> ApkKey {
+        let seed = Sha256::digest(b"TropicoRecomp APK signing key, version 1");
+        ApkKey::from_bytes(&seed).expect("the built-in key is a valid P-256 key")
+    }
+
     /// From 32 random bytes (the private scalar).
     pub fn from_bytes(b: &[u8]) -> Result<ApkKey, String> {
         SigningKey::from_slice(b)
@@ -411,6 +420,17 @@ mod tests {
         let mut bad = apk.clone();
         bad[100] ^= 1;
         assert!(verify(&mut std::io::Cursor::new(&bad)).is_err());
+    }
+
+    #[test]
+    fn the_builtin_key_is_fixed() {
+        let a = ApkKey::builtin().public_key();
+        assert_eq!(a, ApkKey::builtin().public_key());
+        // A fixed key gives a fixed certificate (deterministic signatures).
+        assert_eq!(
+            ApkKey::builtin().certificate(),
+            ApkKey::builtin().certificate()
+        );
     }
 
     #[test]

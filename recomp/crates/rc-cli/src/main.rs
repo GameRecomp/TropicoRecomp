@@ -80,8 +80,8 @@ enum Cmd {
         /// The zip (or, for Android, the APK) to write.
         #[arg(short, long)]
         out: PathBuf,
-        /// For Android: the APK signing key (32 bytes), made if missing.
-        /// Use the same key again so that a new APK installs as an update.
+        /// For Android: sign with this key (32 bytes, made if missing)
+        /// instead of the converter's built-in one.
         #[arg(long)]
         apk_key: Option<PathBuf>,
     },
@@ -193,7 +193,7 @@ fn convert(installer: &Path, template: &Path, out: &Path, key: Option<&Path>) ->
     let tpl = rc_convert::template(&tbytes)?;
     let key = match (tpl.apk, key) {
         (true, Some(k)) => Some(apk_key(k)?),
-        (true, None) => return Err("an Android template needs --apk-key FILE".into()),
+        (true, None) => Some(rc_convert::apk::ApkKey::builtin()),
         (false, _) => None,
     };
     let mut input =

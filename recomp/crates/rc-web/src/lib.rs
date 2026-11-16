@@ -122,8 +122,8 @@ fn tell(progress: &Function, stage: &str, done: f64, total: f64) {
 }
 
 /// Convert the installer of `size` bytes read by `read(offset, length)`
-/// into a zip (an APK for an Android template, signed with the 32-byte
-/// `key`) for the shell template `template`, handed out through
+/// into a zip (an APK for an Android template, signed with the
+/// converter's built-in key) for the shell template `template`, handed out through
 /// `output(chunk)`. `progress(stage, done, total)` hears the stages:
 /// `identify`, `lift`, `compile`, `package` (bytes of game files).
 /// Returns a line describing the result.
@@ -132,17 +132,12 @@ pub fn convert(
     size: f64,
     read: Function,
     template: Vec<u8>,
-    key: Vec<u8>,
     progress: Function,
     output: Function,
 ) -> Result<String, JsValue> {
     let err = |e: String| JsValue::from_str(&e);
     let tpl = rc_convert::template(&template).map_err(err)?;
-    let key = if tpl.apk {
-        Some(rc_convert::apk::ApkKey::from_bytes(&key).map_err(err)?)
-    } else {
-        None
-    };
+    let key = tpl.apk.then(rc_convert::apk::ApkKey::builtin);
     let mut input = JsReader {
         read,
         size: size as u64,
