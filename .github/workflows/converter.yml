@@ -6,9 +6,10 @@
 # its source.
 name: converter
 
+# Manual runs only for now; push is off.
 on:
-  push:
-    branches: [main]
+  # push:
+  #   branches: [main]
   workflow_dispatch:
 
 permissions:

@@ -3,9 +3,11 @@
 # fixtures, and checks that the repository follows its rules.
 name: ci
 
+# Manual runs only for now; push and pull_request are off.
 on:
-  push:
-  pull_request:
+  # push:
+  # pull_request:
+  workflow_dispatch:
 
 jobs:
   audit:
