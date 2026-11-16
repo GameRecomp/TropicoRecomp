@@ -80,8 +80,9 @@ rc_display rc_plat_display_get(void);
  * (RC_SCALE, RC_PIXELS, RC_FULLSCREEN, RC_RESOLUTION), and apply them. */
 void rc_plat_display_load(const char *user_dir);
 
-/* Write the display settings that change while playing (full screen) back
- * to the settings.ini rc_plat_display_load read. */
+/* Write the display settings that change while playing (full screen, and
+ * the resolution a game project lets the user choose) back to the
+ * settings.ini rc_plat_display_load read. */
 void rc_plat_display_store(void);
 void rc_plat_show(bool show);
 void rc_plat_title(const char *title);

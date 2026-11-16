@@ -54,6 +54,7 @@ hooks = [
     0x00526220, # resolution: the painter of images (the world's)
     0x004526d0, # resolution, vtext: the drawer of rotated text
     0x00515450, # resolution, fullscreen: the routine that applies video settings
+    0x00491280, # resolution: the options page's handler of changed widgets
 ]
 points = [
     0x00530a51, # resolution: a movie widget's flags, just copied from its record
@@ -62,6 +63,8 @@ points = [
     0x00491127, # fullscreen: the options page has read the windowed flag
     0x0047c375, # fullscreen: the start-up reads the windowed flag
     0x00503a11, # textedit: a text field's loop has read an event
+    0x00490c83, # resolution: the options page has made the resolution's label
+    0x00490cab, # resolution: the options page sets the resolution slider
 ]
 operands = [
     # resolution: the code that finds a mode's slot compares against slot 4

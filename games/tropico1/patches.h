@@ -23,7 +23,8 @@ void tropico1_patch_resolution(void);
 void tropico1_patch_resolution_loaded(void);
 
 /* patch_vtext.c: rotated labels at a 16:9 resolution of the user's
- * choosing (nothing at other aspects). */
+ * choosing (nothing at other aspects). Called again whenever that
+ * resolution changes; 0 x 0 for none. */
 void tropico1_patch_vtext(int w, int h);
 
 /* patch_fullscreen.c: the options page's full screen box is the host's

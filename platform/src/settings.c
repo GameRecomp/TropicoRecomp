@@ -27,7 +27,8 @@ static const char DEFAULTS[] =
     "fullscreen = no\n"
     "\n"
     "# A resolution for the game besides its own (640x480 to 1600x1200), for\n"
-    "# example 1920x1080; it is then the highest one on the game's options page.\n"
+    "# example 1920x1080. The game's options page offers common ones too, and\n"
+    "# what is chosen there is written here.\n"
     "# window: the size of the window (divided by the scale), following it when\n"
     "# the window changes size; the game then always plays at it.\n"
     "# off: only the game's own.\n"
@@ -89,7 +90,9 @@ void rc_plat_display_store(void)
     if (!settings_path[0]) {
         return;
     }
-    /* The file as it is, with the full screen line replaced. */
+    /* The file as it is, with the lines of the settings that change while
+     * playing (full screen, and the resolution on the options page)
+     * replaced. */
     char text[8192] = "";
     size_t n = 0;
     FILE *f = fopen(settings_path, "r");
@@ -99,9 +102,19 @@ void rc_plat_display_store(void)
     }
     text[n] = 0;
     rc_display d = rc_plat_display_get();
+    char lines[2][64];
+    snprintf(lines[0], sizeof lines[0], "fullscreen = %s\n", d.fullscreen ? "yes" : "no");
+    if (d.game_w < 0) {
+        snprintf(lines[1], sizeof lines[1], "resolution = window\n");
+    } else if (d.game_w > 0 && d.game_h > 0) {
+        snprintf(lines[1], sizeof lines[1], "resolution = %dx%d\n", d.game_w, d.game_h);
+    } else {
+        snprintf(lines[1], sizeof lines[1], "resolution = off\n");
+    }
+    static const char *const keys[2] = {"fullscreen", "resolution"};
+    bool done[2] = {false, false};
     char out[8400] = "";
     size_t o = 0;
-    bool done = false;
     for (char *line = text; *line;) {
         char *nl = strchr(line, '\n');
         size_t len = nl ? (size_t)(nl - line) + 1 : strlen(line);
@@ -109,18 +122,29 @@ void rc_plat_display_store(void)
         while (*p == ' ' || *p == '\t') {
             p++;
         }
-        if (!strncmp(p, "fullscreen", 10) && strchr(p, '=') && (size_t)(strchr(p, '=') - line) < len) {
-            o += (size_t)snprintf(out + o, sizeof out - o, "fullscreen = %s\n", d.fullscreen ? "yes" : "no");
-            done = true;
-        } else if (o + len < sizeof out) {
-            memcpy(out + o, line, len);
-            o += len;
+        const char *eq = strchr(p, '=');
+        const char *put = line;
+        size_t put_len = len;
+        for (int k = 0; k < 2; k++) {
+            if (!strncmp(p, keys[k], strlen(keys[k])) && eq && (size_t)(eq - line) < len) {
+                put = lines[k];
+                put_len = strlen(put);
+                done[k] = true;
+            }
+        }
+        if (o + put_len < sizeof out) {
+            memcpy(out + o, put, put_len);
+            o += put_len;
             out[o] = 0;
         }
         line += len;
     }
-    if (!done) {
-        snprintf(out + o, sizeof out - o, "fullscreen = %s\n", d.fullscreen ? "yes" : "no");
+    for (int k = 0; k < 2; k++) {
+        size_t len = strlen(lines[k]);
+        if (!done[k] && o + len < sizeof out) {
+            memcpy(out + o, lines[k], len + 1);
+            o += len;
+        }
     }
     if ((f = fopen(settings_path, "w")) != NULL) {
         fputs(out, f);

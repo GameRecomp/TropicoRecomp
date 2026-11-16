@@ -63,6 +63,17 @@ set of archives (the marker `data/ARTSET-MODE.txt`) and removed when no
 resolution is chosen (`data/ARTSET-MANIFEST.txt`). It takes about 0.3 s
 natively and 4 s in a browser.
 
+The game lists the loose files of `data\` only once, at start (`0x004eec70`,
+before it opens the archives), in a list at `0x0061380c` of 0x14-byte nodes
+{ hash of the name, open handle, size, name, next }; a file is known by its
+place in it, and the last one found that way is remembered at `0x00613810`
+(its place at `0x005a12d4`). Art made or removed while the game runs would
+not be seen (the HUD was then drawn from the archive's 1600x1200 pieces), so
+after the art changes the patch frees the list's nodes with the game's own
+allocator (`0x004e5800`, as its cleanup at `0x004ef01a` does), forgets the
+remembered node, and calls `0x004ef840`, which nothing in the game calls
+and which lists `data\` again.
+
 The HUD's readouts (treasury, Swiss account, population, date) use colour 2
 of the text markup's `[Cn]` table at `0x00594fe8`, a grey that is hard to
 read on the rescaled art: it is made white (`0x7fff`).
@@ -101,6 +112,41 @@ the game plays everything there:
 
 A window too narrow for slot 4 (1280 or less after the scale) gets the
 smallest width slot 4 may have, at the window's shape, shown smaller.
+
+## The options page's resolution slider
+
+The slider offers what the browser player offers: after the game's four
+smaller slots (640x480 to 1280x1024) a stop for each size slot 4 may take
+(1360x768 to 3840x2160, the game's own 1600x1200 among them, and the one from
+`settings.ini` if it is another), and last the window's size. Its label gives
+the aspect ratio in brackets ("1920x1080 (16:9)"; "(window)" for the
+window's). A size of another shape than the window is letterboxed by the
+host as before. How the game builds the page is in
+[tropico1-options.md](tropico1-options.md).
+
+- The slider is widget `0x1ea4` (type `0x200`, a slider; its tooltip is text
+  2843). The page's file gives it five stops; a slider keeps the number of
+  its stops at `+0xba` and its position at `+0xe2`. The wrapper of the
+  function that adds a widget (`0x004e8710`) sets the stops. It also makes
+  the three sliders of the page 300 units shorter and their value labels
+  (`0x1e82`, `0x1e84`, `0x1ea5`) as much wider, to the left, so that the
+  resolution's label keeps to one line.
+- The page sets the slider from the slot in effect (`[0x00612fec]+0x18`) with
+  message `0x66`, the slot in `edx` at `0x00490cab`; a patch point there
+  turns the slot into its stop.
+- The label is "%1 x %2" of the slot, formatted into the buffer at
+  `0x0060a83c` by `0x004f0bf0` and set with message `0x71`; at `0x00490c83`,
+  just after the formatting, a patch point writes it again with the aspect
+  ratio.
+- The page's handler of changed widgets, `0x00491280` (fastcall: the message
+  in `ecx`, the widget's number at `+4`; the new value in `edx`), asks the
+  routine that applies video settings for the slider's value as the slot,
+  if the table of available modes at `0x0060c998` has it. Its wrapper puts a
+  stop's size into slot 4 (with its art, as for the window) and passes slot 4;
+  the window's stop makes slot 4 follow the window, and one of the first
+  four stops ends that. The choice is written to `settings.ini`. On the setup
+  screen of the main menu (the game's state at `0x005d6af0` is `0xb`) the
+  game refuses to change the resolution and says so; nothing is changed then.
 
 ## The limits
 

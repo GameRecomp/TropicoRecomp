@@ -96,13 +96,15 @@ static void drawer(rc_cpu *c)
 
 void tropico1_patch_vtext(int w, int h)
 {
+    static int registered;
     double aspect = h ? (double)w / (double)h : 0.0;
-    if (aspect < 1.77 || aspect > 1.79) {
-        return;
+    int wide = aspect >= 1.77 && aspect <= 1.79;
+    fix_w = wide ? w : 0;
+    fix_h = wide ? h : 0;
+    if (!registered) {
+        registered = 1;
+        rc_on_point(TAB_CALL_ALMANAC, tab_label);
+        rc_on_point(TAB_CALL_OPTIONS, tab_label);
+        rc_hook(DRAWER, drawer);
     }
-    fix_w = w;
-    fix_h = h;
-    rc_on_point(TAB_CALL_ALMANAC, tab_label);
-    rc_on_point(TAB_CALL_OPTIONS, tab_label);
-    rc_hook(DRAWER, drawer);
 }
