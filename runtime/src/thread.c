@@ -9,29 +9,30 @@
  *   guest thread, handing a baton (a mutex and a condition variable) to the
  *   one that is to run. macOS has deprecated ucontext; Android's C library
  *   has none.
- *
- * Under Emscripten there is none yet, and no thread can be started.
+ * - Emscripten (a browser, with JSPI): coroutines. A thread that gives way
+ *   suspends its WebAssembly stack on a promise the next one resolves; each
+ *   has its own C shadow stack (rc/web.h, runtime/web/library_rc.js).
  */
 #if defined(_WIN32)
 #define BACKEND_FIBERS 1
 #define BACKEND_PTHREAD 0
 #define BACKEND_UCONTEXT 0
-#define BACKEND_NONE 0
+#define BACKEND_JSPI 0
 #elif defined(__EMSCRIPTEN__)
 #define BACKEND_FIBERS 0
 #define BACKEND_PTHREAD 0
 #define BACKEND_UCONTEXT 0
-#define BACKEND_NONE 1
+#define BACKEND_JSPI 1
 #elif defined(__APPLE__) || defined(__ANDROID__) || defined(RC_THREADS_PTHREAD)
 #define BACKEND_FIBERS 0
 #define BACKEND_PTHREAD 1
 #define BACKEND_UCONTEXT 0
-#define BACKEND_NONE 0
+#define BACKEND_JSPI 0
 #else
 #define BACKEND_FIBERS 0
 #define BACKEND_PTHREAD 0
 #define BACKEND_UCONTEXT 1
-#define BACKEND_NONE 0
+#define BACKEND_JSPI 0
 #endif
 
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(__EMSCRIPTEN__)
@@ -59,6 +60,11 @@
 #include <pthread.h>
 #elif BACKEND_UCONTEXT
 #include <ucontext.h>
+#elif BACKEND_JSPI
+#include <emscripten.h>
+#include <emscripten/stack.h>
+
+#include "rc/web.h"
 #endif
 
 #define THREADS 16
@@ -81,6 +87,9 @@ typedef struct thread {
 #elif BACKEND_UCONTEXT
     ucontext_t ctx;
     void *host_stack;
+#elif BACKEND_JSPI
+    void *host_stack;
+    uint32_t stack_base, stack_end; /* the shadow stack: base is the top */
 #endif
 } thread;
 
@@ -104,6 +113,9 @@ void rc_thread_init_main(rc_cpu *c, uint32_t tib)
     nthreads = 1;
 #if BACKEND_PTHREAD
     baton = 0;
+#elif BACKEND_JSPI
+    threads[0].stack_base = (uint32_t)emscripten_stack_get_base();
+    threads[0].stack_end = (uint32_t)emscripten_stack_get_end();
 #endif
 }
 
@@ -161,6 +173,11 @@ static void switch_to(uint32_t next)
     if (swapcontext(&threads[prev].ctx, &threads[next].ctx) != 0) {
         rc_fatal("cannot switch threads");
     }
+#elif BACKEND_JSPI
+    uint32_t prev = current;
+    current = next;
+    rc_web_switch(prev, next, threads[prev].stack_base, threads[prev].stack_end, threads[next].stack_base,
+                  threads[next].stack_end);
 #endif
 }
 
@@ -194,6 +211,9 @@ static void schedule(void) { switch_to(pick()); }
 
 void rc_thread_yield(void)
 {
+#if BACKEND_JSPI
+    rc_web_poll();
+#endif
     if (nthreads < 2) {
         return;
     }
@@ -228,7 +248,7 @@ void rc_thread_sleep(uint32_t ms)
 }
 
 /* The body of every thread but the main one. Returns only with the
- * pthread backend, after handing on the baton. */
+ * pthread and JSPI backends, after handing on the baton. */
 static void thread_main(void)
 {
     thread *t = &threads[current];
@@ -241,11 +261,23 @@ static void thread_main(void)
     uint32_t next = pick();
 #if BACKEND_PTHREAD
     pass_baton(next, false);
+#elif BACKEND_JSPI
+    current = next;
+    rc_web_finish(next, threads[next].stack_base, threads[next].stack_end);
 #else
     switch_to(next);
     rc_fatal("an ended thread ran again");
 #endif
 }
+
+#if BACKEND_JSPI
+/* Where the page starts a thread, on its own shadow stack. */
+EMSCRIPTEN_KEEPALIVE void rc_web_thread_entry(uint32_t i)
+{
+    (void)i;
+    thread_main();
+}
+#endif
 
 #if BACKEND_FIBERS
 static void CALLBACK fiber_entry(void *p)
@@ -269,13 +301,6 @@ static void *pthread_entry(void *p)
 
 uint32_t rc_thread_create(uint32_t start, uint32_t param, uint32_t stack_size, uint32_t *id)
 {
-#if BACKEND_NONE
-    (void)start;
-    (void)param;
-    (void)stack_size;
-    (void)id;
-    return 0;
-#else
     if (nthreads == 0 || nthreads == THREADS) {
         return 0;
     }
@@ -341,7 +366,7 @@ uint32_t rc_thread_create(uint32_t start, uint32_t param, uint32_t stack_size, u
     if (err != 0) {
         return 0;
     }
-#else
+#elif BACKEND_UCONTEXT
     t->host_stack = malloc(HOST_STACK);
     if (!t->host_stack || getcontext(&t->ctx) != 0) {
         free(t->host_stack);
@@ -351,6 +376,14 @@ uint32_t rc_thread_create(uint32_t start, uint32_t param, uint32_t stack_size, u
     t->ctx.uc_stack.ss_size = HOST_STACK;
     t->ctx.uc_link = NULL;
     makecontext(&t->ctx, thread_main, 0);
+#elif BACKEND_JSPI
+    enum { SHADOW = 1u << 20 };
+    t->host_stack = malloc(SHADOW);
+    if (!t->host_stack) {
+        return 0;
+    }
+    t->stack_end = ((uint32_t)(uintptr_t)t->host_stack + 15u) & ~15u;
+    t->stack_base = ((uint32_t)(uintptr_t)t->host_stack + SHADOW) & ~15u;
 #endif
     t->state = T_RUNNING;
     nthreads++;
@@ -361,5 +394,4 @@ uint32_t rc_thread_create(uint32_t start, uint32_t param, uint32_t stack_size, u
         rc_log("[thread] %u starts at %#010x(%#x), stack %#010x", i + 1, start, param, stack);
     }
     return HANDLE_BASE + i;
-#endif
 }

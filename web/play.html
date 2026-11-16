@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tropico Player</title>
+<meta name="description" content="Plays the copy of Tropico you converted, in this browser.">
+<link rel="icon" href="tropico.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="player idle">
+<div class="stage"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
+
+<div class="bar" id="bar">
+  <a href="./">Converter</a>
+  <span class="spacer"></span>
+  <span id="saved" class="saved"></span>
+  <label><input id="sharp" type="checkbox"> Sharp pixels</label>
+  <button id="fullscreen" type="button">Full screen</button>
+</div>
+
+<div class="overlay" id="overlay">
+  <section class="card">
+    <img src="tropico.svg" alt="" width="64" height="64">
+    <h1 id="title">Tropico</h1>
+    <p id="status">Looking for the game in this browser…</p>
+    <p id="error" class="error" role="alert" hidden></p>
+    <div class="actions" style="justify-content: center">
+      <button id="start" class="primary" type="button" hidden>Play</button>
+      <a id="convert" class="button" href="./" hidden>Convert the game first</a>
+    </div>
+  </section>
+</div>
+<script type="module" src="play.js"></script>
+</body>
+</html>

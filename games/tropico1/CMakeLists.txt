@@ -15,7 +15,31 @@ if(ANDROID)
 endif()
 add_executable(tropico1-shell main.c shell.c)
 target_link_libraries(tropico1-shell PRIVATE rc_hle rc_runtime)
-if(MSVC)
+if(EMSCRIPTEN)
+    # The web shell: an ES module (createTropico) that web/play.js starts
+    # after it has given it the game's module and files. The game owns its
+    # loop, so main runs on JSPI and gives the browser its turn (rc/web.h).
+    target_link_options(tropico1-shell PRIVATE
+        -sJSPI=1
+        "-sJSPI_EXPORTS=['main','rc_web_thread_entry']"
+        -sALLOW_MEMORY_GROWTH=1
+        -sMAXIMUM_MEMORY=4GB
+        -sALLOW_TABLE_GROWTH=1
+        -sSTACK_SIZE=8MB
+        -sINITIAL_MEMORY=64MB
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sEXPORT_NAME=createTropico
+        -sENVIRONMENT=web
+        -sINVOKE_RUN=0
+        -sEXIT_RUNTIME=0
+        -sFORCE_FILESYSTEM=1
+        "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_rc_web_thread_entry','_rc_wasm_helpers','_rc_wasm_register']"
+        "-sEXPORTED_RUNTIME_METHODS=['FS','IDBFS','ENV','callMain','HEAPU8','HEAPU32','addRunDependency','removeRunDependency']"
+        "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['$rcLoadCode','$rcGameFS']"
+        -lidbfs.js)
+    set_target_properties(tropico1-shell PROPERTIES OUTPUT_NAME tropico)
+elseif(MSVC)
     # A windowed program (no console window) that still starts at main().
     target_link_options(tropico1-shell PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
 endif()

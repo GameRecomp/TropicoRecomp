@@ -5,6 +5,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +30,11 @@ bool rc_host_list(const char *dir, rc_host_dir_fn fn, void *ctx);
 
 /* Read a whole file; the caller frees the buffer. */
 uint8_t *rc_host_read(const char *path, uint32_t *size);
+
+/* fread(buf, 1, n, f). In a browser it first has the page fetch what the
+ * read needs from its storage (rc/web.h); every read of game files goes
+ * through it. */
+size_t rc_host_fread(void *buf, size_t n, FILE *f);
 
 #ifdef __cplusplus
 }

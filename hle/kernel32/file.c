@@ -25,6 +25,13 @@
 #include "k32.h"
 #include "rc/hostfs.h"
 #include "rc/log.h"
+#if defined(__EMSCRIPTEN__)
+#include "rc/web.h"
+/* The user directory lives in the browser's storage: save it soon. */
+#define SAVED() rc_web_saved()
+#else
+#define SAVED() ((void)0)
+#endif
 
 #define GENERIC_READ 0x80000000u
 #define GENERIC_WRITE 0x40000000u
@@ -219,6 +226,7 @@ static bool copy_file(const char *from, const char *to)
         ok = fclose(f) == 0 && ok;
     }
     free(b);
+    SAVED();
     return ok;
 }
 
@@ -288,7 +296,7 @@ static void k_ReadFile(rc_cpu *c)
         rc_last_error = ERROR_INVALID_HANDLE;
         RC_RETURN(c, get(h, K_STD) != NULL, 5);
     }
-    size_t r = n ? fread(rc_ptr(buf), 1, n, x->f) : 0;
+    size_t r = rc_host_fread(rc_ptr(buf), n, x->f);
     if (done) {
         rc_st32(done, (uint32_t)r);
     }
@@ -303,6 +311,7 @@ static void k_WriteFile(rc_cpu *c)
     handle *s = get(h, K_STD);
     if (x) {
         w = fwrite(rc_ptr(buf), 1, n, x->f);
+        SAVED();
     } else if (s) {
         w = fwrite(rc_ptr(buf), 1, n, s->std == 2 ? stderr : stdout);
     } else {
@@ -348,6 +357,7 @@ static void k_SetEndOfFile(rc_cpu *c)
 #else
     int ok = ftruncate(fileno(x->f), pos) == 0;
 #endif
+    SAVED();
     RC_RETURN(c, ok, 1);
 }
 
@@ -364,6 +374,7 @@ static void k_CloseHandle(rc_cpu *c)
     if (x) {
         fclose(x->f);
         x->kind = K_FREE;
+        SAVED();
     }
     RC_RETURN(c, 1, 1); /* events and other pseudo handles close too */
 }
@@ -392,7 +403,7 @@ long rc_vfs_read_head(const char *guest_path, uint32_t h, uint8_t *buf, uint32_t
         if (!f) {
             return -1;
         }
-        long r = (long)fread(buf, 1, n, f);
+        long r = (long)rc_host_fread(buf, n, f);
         fclose(f);
         return r;
     }
@@ -402,7 +413,7 @@ long rc_vfs_read_head(const char *guest_path, uint32_t h, uint8_t *buf, uint32_t
     }
     long pos = ftell(x->f);
     fseek(x->f, 0, SEEK_SET);
-    long r = (long)fread(buf, 1, n, x->f);
+    long r = (long)rc_host_fread(buf, n, x->f);
     fseek(x->f, pos, SEEK_SET);
     return r;
 }

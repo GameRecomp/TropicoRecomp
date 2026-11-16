@@ -685,6 +685,7 @@ dependencies = [
  "p256",
  "rc-discover",
  "rc-emit-native",
+ "rc-emit-wasm",
  "rc-inno",
  "rc-ir",
  "rc-manifest",

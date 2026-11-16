@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tropico Converter</title>
-<meta name="description" content="Turn your own GOG copy of Tropico into a native build for Windows, Linux, macOS or Android, in your browser.">
+<meta name="description" content="Turn your own GOG copy of Tropico into a native build for Windows, Linux, macOS or Android, or play it right in your browser.">
 <link rel="icon" href="tropico.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -15,9 +15,18 @@
     <img src="tropico.svg" alt="" width="56" height="56">
     <div>
       <h1>Tropico Converter</h1>
-      <p class="lede">Turns your own GOG copy of <em>Tropico</em> into a build that runs natively on Windows, Linux, macOS or Android.</p>
+      <p class="lede">Turns your own GOG copy of <em>Tropico</em> into a build that runs natively on Windows, Linux, macOS or Android, or that you play right here in your browser.</p>
     </div>
   </header>
+
+  <section id="stored" class="card stored" hidden>
+    <h2>Tropico is in this browser</h2>
+    <p id="stored-info"></p>
+    <div class="actions">
+      <a class="primary button" href="play.html">Play</a>
+      <button id="remove" type="button">Remove it from this browser</button>
+    </div>
+  </section>
 
   <p class="local">Everything happens in this browser tab. Your installer is not uploaded anywhere; this site only serves the converter itself.</p>
 
@@ -40,12 +49,13 @@
       <label><input type="radio" name="system" value="linux"> Linux <small>x86-64, AppImage</small></label>
       <label><input type="radio" name="system" value="macos"> macOS <small>Apple silicon and Intel</small></label>
       <label><input type="radio" name="system" value="android"> Android <small>an app (APK), ARM64 and x86-64</small></label>
+      <label id="web-choice"><input type="radio" name="system" value="web"> Browser <small>play here, without installing anything</small></label>
     </fieldset>
   </section>
 
   <section class="card">
     <h2><span class="step">3</span> Convert</h2>
-    <p>The result is a zip (for Android an APK) of about 1.3 GiB with the game in it. You choose where it is saved.</p>
+    <p id="convert-note">The result is a zip (for Android an APK) of about 1.3 GiB with the game in it. You choose where it is saved.</p>
     <button id="start" class="primary" type="button" disabled>Convert</button>
   </section>
 
@@ -66,7 +76,8 @@
     <p id="result-summary"></p>
     <p id="result-after"></p>
     <a id="download" class="primary button" hidden>Save the zip</a>
-    <p class="warn">The zip contains your copy of the game. Keep it for yourself; do not share it.</p>
+    <a id="play" class="primary button" href="play.html" hidden>Play</a>
+    <p id="result-warn" class="warn">The zip contains your copy of the game. Keep it for yourself; do not share it.</p>
   </section>
 
   <footer>

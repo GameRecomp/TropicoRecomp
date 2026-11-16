@@ -135,13 +135,14 @@ int main(int argc, char **argv)
         pos++;
     }
     /* The lifted code: RC_NATIVE, or the data directory's blob when this
-     * program has none compiled in (the shell). */
+     * program has none compiled in (the shell). In a browser the page has
+     * registered the game's module before main (rc_wasm_register). */
     static char data[RC_PATH_MAX], data_game[RC_PATH_MAX + 8];
     bool have_data = rc_plat_bundled_data(data, sizeof data) || find_data(data, sizeof data);
     const char *native = getenv("RC_NATIVE");
     if (native && *native) {
         load_native(native);
-    } else if (rc_lifted_count == 0) {
+    } else if (rc_lifted_count == 0 && !rc_native_loaded()) {
         const char *target = rc_native_target();
         if (!have_data || !target) {
             rc_fatal("this program holds no game code: it runs what the converter puts in a data "

@@ -19,6 +19,9 @@
 #else
 #include <dirent.h>
 #endif
+#if defined(__EMSCRIPTEN__)
+#include "rc/web.h"
+#endif
 
 static int ieq(const char *a, const char *b)
 {
@@ -173,7 +176,7 @@ uint8_t *rc_host_read(const char *path, uint32_t *size)
         return NULL;
     }
     uint8_t *buf = malloc((size_t)n + 1);
-    if (buf && fread(buf, 1, (size_t)n, f) != (size_t)n) {
+    if (buf && rc_host_fread(buf, (size_t)n, f) != (size_t)n) {
         free(buf);
         buf = NULL;
     }
@@ -182,4 +185,19 @@ uint8_t *rc_host_read(const char *path, uint32_t *size)
         *size = (uint32_t)n;
     }
     return buf;
+}
+
+size_t rc_host_fread(void *buf, size_t n, FILE *f)
+{
+    if (n == 0) {
+        return 0;
+    }
+#if defined(__EMSCRIPTEN__)
+    /* stdio reads ahead by up to its buffer's size beyond the request. */
+    long pos = ftell(f);
+    if (pos >= 0) {
+        rc_web_prefetch(fileno(f), (uint32_t)pos, (uint32_t)(n + BUFSIZ));
+    }
+#endif
+    return fread(buf, 1, n, f);
 }

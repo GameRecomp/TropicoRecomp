@@ -12,9 +12,13 @@ add_library(rc_runtime STATIC
     src/resource.c
     src/thread.c
     src/native.c
+    src/web.c
 )
 target_include_directories(rc_runtime PUBLIC include)
-if(NOT WIN32)
+if(EMSCRIPTEN)
+    # The runtime's JavaScript (rc/web.h).
+    target_link_options(rc_runtime INTERFACE "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/web/library_rc.js")
+elseif(NOT WIN32)
     # Guest threads run on POSIX threads on macOS (see src/thread.c).
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)

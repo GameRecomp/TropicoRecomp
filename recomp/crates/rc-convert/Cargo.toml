@@ -14,6 +14,7 @@ rc-discover.workspace = true
 rc-ir.workspace = true
 rc-x86.workspace = true
 rc-emit-native.workspace = true
+rc-emit-wasm.workspace = true
 rc-inno.workspace = true
 crc32fast.workspace = true
 sha2.workspace = true

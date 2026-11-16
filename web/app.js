@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: MIT
 // The converter page: choose the installer and the system, then run the
-// worker and write what it produces to a file. Nothing is uploaded.
+// worker and write what it produces to a file. Nothing is uploaded. For the
+// browser, the worker stores the game in this origin's private storage
+// instead, and play.html runs it.
 
 const $ = (id) => document.getElementById(id);
 
 const STAGES = [
   { id: 'identify', label: 'Reading the installer', weight: 2 },
   { id: 'lift', label: 'Translating the game code', weight: 4 },
-  { id: 'compile', label: 'Compiling to native code', weight: 14 },
-  { id: 'package', label: 'Packing the game files', weight: 80 },
+  { id: 'compile', label: 'Compiling to native code', web: 'Compiling to WebAssembly', weight: 14 },
+  { id: 'package', label: 'Packing the game files', web: 'Storing the game files in this browser', weight: 80 },
 ];
+let webMode = false;
 
 const SYSTEMS = {
   windows: { label: 'Windows', after: 'Unzip it and start Tropico.exe in the Tropico folder.' },
@@ -18,6 +21,12 @@ const SYSTEMS = {
     label: 'macOS',
     after: 'Unzip it and open Tropico.app. It is not signed: the first time, right-click it and choose Open, '
       + 'or allow it under System Settings → Privacy & Security.',
+  },
+  web: {
+    label: 'Browser',
+    web: true,
+    after: 'The game is stored in this browser, for this site only. Play it now, or come back to this page '
+      + 'any time. Saved games and settings are kept in the browser too.',
   },
   android: {
     label: 'Android',
@@ -34,6 +43,53 @@ function guessSystem() {
   if (/win/i.test(p)) return 'windows';
   if (/mac|iphone|ipad/i.test(p)) return 'macos';
   return 'linux';
+}
+
+/* What playing in this browser needs: stack switching (JSPI) and the
+ * origin's private file system with synchronous access in workers. */
+function browserCanPlay() {
+  return typeof WebAssembly === 'object' && 'Suspending' in WebAssembly && 'promising' in WebAssembly
+    && !!(navigator.storage && navigator.storage.getDirectory);
+}
+
+/* The game stored in this browser (its info.json), or null. */
+async function storedGame() {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const top = await root.getDirectoryHandle('tropico1');
+    const f = await (await top.getFileHandle('info.json')).getFile();
+    return JSON.parse(await f.text());
+  } catch (_) {
+    return null;
+  }
+}
+
+async function showStored() {
+  const info = await storedGame();
+  $('stored').hidden = !info;
+  if (info) {
+    const when = new Date(info.converted).toLocaleDateString();
+    $('stored-info').textContent = `${info.title} (${info.release}), converted on ${when}. `
+      + 'Saved games and settings stay when you convert it again.';
+  }
+}
+
+async function removeStored() {
+  if (!window.confirm('Remove the game from this browser? Saved games and settings are kept.')) return;
+  try {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry('tropico1', { recursive: true });
+  } catch (err) {
+    showError(`Cannot remove it: ${err}`);
+  }
+  showStored();
+}
+
+function updateNote() {
+  const web = document.querySelector('input[name=system]:checked')?.value === 'web';
+  $('convert-note').textContent = web
+    ? 'The game (about 1.3 GiB) is stored in this browser; nothing is downloaded. Converting takes a few minutes.'
+    : 'The result is a zip (for Android an APK) of about 1.3 GiB with the game in it. You choose where it is saved.';
 }
 
 function mib(n) {
@@ -62,7 +118,7 @@ function buildStageList() {
     li.id = `stage-${s.id}`;
     li.dataset.state = 'waiting';
     const label = document.createElement('span');
-    label.textContent = s.label;
+    label.textContent = (webMode && s.web) || s.label;
     const detail = document.createElement('span');
     detail.className = 'detail';
     li.append(label, detail);
@@ -106,14 +162,22 @@ async function start() {
   const outName = sys.file || `Tropico-${sys.label.replace(/\s/g, '')}.zip`;
   $('error').hidden = true;
   $('result').hidden = true;
+  webMode = !!sys.web;
 
   let out;
-  try {
-    out = await openOutput(outName, sys.type);
-  } catch (err) {
-    if (err && err.name === 'AbortError') return;
-    showError(`Cannot write the file: ${err}`);
-    return;
+  if (webMode) {
+    // Nothing to save: the worker stores the game. Ask the browser to keep
+    // it (and the saved games) rather than clear it when space runs low.
+    out = { write: () => Promise.resolve(), close: async () => null, abort: async () => {} };
+    try { await navigator.storage.persist(); } catch (_) { /* not offered */ }
+  } else {
+    try {
+      out = await openOutput(outName, sys.type);
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      showError(`Cannot write the file: ${err}`);
+      return;
+    }
   }
 
   running = true;
@@ -125,14 +189,16 @@ async function start() {
   const timer = setInterval(() => { $('elapsed').textContent = clock(performance.now() - t0); }, 500);
 
   let template;
-  try {
-    const r = await fetch(`templates/Tropico-${system}.zip`);
-    if (!r.ok) throw new Error(`the ${SYSTEMS[system].label} build is not available on this site (${r.status})`);
-    template = await r.arrayBuffer();
-  } catch (err) {
-    await out.abort();
-    finish(false, String(err.message || err));
-    return;
+  if (!webMode) {
+    try {
+      const r = await fetch(`templates/Tropico-${system}.zip`);
+      if (!r.ok) throw new Error(`the ${SYSTEMS[system].label} build is not available on this site (${r.status})`);
+      template = await r.arrayBuffer();
+    } catch (err) {
+      await out.abort();
+      finish(false, String(err.message || err));
+      return;
+    }
   }
 
   const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
@@ -200,7 +266,8 @@ async function start() {
     await out.abort();
     finish(false, e.message || 'the converter stopped');
   };
-  worker.postMessage({ file, template }, [template]);
+  if (webMode) worker.postMessage({ file, mode: 'web' });
+  else worker.postMessage({ file, template }, [template]);
 
   function finish(ok, text, url, name) {
     clearInterval(timer);
@@ -213,6 +280,9 @@ async function start() {
     }
     $('result-summary').textContent = text;
     $('result-after').textContent = SYSTEMS[system].after;
+    $('play').hidden = !webMode;
+    $('result-warn').hidden = webMode;
+    if (webMode) showStored();
     const link = $('download');
     if (url) {
       link.href = url;
@@ -242,4 +312,14 @@ drop.addEventListener('drop', (e) => {
   if (!running && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
 });
 document.querySelector(`input[name=system][value=${guessSystem()}]`).checked = true;
+for (const r of document.querySelectorAll('input[name=system]')) r.addEventListener('change', updateNote);
+$('remove').addEventListener('click', removeStored);
+if (!browserCanPlay()) {
+  const choice = $('web-choice');
+  choice.querySelector('input').disabled = true;
+  choice.querySelector('small').textContent = 'needs a browser with WebAssembly stack switching (JSPI), '
+    + 'such as a current Chrome, Edge or Firefox';
+}
+updateNote();
+showStored();
 setFile(null);

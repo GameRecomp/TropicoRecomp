@@ -14,6 +14,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
+#if defined(__EMSCRIPTEN__)
+#include "rc/web.h"
+#endif
 
 static uint64_t host_ms(void)
 {
@@ -59,6 +62,13 @@ void rc_sleep_ms(uint32_t ms)
     }
 #if defined(_WIN32)
     Sleep(ms);
+#elif defined(__EMSCRIPTEN__)
+    /* The browser runs meanwhile; Sleep(0) gives it a turn when due. */
+    if (ms == 0) {
+        rc_web_poll();
+    } else {
+        rc_web_sleep(ms);
+    }
 #else
     struct timespec ts = {(time_t)(ms / 1000), (long)(ms % 1000) * 1000000L};
     nanosleep(&ts, NULL);

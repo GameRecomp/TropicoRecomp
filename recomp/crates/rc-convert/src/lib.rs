@@ -10,6 +10,10 @@
 //! 4. [`package`]: a zip of a shell template (built by CI, without game
 //!    code) with the code and the game's files in its `data/` directory.
 //!
+//! For playing in a browser, [`compile_wasm`] makes the WebAssembly module
+//! the web shell runs instead, and the page stores it and the game's files
+//! in the browser (rc-web's `convert_web`).
+//!
 //! Nothing here touches the file system: inputs are readers and bytes,
 //! outputs a writer, so the crate runs in a browser as it does natively.
 
@@ -27,6 +31,7 @@ use rc_manifest::Manifest;
 use rc_pe::{Image, PeFile};
 
 pub use rc_emit_native;
+pub use rc_emit_wasm;
 pub use rc_inno;
 
 /// The games the converter knows: id, manifest, and whether a shell
@@ -266,6 +271,19 @@ pub fn compile(
         all.extend(p?);
     }
     rc_emit_native::link(target, &all, &lifted.modules).map_err(|e| e.to_string())
+}
+
+/// Compile everything to the web shell's WebAssembly module (rc-emit-wasm).
+/// `progress` hears functions compiled.
+pub fn compile_wasm(lifted: &Lifted, progress: &mut dyn FnMut(usize)) -> Result<Vec<u8>, Error> {
+    let addrs: BTreeSet<u32> = lifted.functions.iter().map(|f| f.addr).collect();
+    let compiler = rc_emit_wasm::Compiler::new(&addrs, rc_emit_wasm::Options::default());
+    let mut all = Vec::with_capacity(lifted.functions.len());
+    for f in &lifted.functions {
+        all.push(compiler.compile(f).map_err(|e| e.to_string())?);
+        progress(1);
+    }
+    rc_emit_wasm::link(&all, &lifted.modules).map_err(|e| e.to_string())
 }
 
 /// What a shell template holds: where its `data/` directory is and which
