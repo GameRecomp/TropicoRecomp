@@ -124,7 +124,7 @@ M2.
 |---|---|
 | `data/*.PK2` (4 files, about 1 GiB) | Main asset archives |
 | `data/*.imb`, `data/*.pal` | Images and a palette |
-| `data2/*.xdt`, `*.dat`, `*.lng`, `TROPICO.CFG` | Game tables, language text, settings |
+| `data2/*.xdt`, `*.dat`, `*.lng` | Game tables, language text, settings |
 | `data2/Miles/` | Miles plug-ins (`.asi`, `.m3d`, `.flt`): proprietary DLLs, not used by us |
 | `maps/*.mp2` (45) | Scenario maps |
 | `movies/*.bik` (322) | Bink 1 videos |

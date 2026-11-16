@@ -19,7 +19,6 @@ required = [
     "data/px2.PK2",
     "data/px3.PK2",
     "data/px4.PK2",
-    "data2/TROPICO.CFG",
     "data2/Tropico.lng",
     "data2/bldgtype.dat",
     "data2/unittype.dat",
