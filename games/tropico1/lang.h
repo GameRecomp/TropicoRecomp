@@ -18,7 +18,9 @@ typedef enum tropico1_lang {
 
 /* The texts. */
 typedef enum tropico1_text {
-    TROPICO1_T_WINDOW, /* the window's size, on the resolution slider */
+    TROPICO1_T_WINDOW,         /* the window's size, on the resolution slider */
+    TROPICO1_T_NO_EDGE_SCROLL, /* the options page's check box */
+    TROPICO1_T_NO_EDGE_SCROLL_TIP, /* and its tooltip */
     TROPICO1_TEXTS
 } tropico1_text;
 

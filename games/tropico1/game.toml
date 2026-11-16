@@ -56,6 +56,8 @@ hooks = [
     0x00515450, # resolution, fullscreen: the routine that applies video settings
     0x00491280, # resolution: the options page's handler of changed widgets
     0x0044da90, # preview: the drawer of a scenario's island preview
+    0x0051edc0, # scroll: what an edge's widget does while the mouse is over it
+    0x004f1f40, # scroll: the text lookup (the edge scrolling box's texts)
 ]
 points = [
     0x00530a51, # resolution: a movie widget's flags, just copied from its record

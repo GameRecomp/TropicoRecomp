@@ -40,6 +40,11 @@ void tropico1_patch_textedit(void);
  * menu resolution, instead of read past its rows. */
 void tropico1_patch_preview(void);
 
+/* patch_scroll.c: the map scrolls by dragging it (with a finger, a pen or
+ * the mouse), and at the screen's edge only with a mouse and when the
+ * options page's box allows it. */
+void tropico1_patch_scroll(void);
+
 /* patch_art.c: the interface art for a resolution the game has none for
  * (0 x 0: remove what was made for one before). */
 void tropico1_patch_art(int w, int h);

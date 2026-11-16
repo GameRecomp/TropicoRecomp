@@ -49,6 +49,8 @@ game's character set, Windows-1252, written as escapes in the source
 | Text | English | German | Spanish | French | Italian |
 |---|---|---|---|---|---|
 | `TROPICO1_T_WINDOW` | window | Fenster | ventana | fenêtre | finestra |
+| `TROPICO1_T_NO_EDGE_SCROLL` | No edge scrolling | Kein Rand-Scrollen | Sin desplazamiento en bordes | Pas de défilement aux bords | Nessuno scorrimento ai bordi |
+| `TROPICO1_T_NO_EDGE_SCROLL_TIP` | (the box's tooltip, in each language) | | | | |
 
 To add a text: a name in `tropico1_text` and a row in `texts[]` in `lang.c`,
 one column per language. To add a language: a name in `tropico1_lang`, the

@@ -53,8 +53,10 @@ Tooltip numbers of the widgets involved:
 
 The wrapper of `0x004e8710` moves the removed widgets (and the label added
 just before a removed button at the same height) to x = `0x7000`, off the
-page, where they are neither drawn nor under the mouse, and moves the six
+page, where they are neither drawn nor under the mouse, and moves the
 check boxes up by `0x15e`, into the space of the three rows of buttons.
+The box for graphics shifting stays, as "No edge scrolling"
+(`tropico1-scroll.md`).
 The widgets stay where the game expects them, so the game's own code that
 reads and sets them is untouched.
 

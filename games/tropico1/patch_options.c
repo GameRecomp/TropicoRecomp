@@ -31,15 +31,15 @@
 #define W_TOOLTIP 0x32u
 
 /* Tooltips of the widgets taken off the page: the 3D mode's two buttons,
- * the colour depth's two, the sound quality's two, and the check box for
- * graphics shifting. A row of buttons has its label in a widget of its own
+ * the colour depth's two and the sound quality's two. A row of buttons has its label in a widget of its own
  * without a tooltip, added just before the buttons at the same height: it
  * goes too. (A check box draws its own label.) */
-static const uint16_t removed[] = {2846, 2848, 2851, 2853, 3207, 3209, 3212};
+static const uint16_t removed[] = {2846, 2848, 2851, 2853, 3207, 3209};
 
 /* Tooltips of the check boxes below them: full screen, auto save,
- * automatic yearbook, grid, setup videos, clouds. */
-static const uint16_t moved[] = {2855, 2863, 2865, 2857, 3204, 2859};
+ * automatic yearbook, grid, setup videos, clouds, graphics shifting (now
+ * edge scrolling). */
+static const uint16_t moved[] = {2855, 2863, 2865, 2857, 3204, 2859, 3212};
 
 /* How far they move up: from the first check box row to where the 3D
  * mode's row was. */

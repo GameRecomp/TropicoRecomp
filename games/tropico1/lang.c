@@ -45,6 +45,19 @@ static const char *const titles[] = {"English", "Deutsch", "Fran\xc3\xa7" "ais",
  * it). */
 static const char *const texts[TROPICO1_TEXTS][TROPICO1_LANGS] = {
     [TROPICO1_T_WINDOW] = {"window", "Fenster", "ventana", "fen\xeatre", "finestra"},
+    [TROPICO1_T_NO_EDGE_SCROLL] = {"No edge scrolling", "Kein Rand-Scrollen", "Sin desplazamiento en bordes",
+                                   "Pas de d\xe9" "filement aux bords", "Nessuno scorrimento ai bordi"},
+    [TROPICO1_T_NO_EDGE_SCROLL_TIP] =
+        {"The map does not scroll when the mouse is at the edge of the screen. It always scrolls by dragging "
+         "it; with a touch screen, edge scrolling is off anyway.",
+         "Die Karte scrollt nicht, wenn die Maus am Bildschirmrand ist. Ziehen verschiebt sie immer; bei "
+         "Bedienung mit dem Finger ist das Scrollen am Rand ohnehin aus.",
+         "El mapa no se desplaza cuando el rat\xf3n est\xe1 en el borde de la pantalla. Siempre se puede "
+         "arrastrar; con una pantalla t\xe1" "ctil, el desplazamiento en los bordes est\xe1 desactivado.",
+         "La carte ne d\xe9" "file pas quand la souris est au bord de l'\xe9" "cran. On peut toujours la "
+         "faire glisser\xa0; sur un \xe9" "cran tactile, le d\xe9" "filement aux bords est d\xe9" "sactiv\xe9.",
+         "La mappa non scorre quando il mouse \xe8 sul bordo dello schermo. Si pu\xf2 sempre trascinarla; "
+         "con uno schermo tattile, lo scorrimento ai bordi \xe8 disattivato."},
 };
 
 static int known;            /* the game has found its language */
