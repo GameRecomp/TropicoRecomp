@@ -4,6 +4,7 @@
 #ifndef RC_HLE_MODULES_H
 #define RC_HLE_MODULES_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -24,6 +25,15 @@ void rc_hle_all(void);
  * happen regularly: `fn` runs whenever the program looks for messages. */
 struct rc_cpu;
 void rc_add_pump_hook(void (*fn)(struct rc_cpu *c));
+
+/* A filter for the host's input before the program gets it (one): true
+ * when it takes the event, to hold it back or act on it itself. An event
+ * held back is given to the program later with rc_input_deliver. */
+struct rc_event;
+void rc_set_input_filter(bool (*fn)(const struct rc_event *e));
+void rc_input_deliver(const struct rc_event *e);
+/* What the last pointer event came from (rc_event_source). */
+int rc_input_source(void);
 
 /* DirectDraw's display mode (0 x 0 before one is set). */
 void rc_ddraw_mode(uint32_t *w, uint32_t *h);

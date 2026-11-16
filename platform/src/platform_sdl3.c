@@ -494,6 +494,11 @@ static void key_codes(SDL_Scancode s, int *vk, int *scan, int *ext)
     }
 }
 
+static rc_event_source source_of(SDL_MouseID which)
+{
+    return which == SDL_TOUCH_MOUSEID ? RC_SRC_TOUCH : which == SDL_PEN_MOUSEID ? RC_SRC_PEN : RC_SRC_MOUSE;
+}
+
 bool rc_plat_poll(rc_event *e)
 {
     SDL_Event ev;
@@ -509,12 +514,14 @@ bool rc_plat_poll(rc_event *e)
             return true;
         case SDL_EVENT_MOUSE_MOTION:
             e->type = RC_EV_MOUSE_MOVE;
+            e->source = source_of(ev.motion.which);
             e->x = (int)ev.motion.x;
             e->y = (int)ev.motion.y;
             return true;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
             e->type = RC_EV_MOUSE_BUTTON;
+            e->source = source_of(ev.button.which);
             e->x = (int)ev.button.x;
             e->y = (int)ev.button.y;
             e->button = ev.button.button == SDL_BUTTON_LEFT ? 1 : ev.button.button == SDL_BUTTON_RIGHT ? 2 : 3;
@@ -522,6 +529,7 @@ bool rc_plat_poll(rc_event *e)
             return true;
         case SDL_EVENT_MOUSE_WHEEL:
             e->type = RC_EV_WHEEL;
+            e->source = source_of(ev.wheel.which);
             e->x = (int)ev.wheel.mouse_x;
             e->y = (int)ev.wheel.mouse_y;
             e->delta = (int)(ev.wheel.y * 120.0f);

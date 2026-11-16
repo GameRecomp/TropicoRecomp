@@ -27,6 +27,14 @@ typedef enum rc_event_type {
     RC_EV_FOCUS,        /* down: gained */
 } rc_event_type;
 
+/* What a pointer event came from: SDL turns touch and pen into mouse
+ * events, and says so. */
+typedef enum rc_event_source {
+    RC_SRC_MOUSE,
+    RC_SRC_TOUCH,
+    RC_SRC_PEN,
+} rc_event_source;
+
 typedef struct rc_event {
     rc_event_type type;
     int x, y;
@@ -37,6 +45,7 @@ typedef struct rc_event {
     int scancode;
     int extended;
     int repeat;
+    rc_event_source source; /* of a pointer event */
 } rc_event;
 
 /* Start the platform. False if there is no display (the null platform

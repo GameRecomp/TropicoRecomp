@@ -568,66 +568,85 @@ static bool next_event(rc_event *e)
     return rc_plat_poll(e);
 }
 
+static bool (*input_filter)(const rc_event *e);
+static int last_source;
+
+void rc_set_input_filter(bool (*fn)(const rc_event *e)) { input_filter = fn; }
+
+int rc_input_source(void) { return last_source; }
+
+void rc_input_deliver(const rc_event *ev)
+{
+    rc_event e = *ev;
+    uint32_t to = capture_hwnd ? capture_hwnd : main_hwnd;
+    if (!to) {
+        return;
+    }
+    switch (e.type) {
+    case RC_EV_QUIT:
+        if (!quit_requested) {
+            quit_requested = 1;
+            rc_post_message(main_hwnd, WM_CLOSE, 0, 0);
+        }
+        break;
+    case RC_EV_MOUSE_MOVE:
+        mouse_x = e.x;
+        mouse_y = e.y;
+        rc_post_message(to, WM_MOUSEMOVE, mk_flags(), point(e.x, e.y));
+        break;
+    case RC_EV_MOUSE_BUTTON: {
+        static const uint8_t vk[4] = {0, 0x01, 0x02, 0x04};
+        mouse_x = e.x;
+        mouse_y = e.y;
+        keys[vk[e.button]] = e.down ? 0x80 : 0;
+        /* WM_LBUTTONDOWN 0x201, RBUTTON 0x204, MBUTTON 0x207; up is +1. */
+        uint32_t m = WM_LBUTTONDOWN + 3u * (uint32_t)(e.button - 1) + (e.down ? 0u : 1u);
+        rc_post_message(to, m, mk_flags(), point(e.x, e.y));
+        break;
+    }
+    case RC_EV_WHEEL:
+        rc_post_message(to, WM_MOUSEWHEEL, ((uint32_t)(e.delta & 0xffff) << 16) | mk_flags(), point(e.x, e.y));
+        break;
+    case RC_EV_KEY: {
+        uint8_t *k = &keys[e.vk & 0xff];
+        if (e.down && !(*k & 0x80)) {
+            *k ^= 1; /* toggle state, as Caps Lock shows it */
+        }
+        int was_down = (*k & 0x80) != 0;
+        *k = (uint8_t)((*k & 1) | (e.down ? 0x80 : 0));
+        int alt = (keys[0x12] & 0x80) != 0;
+        uint32_t lp = 1u | ((uint32_t)(e.scancode & 0xff) << 16) | ((uint32_t)e.extended << 24);
+        if (alt) {
+            lp |= 1u << 29;
+        }
+        if (was_down) {
+            lp |= 1u << 30;
+        }
+        if (!e.down) {
+            lp |= 1u << 31;
+        }
+        uint32_t m = (alt || e.vk == 0x12 || e.vk == 0x79) ? (e.down ? WM_SYSKEYDOWN : WM_SYSKEYUP)
+                                                          : (e.down ? WM_KEYDOWN : WM_KEYUP);
+        rc_post_message(focus_hwnd ? focus_hwnd : main_hwnd, m, (uint32_t)e.vk, lp);
+        break;
+    }
+    case RC_EV_FOCUS:
+        rc_post_message(main_hwnd, WM_ACTIVATEAPP, (uint32_t)e.down, 1);
+        break;
+    }
+}
+
 void rc_pump_events(void)
 {
     rc_event e;
-    uint32_t to = capture_hwnd ? capture_hwnd : main_hwnd;
     while (next_event(&e)) {
-        if (!to) {
+        if (e.type == RC_EV_MOUSE_MOVE || e.type == RC_EV_MOUSE_BUTTON || e.type == RC_EV_WHEEL) {
+            last_source = (int)e.source;
+        }
+        if (input_filter && input_filter(&e)) {
             continue;
         }
-        switch (e.type) {
-        case RC_EV_QUIT:
-            if (!quit_requested) {
-                quit_requested = 1;
-                rc_post_message(main_hwnd, WM_CLOSE, 0, 0);
-            }
-            break;
-        case RC_EV_MOUSE_MOVE:
-            mouse_x = e.x;
-            mouse_y = e.y;
-            rc_post_message(to, WM_MOUSEMOVE, mk_flags(), point(e.x, e.y));
-            break;
-        case RC_EV_MOUSE_BUTTON: {
-            static const uint8_t vk[4] = {0, 0x01, 0x02, 0x04};
-            mouse_x = e.x;
-            mouse_y = e.y;
-            keys[vk[e.button]] = e.down ? 0x80 : 0;
-            /* WM_LBUTTONDOWN 0x201, RBUTTON 0x204, MBUTTON 0x207; up is +1. */
-            uint32_t m = WM_LBUTTONDOWN + 3u * (uint32_t)(e.button - 1) + (e.down ? 0u : 1u);
-            rc_post_message(to, m, mk_flags(), point(e.x, e.y));
-            break;
-        }
-        case RC_EV_WHEEL:
-            rc_post_message(to, WM_MOUSEWHEEL, ((uint32_t)(e.delta & 0xffff) << 16) | mk_flags(), point(e.x, e.y));
-            break;
-        case RC_EV_KEY: {
-            uint8_t *k = &keys[e.vk & 0xff];
-            if (e.down && !(*k & 0x80)) {
-                *k ^= 1; /* toggle state, as Caps Lock shows it */
-            }
-            int was_down = (*k & 0x80) != 0;
-            *k = (uint8_t)((*k & 1) | (e.down ? 0x80 : 0));
-            int alt = (keys[0x12] & 0x80) != 0;
-            uint32_t lp = 1u | ((uint32_t)(e.scancode & 0xff) << 16) | ((uint32_t)e.extended << 24);
-            if (alt) {
-                lp |= 1u << 29;
-            }
-            if (was_down) {
-                lp |= 1u << 30;
-            }
-            if (!e.down) {
-                lp |= 1u << 31;
-            }
-            uint32_t m = (alt || e.vk == 0x12 || e.vk == 0x79) ? (e.down ? WM_SYSKEYDOWN : WM_SYSKEYUP)
-                                                              : (e.down ? WM_KEYDOWN : WM_KEYUP);
-            rc_post_message(focus_hwnd ? focus_hwnd : main_hwnd, m, (uint32_t)e.vk, lp);
-            break;
-        }
-        case RC_EV_FOCUS:
-            rc_post_message(main_hwnd, WM_ACTIVATEAPP, (uint32_t)e.down, 1);
-            break;
-        }
+        rc_input_deliver(&e);
     }
 }
 

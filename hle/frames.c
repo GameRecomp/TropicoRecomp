@@ -10,6 +10,8 @@
  *       FRAME down|up BUTTON   a mouse button (1 left, 2 right, 3 middle)
  *       FRAME key|keyup VK     a key, by Windows virtual-key code
  *       FRAME area W H         the window becomes W x H (rc_plat_area_set)
+ *       FRAME touch|pen|mouse  what the pointer events from here on come
+ *                              from (a finger, a pen; at first the mouse)
  *   Lines starting with '#' are comments. Keying input to frames rather
  *   than time makes a run replay the same on a fast and a slow machine.
  */
@@ -27,6 +29,7 @@ static FILE *script;
 static unsigned next_frame;
 static char next_line[256];
 static int script_done;
+static rc_event_source source;
 
 static bool read_line(void)
 {
@@ -73,8 +76,13 @@ static void run_script(unsigned frame)
             e.type = RC_EV_KEY;
             e.vk = (int)a;
             e.down = !strcmp(what, "key");
-        } else if (!strcmp(what, "area")) {
-            rc_plat_area_set((int)a, (int)b);
+        } else if (!strcmp(what, "area") || !strcmp(what, "touch") || !strcmp(what, "pen") ||
+                   !strcmp(what, "mouse")) {
+            if (what[0] == 'a') {
+                rc_plat_area_set((int)a, (int)b);
+            } else {
+                source = what[0] == 't' ? RC_SRC_TOUCH : what[0] == 'p' ? RC_SRC_PEN : RC_SRC_MOUSE;
+            }
             if (!read_line()) {
                 script_done = 1;
                 return;
@@ -82,6 +90,9 @@ static void run_script(unsigned frame)
             continue;
         } else {
             rc_log("RC_INPUT: cannot read \"%s\"", next_line);
+        }
+        if (e.type != RC_EV_KEY) {
+            e.source = source;
         }
         rc_inject_event(&e);
         if (!read_line()) {
