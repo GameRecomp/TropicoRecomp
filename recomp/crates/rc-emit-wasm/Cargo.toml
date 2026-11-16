@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "rc-emit-wasm"
+description = "IR to a WebAssembly module that runs on the runtime built with Emscripten (playing in a browser)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rc-ir.workspace = true
+wasm-encoder = { version = "0.263", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+wasmparser = { version = "0.263", default-features = false, features = ["std", "validate", "features"] }
+
+[lints]
+workspace = true

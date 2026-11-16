@@ -4,6 +4,12 @@
  * calls through rc_cpu.helpers. The blob format is described in
  * recomp/crates/rc-emit-native/src/blob.rs; the x87 operation codes in
  * recomp/crates/rc-emit-native/src/fpu.rs.
+ *
+ * Under Emscripten the lifted code is a WebAssembly module from
+ * rc-emit-wasm instead, which the page instantiates against this program's
+ * memory and function table (rc/native.h, rc_wasm_*). Its `rc.code` section
+ * holds the same tables as a blob, without code: a function's offset is its
+ * index, and its function pointer the table slot `table_base + index`.
  */
 #if defined(__APPLE__)
 #define _DARWIN_C_SOURCE
@@ -22,6 +28,10 @@
 #include "rc/log.h"
 #include "rc/mem.h"
 #include "rc/x87.h"
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -239,10 +249,48 @@ void rc_native_bind(rc_cpu *c)
 static bool loaded;
 static rc_native_image current;
 
+#if defined(__EMSCRIPTEN__)
+/* The first function-table slot of the module being registered. */
+static uint32_t wasm_table_base;
+
+EMSCRIPTEN_KEEPALIVE const uint32_t *rc_wasm_helpers(void)
+{
+    /* Function pointers are table slots: the module imports these. */
+    static uint32_t slots[6];
+    slots[0] = (uint32_t)(uintptr_t)h_dispatch;
+    slots[1] = (uint32_t)(uintptr_t)h_trap;
+    slots[2] = (uint32_t)(uintptr_t)h_cpuid;
+    slots[3] = (uint32_t)(uintptr_t)h_rdtsc;
+    slots[4] = (uint32_t)(uintptr_t)h_fpu;
+    slots[5] = (uint32_t)(uintptr_t)h_fstsw;
+    return slots;
+}
+
+bool rc_wasm_open(const uint8_t *tables, size_t size, uint32_t table_base, rc_native_image *img, char *err,
+                  size_t errn)
+{
+    wasm_table_base = table_base;
+    return rc_native_open(tables, size, img, err, errn);
+}
+
+EMSCRIPTEN_KEEPALIVE int rc_wasm_register(const uint8_t *tables, uint32_t size, uint32_t table_base)
+{
+    char err[256];
+    wasm_table_base = table_base;
+    if (!rc_native_load(tables, size, err, sizeof err)) {
+        rc_log("game code: %s", err);
+        return 0;
+    }
+    return 1;
+}
+#endif
+
 /* The blob's target id for this build (rc-emit-native's Target::id). */
 static uint32_t host_target(void)
 {
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__EMSCRIPTEN__)
+    return 5;
+#elif defined(__x86_64__) || defined(_M_X64)
 #if defined(_WIN32)
     return 2;
 #else
@@ -270,6 +318,8 @@ const char *rc_native_target(void)
         return "arm64-apple";
     case 4:
         return "arm64-linux";
+    case 5:
+        return "wasm32";
     default:
         return NULL;
     }
@@ -350,6 +400,13 @@ bool rc_native_open(const uint8_t *b, size_t size, rc_native_image *img, char *e
     if ((uint64_t)code_at + csize > size || code_at < 48 || nfuncs == 0) {
         FAIL("native code is damaged (sizes)");
     }
+#if defined(__EMSCRIPTEN__)
+    /* A module's tables: the code is in the module. */
+    if (csize != 0) {
+        FAIL("native code is damaged (code in a module's tables)");
+    }
+    csize = nfuncs;
+#endif
     const uint8_t *p = b + 48, *end = b + code_at;
 #define NEED(n)                                                                                    \
     if ((size_t)(end - p) < (size_t)(n)) {                                                         \
@@ -369,10 +426,14 @@ bool rc_native_open(const uint8_t *b, size_t size, rc_native_image *img, char *e
     if (!table || !modules) {
         FAIL("out of memory");
     }
+#if defined(__EMSCRIPTEN__)
+    uint8_t *code = NULL;
+#else
     uint8_t *code = map_code(b + code_at, csize);
     if (!code) {
         FAIL("cannot map native code executable");
     }
+#endif
     for (uint32_t i = 0; i < nfuncs; i++) {
         NEED(8);
         uint32_t addr = rd32(p), off = rd32(p + 4);
@@ -380,13 +441,17 @@ bool rc_native_open(const uint8_t *b, size_t size, rc_native_image *img, char *e
         if (off >= csize || (i > 0 && addr <= table[i - 1].addr)) {
             FAIL("native code is damaged (function table)");
         }
+        table[i].addr = addr;
+#if defined(__EMSCRIPTEN__)
+        table[i].fn = (rc_fn)(uintptr_t)(wasm_table_base + off);
+#else
         union {
             const void *p;
             rc_fn f;
         } u;
         u.p = code + off;
-        table[i].addr = addr;
         table[i].fn = u.f;
+#endif
     }
     for (uint32_t i = 0; i < ntr; i++) {
         NEED(12);

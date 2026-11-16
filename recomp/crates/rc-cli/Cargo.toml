@@ -20,6 +20,7 @@ rc-x86.workspace = true
 rc-emit-c.workspace = true
 rc-inno.workspace = true
 rc-emit-native.workspace = true
+rc-emit-wasm.workspace = true
 rc-convert.workspace = true
 getrandom = "0.3"
 clap.workspace = true

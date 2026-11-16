@@ -7,8 +7,10 @@
 //! on the real CPU in 32-bit mode (`tools/difftest/ref32.c`) and through
 //! each back end: as lifted C (`tools/difftest/harness.c`) and as native
 //! code from rc-emit-native (the same harness built with
-//! RC_NATIVE_HARNESS; on hosts that are a native-code target). Registers,
-//! the defined flags and a 4 KiB memory window must agree.
+//! RC_NATIVE_HARNESS; on hosts that are a native-code target), and as a
+//! WebAssembly module from rc-emit-wasm (the harness built with Emscripten
+//! and run by Node, when `emcc` and `node` are found). Registers, the
+//! defined flags and a 4 KiB memory window must agree.
 //!
 //! Needs an x86 Linux host that can run 32-bit programs, clang (for
 //! `-m32 -nostdlib`) and a C compiler. Writes to `build/difftest`.
@@ -143,8 +145,28 @@ fn real_main() -> Result<bool, String> {
     };
     let mut bundle = Vec::new();
     bundle.extend_from_slice(&(instances.len() as u32).to_le_bytes());
+    let wasm = have("emcc") && have("node");
+    let mut wasm_bundle = Vec::new();
+    wasm_bundle.extend_from_slice(&(instances.len() as u32).to_le_bytes());
     for (k, inst) in instances.iter().enumerate() {
         let (funcs, entries) = cases::lift_functions(inst);
+        if wasm {
+            let addrs: std::collections::BTreeSet<u32> = funcs.iter().map(|f| f.addr).collect();
+            let wc = rc_emit_wasm::Compiler::new(
+                &addrs,
+                rc_emit_wasm::Options {
+                    flags_at_return: true,
+                },
+            );
+            let compiled = funcs
+                .iter()
+                .map(|f| wc.compile(f))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("{}: {e}", inst.text))?;
+            let module = rc_emit_wasm::link(&compiled, &[]).map_err(|e| e.to_string())?;
+            wasm_bundle.extend_from_slice(&(module.len() as u32).to_le_bytes());
+            wasm_bundle.extend_from_slice(&module);
+        }
         if let Some(cc) = &compiler {
             let compiled = funcs
                 .iter()
@@ -191,6 +213,11 @@ fn real_main() -> Result<bool, String> {
     let bundle_path = work.join("native.bundle");
     if compiler.is_some() {
         fs::write(&bundle_path, &bundle).map_err(|e| e.to_string())?;
+    }
+    let wasm_bundle_path = work.join("wasm.bundle");
+    if wasm {
+        build_wasm(&root, &work)?;
+        fs::write(&wasm_bundle_path, &wasm_bundle).map_err(|e| e.to_string())?;
     }
 
     // Cases.
@@ -247,6 +274,18 @@ fn real_main() -> Result<bool, String> {
         eprintln!(
             "difftest: this host is no native-code target; the native back end is not tested"
         );
+    }
+    if wasm {
+        let args = [
+            work.join("harness-wasm.js").to_string_lossy().into_owned(),
+            wasm_bundle_path.to_string_lossy().into_owned(),
+        ];
+        backends.push((
+            "wasm",
+            execute(Path::new("node"), &args, &input).map_err(|e| crashed("wasm", e))?,
+        ));
+    } else {
+        eprintln!("difftest: emcc or node not found; the WebAssembly back end is not tested");
     }
     let mut all_ok = true;
     for (name, lifted) in &backends {
@@ -464,6 +503,43 @@ fn build(root: &Path, work: &Path, c_files: &[PathBuf], native: bool) -> Result<
         .arg("-lm")
         .arg("-o")
         .arg(work.join("harness-native")))
+}
+
+/// Whether `prog` runs.
+fn have(prog: &str) -> bool {
+    Command::new(prog)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// The WebAssembly harness: the runtime and the harness built with
+/// Emscripten for Node, loading rc-emit-wasm modules at run time.
+fn build_wasm(root: &Path, work: &Path) -> Result<(), String> {
+    let td = root.join("tools/difftest");
+    let mut c = Command::new("emcc");
+    c.args(["-std=c11", "-O2", "-DRC_NATIVE_HARNESS", "-I"])
+        .arg(root.join("runtime/include"))
+        .arg("-I")
+        .arg(&td);
+    for s in ["mem.c", "log.c", "dispatch.c", "x87.c", "native.c"] {
+        c.arg(root.join("runtime/src").join(s));
+    }
+    c.arg(td.join("harness.c"));
+    c.args([
+        "-sENVIRONMENT=node",
+        "-sNODERAWFS=1",
+        "-sALLOW_MEMORY_GROWTH=1",
+        "-sMAXIMUM_MEMORY=4GB",
+        "-sALLOW_TABLE_GROWTH=1",
+        "-sEXIT_RUNTIME=1",
+        "-sEXPORTED_FUNCTIONS=_main,_malloc",
+        "-o",
+    ])
+    .arg(work.join("harness-wasm.js"));
+    run(&mut c)
 }
 
 /// Run `bin` on `input`. On failure: the message and how many bytes of

@@ -3,8 +3,13 @@
  * Reserving the guest address space.
  *
  * 64-bit POSIX and Windows hosts reserve address space only and commit
- * pages as the loader and the guest heap need them. Other hosts (32-bit,
- * Emscripten) allocate the region outright, so they reserve less.
+ * pages as the loader and the guest heap need them. Other hosts (32-bit)
+ * allocate the region outright, so they reserve less.
+ *
+ * Under Emscripten the region is the lower 2 GiB of the guest's addresses
+ * (everything the runtime maps lies below 0x80000000), taken from the
+ * top of the WebAssembly memory with sbrk: memory the browser adds is zero
+ * and is backed by real pages only once it is written.
  */
 #if defined(__APPLE__)
 #define _DARWIN_C_SOURCE
@@ -21,7 +26,11 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #define RC_MEM_VIRTUAL 1
-#elif (defined(__unix__) || defined(__APPLE__)) && !defined(__EMSCRIPTEN__)
+#elif defined(__EMSCRIPTEN__)
+#include <unistd.h>
+#define RC_MEM_VIRTUAL 0
+#define RC_MEM_GUEST_MAX UINT64_C(0x80000000)
+#elif (defined(__unix__) || defined(__APPLE__))
 #include <sys/mman.h>
 #include <unistd.h>
 #define RC_MEM_VIRTUAL 1
@@ -60,6 +69,24 @@ bool rc_mem_reserve(uint64_t size)
     void *p = mmap(NULL, (size_t)size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (p == MAP_FAILED) {
         return false;
+    }
+#elif defined(__EMSCRIPTEN__)
+    if (size > RC_MEM_GUEST_MAX) {
+        size = RC_MEM_GUEST_MAX;
+    }
+    /* Aligned to 64 KiB, in pieces: sbrk takes a signed size. */
+    uintptr_t at = (uintptr_t)sbrk(0);
+    uintptr_t pad = (0x10000u - (at & 0xffffu)) & 0xffffu;
+    if (pad && sbrk((intptr_t)pad) == (void *)-1) {
+        return false;
+    }
+    void *p = sbrk(0);
+    for (uint64_t got = 0; got < size;) {
+        uint64_t piece = size - got < (UINT64_C(1) << 30) ? size - got : (UINT64_C(1) << 30);
+        if (sbrk((intptr_t)piece) == (void *)-1) {
+            return false;
+        }
+        got += piece;
     }
 #else
     if ((uint64_t)(size_t)size != size) {
@@ -105,6 +132,8 @@ void rc_mem_release(void)
     VirtualFree(rc_mem_base, 0, MEM_RELEASE);
 #elif RC_MEM_VIRTUAL
     munmap(rc_mem_base, (size_t)rc_mem_size);
+#elif defined(__EMSCRIPTEN__)
+    /* Taken for the life of the program. */
 #else
     free(rc_mem_base);
 #endif

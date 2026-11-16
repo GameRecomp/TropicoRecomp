@@ -65,7 +65,8 @@ enum Cmd {
         comments: bool,
         /// Compile to native code instead of C, for these targets
         /// (comma-separated: host, x86_64-sysv, x86_64-windows, arm64-apple,
-        /// arm64-linux). Writes generated/<id>/native/code-<target>.bin.
+        /// arm64-linux; or wasm32, a WebAssembly module for the web shell).
+        /// Writes generated/<id>/native/code-<target>.bin (code-wasm32.wasm).
         #[arg(long, value_delimiter = ',')]
         native: Vec<String>,
     },
@@ -637,6 +638,52 @@ fn lift(
     Ok(())
 }
 
+/// Compile `functions` to a WebAssembly module for the web shell, on all
+/// cores, and write it to `out/code-wasm32.wasm`.
+fn lift_wasm(functions: &[rc_ir::Function], modules: &[String], out: &Path) -> Result<()> {
+    use rc_emit_wasm::{Compiler, Options, link};
+    let addrs: BTreeSet<u32> = functions.iter().map(|f| f.addr).collect();
+    let compiler = Compiler::new(&addrs, Options::default());
+    let start = std::time::Instant::now();
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let chunk = functions.len().div_ceil(workers).max(1);
+    let results: Vec<_> = std::thread::scope(|s| {
+        let handles: Vec<_> = functions
+            .chunks(chunk)
+            .map(|part| {
+                let compiler = &compiler;
+                s.spawn(move || {
+                    part.iter()
+                        .map(|f| compiler.compile(f))
+                        .collect::<std::result::Result<Vec<_>, _>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join()
+                    .unwrap_or_else(|_| Err(rc_emit_wasm::Error("a worker panicked".into())))
+            })
+            .collect()
+    });
+    let mut compiled = Vec::with_capacity(functions.len());
+    for r in results {
+        compiled.extend(r.map_err(|e| e.to_string())?);
+    }
+    let module = link(&compiled, modules).map_err(|e| e.to_string())?;
+    let path = out.join("code-wasm32.wasm");
+    fs::write(&path, &module).map_err(|e| format!("{}: {e}", path.display()))?;
+    eprintln!(
+        "wasm32: {} functions in {:.1} s on {workers} threads, {:.1} MB of code, to {}",
+        compiled.len(),
+        start.elapsed().as_secs_f64(),
+        module.len() as f64 / 1e6,
+        path.display()
+    );
+    Ok(())
+}
+
 /// Compile `functions` to native code for each of `targets`, on all
 /// cores, and write one blob per target into `out`.
 fn lift_native(
@@ -649,6 +696,10 @@ fn lift_native(
     use rc_emit_native::{Compiler, Options, Target, link};
     fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     for t in targets {
+        if t == rc_emit_wasm::TARGET_NAME {
+            lift_wasm(functions, modules, out)?;
+            continue;
+        }
         let target = if t == "host" {
             Target::host().ok_or("this machine is not a native-code target")?
         } else {

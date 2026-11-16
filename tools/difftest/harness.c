@@ -7,7 +7,10 @@
  *
  * Built with RC_NATIVE_HARNESS, it runs the native back end's code instead:
  * the programs come from a bundle of blobs named on the command line
- * (u32 count, then per program u32 size and the blob).
+ * (u32 count, then per program u32 size and the blob). Built with
+ * Emscripten and RC_NATIVE_HARNESS (run by Node), the bundle holds
+ * WebAssembly modules from rc-emit-wasm, instantiated here against the
+ * harness's memory and function table as the web shell does.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -24,6 +27,32 @@ typedef struct rc_program {
     const rc_fn_entry *table;
     uint32_t count;
 } rc_program;
+
+#if defined(RC_NATIVE_HARNESS) && defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+
+/* Instantiate the module `bytes`; returns its first table slot and sets
+ * *tables to a copy of its rc.code section (*tables_len bytes). */
+EM_JS(uint32_t, instantiate, (const uint8_t *bytes, uint32_t len, const uint32_t *helpers, uint8_t **tables,
+                              uint32_t *tables_len), {
+    const table = wasmExports['__indirect_function_table'];
+    const m = new WebAssembly.Module(HEAPU8.slice(bytes, bytes + len));
+    const sec = new Uint8Array(WebAssembly.Module.customSections(m, 'rc.code')[0]);
+    const n = new DataView(sec.buffer).getUint32(24, true);
+    const base = table.grow(n);
+    const h = (i) => table.get(HEAPU32[(helpers >> 2) + i]);
+    new WebAssembly.Instance(m, {
+        rc: {dispatch: h(0), trap: h(1), cpuid: h(2), rdtsc: h(3), fpu: h(4), fstsw: h(5)},
+        env: {memory: wasmMemory, table: table,
+              table_base: new WebAssembly.Global({value: 'i32', mutable: false}, base)},
+    });
+    const p = _malloc(sec.length);
+    HEAPU8.set(sec, p);
+    HEAPU32[tables >> 2] = p;
+    HEAPU32[tables_len >> 2] = sec.length;
+    return base;
+});
+#endif
 
 #if defined(RC_NATIVE_HARNESS)
 static rc_program *rc_programs;
@@ -49,7 +78,14 @@ static int load_bundle(const char *path)
         }
         rc_native_image img;
         char err[200];
+#if defined(__EMSCRIPTEN__)
+        uint8_t *tables;
+        uint32_t tables_len;
+        uint32_t base = instantiate(b, n, rc_wasm_helpers(), &tables, &tables_len);
+        if (!rc_wasm_open(tables, tables_len, base, &img, err, sizeof err)) {
+#else
         if (!rc_native_open(b, n, &img, err, sizeof err)) {
+#endif
             fprintf(stderr, "harness: program %u: %s\n", k, err);
             return 0;
         }
