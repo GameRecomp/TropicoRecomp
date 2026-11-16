@@ -28,6 +28,11 @@ This repository contains **no game code and no game data**, and never will:
 Put your installed game under `orig/` (ignored by git); see
 [docs/WORKFLOWS.md](docs/WORKFLOWS.md#1-ingest-a-game-copy).
 
+Or use the converter page: it runs in your browser, takes your GOG
+installer and gives you a zip that runs on Windows, Linux or macOS. The
+installer never leaves your machine, and the page serves only the tools
+(see [docs/WORKFLOWS.md](docs/WORKFLOWS.md#11a-the-converter)).
+
 ## How it works
 
 ```

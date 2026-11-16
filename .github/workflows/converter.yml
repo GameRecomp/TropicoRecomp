@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: MIT
+# The converter site: the game shells for Windows, Linux and macOS (no game
+# code in them), the converter compiled to WebAssembly, and the page,
+# published to GitHub Pages. Pages must be enabled with "GitHub Actions" as
+# its source.
+name: converter
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shell-linux:
+    # The oldest supported runner, so that the shell runs on older glibc.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: SDL build dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev
+          libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev
+          libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev
+          libdbus-1-dev libudev-dev libasound2-dev libpulse-dev libpipewire-0.3-dev
+      - run: tools/build-shell build/out/tropico1-shell
+      - run: tools/make-appimage build/out/tropico1-shell build/out/Tropico.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shell-linux
+          path: build/out/Tropico.AppImage
+
+  shell-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: tools/build-shell build/out/Tropico
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shell-macos
+          path: build/out/Tropico
+
+  shell-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - run: tools/build-shell build/out/Tropico.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shell-windows
+          path: build/out/Tropico.exe
+
+  site:
+    needs: [shell-linux, shell-macos, shell-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - uses: actions/download-artifact@v4
+        with:
+          path: build/shells
+      - name: shell templates
+        run: |
+          cargo build --release --manifest-path recomp/Cargo.toml -p rc-cli
+          mkdir -p build/templates
+          recomp/target/release/recomp template --system linux \
+            --shell build/shells/shell-linux/Tropico.AppImage -o build/templates/Tropico-linux.zip
+          recomp/target/release/recomp template --system macos \
+            --shell build/shells/shell-macos/Tropico -o build/templates/Tropico-macos.zip
+          recomp/target/release/recomp template --system windows \
+            --shell build/shells/shell-windows/Tropico.exe -o build/templates/Tropico-windows.zip
+      - run: tools/build-web build/site build/templates
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
+
+  deploy:
+    needs: site
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

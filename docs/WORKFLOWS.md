@@ -257,6 +257,31 @@ release archive, changelog.
 - The hosted site serves only our tools. A recompiled module is never
   uploaded, cached on a server, or offered for download.
 
+## 11a. The converter
+
+The converter page turns a GOG installer into a zip for Windows, Linux or
+macOS (M12). CI builds and publishes it (`.github/workflows/converter.yml`
+to GitHub Pages); locally:
+
+```sh
+tools/build-shell build/shell/out/tropico1-shell        # the shell, SDL linked in
+tools/make-appimage build/shell/out/tropico1-shell build/shell/out/Tropico.AppImage
+recomp template --system linux --shell build/shell/out/Tropico.AppImage \
+    -o build/templates/Tropico-linux.zip
+recomp convert orig/setup_tropico_2.1.0.14.exe \
+    --template build/templates/Tropico-linux.zip -o build/Tropico-linux.zip
+tools/build-web build/site build/templates               # the page, for a local server
+```
+
+- `recomp convert` runs the same pipeline as the page (rc-convert); the
+  page's WebAssembly build and the native command give byte-identical zips.
+- The shell is the game program without lifted code. It runs the native
+  code and game files in `data/` beside it; `RC_NATIVE=blob` and
+  `TROPICO1_DATA=dir` point it elsewhere for testing.
+- The site serves only our tools and the shells, which contain no game
+  code. A converted build is made in the user's browser and saved on their
+  machine; it is never uploaded or offered for download.
+
 ## 12. Notes and documentation
 
 - Facts about the executables go in `docs/TARGETS.md`.

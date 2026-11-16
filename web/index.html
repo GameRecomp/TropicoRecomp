@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tropico Converter</title>
+<meta name="description" content="Turn your own GOG copy of Tropico into a native build for Windows, Linux or macOS, in your browser.">
+<link rel="icon" href="tropico.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <img src="tropico.svg" alt="" width="56" height="56">
+    <div>
+      <h1>Tropico Converter</h1>
+      <p class="lede">Turns your own GOG copy of <em>Tropico</em> into a build that runs natively on Windows, Linux or macOS.</p>
+    </div>
+  </header>
+
+  <p class="local">Everything happens in this browser tab. Your installer is not uploaded anywhere; this site only serves the converter itself.</p>
+
+  <section class="card">
+    <h2><span class="step">1</span> Your installer</h2>
+    <div id="drop" class="drop">
+      <p>The GOG installer, <code>setup_tropico_2.1.0.14.exe</code> (about 820 MiB).</p>
+      <button id="choose" type="button">Choose file…</button>
+      <span id="file-name" class="file-name">No file chosen</span>
+      <input id="file" type="file" accept=".exe" hidden>
+      <p class="hint">Or drop it here.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">2</span> Your system</h2>
+    <fieldset class="systems">
+      <legend class="sr-only">System</legend>
+      <label><input type="radio" name="system" value="windows"> Windows <small>64-bit</small></label>
+      <label><input type="radio" name="system" value="linux"> Linux <small>x86-64, AppImage</small></label>
+      <label><input type="radio" name="system" value="macos"> macOS <small>Apple silicon and Intel</small></label>
+    </fieldset>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">3</span> Convert</h2>
+    <p>The result is a zip of about 1.3 GiB with the game in it. You choose where it is saved.</p>
+    <button id="start" class="primary" type="button" disabled>Convert</button>
+  </section>
+
+  <section id="progress-card" class="card" hidden aria-live="polite">
+    <h2>Progress</h2>
+    <div class="bar-row">
+      <progress id="bar" max="100" value="0"></progress>
+      <span id="bar-label" class="bar-label">0 %</span>
+    </div>
+    <ol id="stages" class="stages"></ol>
+    <p class="elapsed">Elapsed: <span id="elapsed">0 s</span></p>
+  </section>
+
+  <p id="error" class="error" role="alert" hidden></p>
+
+  <section id="result" class="card result" hidden>
+    <h2>Done</h2>
+    <p id="result-summary"></p>
+    <p id="result-after"></p>
+    <a id="download" class="primary button" hidden>Save the zip</a>
+    <p class="warn">The zip contains your copy of the game. Keep it for yourself; do not share it.</p>
+  </section>
+
+  <footer>
+    <p>An unofficial fan project, not affiliated with or endorsed by the rights holders. Supported: the GOG release of Tropico. Tropico 2 follows later.</p>
+  </footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

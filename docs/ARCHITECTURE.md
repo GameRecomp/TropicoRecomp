@@ -40,11 +40,12 @@ recomp/                 Rust workspace: the recompiler
     rc-analysis/        x87 stack depth, stack deltas, call contracts (later)
     rc-emit-c/          IR → C
     rc-emit-native/     IR → x86-64 / ARM64 machine code with Cranelift (one blob per target)
+    rc-convert/         installer → identified game → lifted → native code → zip with a shell
+    rc-web/             rc-convert for the browser (wasm-bindgen), run by web/ in a worker
     rc-emit-wasm/       IR → WebAssembly module (later)
     rc-manifest/        game.toml and override files
     rc-report/          JSON reports
     rc-cli/             the `recomp` command
-    rc-web/             wasm-bindgen front end for the browser (later)
     rc-difftest/        differential tests against the real CPU (dev only)
     rc-inno/            reads and extracts the GOG installers (Inno Setup 5.5.0, own LZMA decoder)
 runtime/                C: CPU state, guest memory, PE image loading, dispatch, traps
@@ -52,6 +53,7 @@ hle/                    C: one directory per reimplemented DLL
   kernel32/ user32/ gdi32/ ddraw/ mss32/ winmm/
   msvcrt6/              native versions of statically linked CRT functions
 platform/               C: the SDL3 side (window, input, audio, video, files)
+web/                    the converter page (GitHub Pages): HTML, CSS, the worker
 games/
   tropico1/             game.toml, overrides, main.c, native/ replacements, tests/
   tropico2/

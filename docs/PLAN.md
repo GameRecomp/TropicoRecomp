@@ -49,6 +49,7 @@ first game carries over to the second.
 | M6 Picture and input | Done: window, DirectDraw software rendering, GDI text, mouse and keyboard on SDL3; the intro movies play, the main menu and the game menu render with their movie backgrounds and respond. Scripted scenarios (`boot`, `menu`, `submenu`, `newgame`) replay exactly on the virtual clock, screenshots included |
 | M7 In game | Started: a scripted run (`newgame`) goes from the main menu through the random map and game settings into a running game on a new island at 1024x768; the simulation runs (letters, the annual report) without traps. Open: ten game years, saving and loading |
 | M8 Sound and video | Mostly done: Miles on `SDL3_mixer` (samples, streams, music); Bink by lifting the game's own `binkw32.dll` with the executable (its threads run as cooperative fibers, its sound goes through our Miles). Open: the audio capture test, a check of sync over a whole movie |
+| M12 Converter | Working end to end on Linux: the page (or `recomp convert`) turns the GOG installer into a zip in about two minutes in Firefox; the Linux AppImage from it reaches the main menu identically to the C build. CI builds the Windows and macOS shells and publishes the site (not yet run). Open: the Windows and macOS shells on real machines; several workers for compiling; Tropico 2 |
 
 Known issue: `recomp discover` on Tropico 2 (no relocations) does not finish
 in reasonable time; the gap pass has nothing to reject bad decodes with.
@@ -216,7 +217,8 @@ serves only our tools.
   code with Cranelift, one position-independent blob per target. The
   runtime loads it into executable memory (`runtime/src/native.c`) instead
   of the C compiled in. Done: the whole game compiles in about a second on
-  16 threads, and the scenarios replay identically to the C build.
+  16 threads (8 s in a single WebAssembly worker), and the scenarios
+  replay identically to the C build.
 - **Shells**: the runtime, HLE and SDL3 built by CI for each system, with
   no game code; at start they load the blob and the game files that sit
   beside them.
