@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # The converter site: the game shells for Windows, Linux, macOS and Android
 # and the web shell for playing in the browser (no game code in any of them),
-# the converter compiled to WebAssembly, and the pages,
+# for the systems platforms.json has on, the converter compiled to
+# WebAssembly, and the pages,
 # published to GitHub Pages. Pages must be enabled with "GitHub Actions" as
 # its source.
 name: converter
@@ -16,6 +17,17 @@ permissions:
   contents: read
 
 jobs:
+  platforms:
+    # The systems to build for: platforms.json (true or false each). A job
+    # for a system that is off is skipped, and the site offers it as off.
+    runs-on: ubuntu-22.04
+    outputs:
+      on: ${{ steps.read.outputs.on }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: echo "on=$(jq -c . platforms.json)" >> "$GITHUB_OUTPUT"
+
   icons:
     # The program's icons, rendered from tools/appimage/tropico.svg.
     runs-on: ubuntu-22.04
@@ -29,7 +41,8 @@ jobs:
           path: build/icons
 
   shell-linux:
-    needs: icons
+    needs: [platforms, icons]
+    if: fromJSON(needs.platforms.outputs.on).linux
     # The oldest supported runner, so that the shell runs on older glibc.
     runs-on: ubuntu-22.04
     steps:
@@ -53,6 +66,8 @@ jobs:
           path: build/out/Tropico.AppImage
 
   shell-macos:
+    needs: platforms
+    if: fromJSON(needs.platforms.outputs.on).macos
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +78,8 @@ jobs:
           path: build/out/Tropico
 
   shell-windows:
-    needs: icons
+    needs: [platforms, icons]
+    if: fromJSON(needs.platforms.outputs.on).windows
     runs-on: windows-latest
     defaults:
       run:
@@ -82,6 +98,8 @@ jobs:
           path: build/out/Tropico.exe
 
   shell-android:
+    needs: platforms
+    if: fromJSON(needs.platforms.outputs.on).android
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +116,8 @@ jobs:
           path: build/out/Tropico-shell.apk
 
   shell-web:
+    needs: platforms
+    if: fromJSON(needs.platforms.outputs.on).web
     # The web shell: the runtime built with Emscripten (JSPI) for playing in
     # the browser, with the Liberation fonts the game's text needs.
     runs-on: ubuntu-22.04
@@ -118,7 +138,9 @@ jobs:
           path: build/out/web
 
   site:
-    needs: [icons, shell-linux, shell-macos, shell-windows, shell-android, shell-web]
+    needs: [platforms, icons, shell-linux, shell-macos, shell-windows, shell-android, shell-web]
+    # Skipped shells (systems that are off) do not hold the site back.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -133,15 +155,21 @@ jobs:
         run: |
           cargo build --release --manifest-path recomp/Cargo.toml -p rc-cli
           mkdir -p build/templates
-          recomp/target/release/recomp template --system linux \
-            --shell build/shells/shell-linux/Tropico.AppImage -o build/templates/Tropico-linux.zip
-          recomp/target/release/recomp template --system macos \
-            --shell build/shells/shell-macos/Tropico -o build/templates/Tropico-macos.zip \
-            --version "$(tools/version)" --icon build/shells/icons/tropico.icns
-          recomp/target/release/recomp template --system windows \
-            --shell build/shells/shell-windows/Tropico.exe -o build/templates/Tropico-windows.zip
-          recomp/target/release/recomp template --system android \
-            --shell build/shells/shell-android/Tropico-shell.apk -o build/templates/Tropico-android.zip
+          on() { jq -e ".$1" platforms.json > /dev/null; }
+          t() { recomp/target/release/recomp template --system "$@"; }
+          if on linux; then
+            t linux --shell build/shells/shell-linux/Tropico.AppImage -o build/templates/Tropico-linux.zip
+          fi
+          if on macos; then
+            t macos --shell build/shells/shell-macos/Tropico -o build/templates/Tropico-macos.zip \
+              --version "$(tools/version)" --icon build/shells/icons/tropico.icns
+          fi
+          if on windows; then
+            t windows --shell build/shells/shell-windows/Tropico.exe -o build/templates/Tropico-windows.zip
+          fi
+          if on android; then
+            t android --shell build/shells/shell-android/Tropico-shell.apk -o build/templates/Tropico-android.zip
+          fi
       - run: tools/build-web build/site build/templates build/shells/shell-web
       - uses: actions/upload-pages-artifact@v3
         with:

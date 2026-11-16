@@ -89,6 +89,15 @@ size. The environment variables `RC_SCALE`, `RC_PIXELS`, `RC_FULLSCREEN`
 and `RC_RESOLUTION` override it; in a scripted run `FRAME area W H` sets
 the window's size. The browser player has the same choices in its bar.
 
+### Systems that are on and off
+
+`platforms.json` says which systems are built (`windows`, `linux`, `macos`,
+`android`, `web`; `true` or `false`). It is the one place for it: the
+converter workflow skips the shell of a system that is off, `ci` leaves its
+runtime build out, `tools/build-web` leaves its template (or the player)
+out of the site and copies the file there, and the converter page shows the
+system greyed out, "disabled on this site for now".
+
 ### Version, icons and metadata
 
 `tools/version` gives the builds' version, `0.1.0+<short git revision>`; CMake

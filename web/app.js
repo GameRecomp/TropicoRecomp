@@ -174,7 +174,9 @@ function showError(text) {
 
 async function start() {
   if (!file || running) return;
-  const system = document.querySelector('input[name=system]:checked').value;
+  const chosen = document.querySelector('input[name=system]:checked');
+  if (!chosen) return; /* (every system is off on this site) */
+  const system = chosen.value;
   const sys = SYSTEMS[system];
   const outName = sys.file || `Tropico-${sys.label.replace(/\s/g, '')}.zip`;
   $('error').hidden = true;
@@ -332,29 +334,48 @@ drop.addEventListener('drop', (e) => {
   drop.classList.remove('over');
   if (!running && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
 });
-document.querySelector(`input[name=system][value=${guessSystem()}]`).checked = true;
+/* A system that cannot be chosen: greyed out, with the reason. */
+function disableChoice(system, why) {
+  const input = document.querySelector(`input[name=system][value=${system}]`);
+  input.disabled = true;
+  input.closest('label').classList.add('off');
+  input.closest('label').querySelector('small').textContent = why;
+  if (input.checked) {
+    input.checked = false;
+    const first = document.querySelector('input[name=system]:not(:disabled)');
+    if (first) first.checked = true;
+  }
+  updateNote();
+}
+const guessed = document.querySelector(`input[name=system][value=${guessSystem()}]`);
+guessed.checked = true;
 for (const r of document.querySelectorAll('input[name=system]')) r.addEventListener('change', updateNote);
 $('remove').addEventListener('click', removeStored);
 $('reconvert').addEventListener('click', () => { reconvert = true; updateView(); });
-function noBrowserChoice(why) {
-  const choice = $('web-choice');
-  const input = choice.querySelector('input');
-  input.disabled = true;
-  if (input.checked) document.querySelector(`input[name=system][value=${guessSystem()}]`).checked = true;
-  choice.querySelector('small').textContent = why;
-  updateNote();
-}
 if (!browserCanPlay()) {
-  noBrowserChoice('needs a browser with WebAssembly stack switching (JSPI), such as a current Chrome, Edge or Firefox');
-} else {
-  // A site built without the web shell cannot play: do not offer it.
-  fetch('player/tropico.js', { method: 'HEAD' }).then((r) => {
-    if (!r.ok) noBrowserChoice('not available on this site yet');
-  }).catch(() => {});
+  disableChoice('web', 'needs a browser with WebAssembly stack switching (JSPI), such as a current Chrome, Edge or Firefox');
 }
+// The systems this site is built for (platforms.json, the same file CI
+// reads); a site without it offers all of them.
+const platforms = fetch('platforms.json', { cache: 'no-cache' })
+  .then((r) => (r.ok ? r.json() : {}))
+  .catch(() => ({}))
+  .then((on) => {
+    for (const system of ['windows', 'linux', 'macos', 'android', 'web']) {
+      if (on[system] === false) disableChoice(system, 'disabled on this site for now');
+    }
+    const web = document.querySelector('input[name=system][value=web]');
+    if (!web.disabled) {
+      // A site built without the web shell cannot play: do not offer it.
+      return fetch('player/tropico.js', { method: 'HEAD' }).then((r) => {
+        if (!r.ok) disableChoice('web', 'not available on this site yet');
+      }).catch(() => {});
+    }
+    return null;
+  });
 updateNote();
 // A stored game: the player is what the visitor most likely wants.
-storedGame().then((info) => {
+Promise.all([storedGame(), platforms]).then(([info]) => {
   storedInfo = info;
   const web = document.querySelector('input[name=system][value=web]');
   if (info && browserCanPlay() && !web.disabled) {

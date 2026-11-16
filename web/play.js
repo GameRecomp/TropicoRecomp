@@ -133,8 +133,12 @@ async function start() {
       try {
         createTropico = (await import('./player/tropico.js')).default;
       } catch (e) {
-        throw new Error('This site has no player for the browser yet (player/tropico.js is missing). '
-          + 'It comes with the next build of the site.');
+        const on = await fetch('platforms.json', { cache: 'no-cache' })
+          .then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+        throw new Error(on.web === false
+          ? 'Playing in the browser is disabled on this site for now.'
+          : 'This site has no player for the browser yet (player/tropico.js is missing). '
+            + 'It comes with the next build of the site.');
       }
     }
     const [code, fonts] = await Promise.all([

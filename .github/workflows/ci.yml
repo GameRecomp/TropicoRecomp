@@ -10,6 +10,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  platforms:
+    # The systems the runtime is built and tested on: those platforms.json
+    # has on, of Linux, macOS and Windows.
+    runs-on: ubuntu-latest
+    outputs:
+      os: ${{ steps.read.outputs.os }}
+      any: ${{ steps.read.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          os=$(jq -c '[{linux: "ubuntu-latest", macos: "macos-latest", windows: "windows-latest"}
+                       | to_entries[] | select($p[0][.key]) | .value]' --slurpfile p platforms.json -n)
+          echo "os=$os" >> "$GITHUB_OUTPUT"
+          echo "any=$(jq 'length > 0' <<< "$os")" >> "$GITHUB_OUTPUT"
+
   audit:
     runs-on: ubuntu-latest
     steps:
@@ -40,10 +56,12 @@ jobs:
       - run: cargo run --release -p rc-difftest
 
   runtime:
+    needs: platforms
+    if: fromJSON(needs.platforms.outputs.any)
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(needs.platforms.outputs.os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

@@ -61,6 +61,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .systems { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
 .systems label { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .systems small { color: var(--muted); }
+.systems label.off { opacity: 0.55; cursor: not-allowed; }
 .bar-row { display: flex; gap: 12px; align-items: center; }
 progress { flex: 1; height: 14px; accent-color: var(--accent); }
 .bar-label { min-width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; }
