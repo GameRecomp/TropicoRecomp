@@ -86,6 +86,9 @@ void rc_plat_display_store(void);
 void rc_plat_show(bool show);
 void rc_plat_title(const char *title);
 
+/* Appended to every title the window gets (the build's revision). */
+void rc_plat_title_suffix(const char *suffix);
+
 /* The next input event, if any. */
 bool rc_plat_poll(rc_event *e);
 

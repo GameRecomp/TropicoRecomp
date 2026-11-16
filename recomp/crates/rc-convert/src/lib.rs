@@ -601,6 +601,8 @@ right click and Open, or allow it under System Settings, Privacy &\r
 Security; or run: xattr -dr com.apple.quarantine Tropico.app\r
 ";
 
+/// The macOS bundle's Info.plist; `{version}` and `{revision}` are filled
+/// in by [`make_template`].
 const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -609,18 +611,35 @@ const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
     <key>CFBundleIdentifier</key><string>org.tropicorecomp.tropico1</string>
     <key>CFBundleName</key><string>Tropico</string>
     <key>CFBundleDisplayName</key><string>Tropico</string>
+    <key>CFBundleIconFile</key><string>Tropico</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleShortVersionString</key><string>{version}</string>
+    <key>CFBundleVersion</key><string>{revision}</string>
+    <key>CFBundleGetInfoString</key><string>Tropico, recompiled ({revision})</string>
+    <key>NSHumanReadableCopyright</key><string>The program: MIT licence, TropicoRecomp. The game: its rights holders.</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.strategy-games</string>
     <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>
 "#;
 
+/// What a template says about the program besides the shell: its version
+/// (`0.1.0+<revision>`, tools/version) and, for macOS, its icon (.icns).
+#[derive(Debug, Default, Clone)]
+pub struct TemplateInfo<'a> {
+    pub version: &'a str,
+    pub icns: Option<&'a [u8]>,
+}
+
 /// A shell template for `system` (windows, linux, macos, android) around
 /// the shell program `shell` (for Linux an AppImage, for Android the
 /// unsigned APK). CI makes one per system.
-pub fn make_template(system: &str, shell: &[u8]) -> Result<Vec<u8>, Error> {
+pub fn make_template(
+    system: &str,
+    shell: &[u8],
+    info: &TemplateInfo<'_>,
+) -> Result<Vec<u8>, Error> {
     let targets = default_targets(system).ok_or_else(|| format!("unknown system {system}"))?;
     let io = |e: std::io::Error| e.to_string();
     let mut z = zip::ZipWriter::new(Vec::new());
@@ -652,12 +671,21 @@ pub fn make_template(system: &str, shell: &[u8]) -> Result<Vec<u8>, Error> {
         ),
     };
     if system == "macos" {
-        z.file(
-            "Tropico.app/Contents/Info.plist",
-            0o644,
-            INFO_PLIST.as_bytes(),
-        )
-        .map_err(io)?;
+        let version = if info.version.is_empty() {
+            "0.1.0+unknown"
+        } else {
+            info.version
+        };
+        let (short, revision) = version.split_once('+').unwrap_or((version, "unknown"));
+        let plist = INFO_PLIST
+            .replace("{version}", short)
+            .replace("{revision}", revision);
+        z.file("Tropico.app/Contents/Info.plist", 0o644, plist.as_bytes())
+            .map_err(io)?;
+        if let Some(icns) = info.icns {
+            z.file("Tropico.app/Contents/Resources/Tropico.icns", 0o644, icns)
+                .map_err(io)?;
+        }
     }
     z.file(exe, 0o755, shell).map_err(io)?;
     let mut text = README.to_string();

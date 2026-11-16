@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# The version of the builds: VERSION+<short git revision> ("+unknown"
+# outside a git checkout). CMake, the AppImage and the macOS template use it.
+#
+#   tools/version          -> 0.1.0+a695b1d
+#   tools/version --rev    -> a695b1d
+set -euo pipefail
+cd "$(dirname "$0")/.."
+VERSION=0.1.0
+rev=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+if [ "${1:-}" = "--rev" ]; then
+    echo "$rev"
+else
+    echo "$VERSION+$rev"
+fi

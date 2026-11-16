@@ -50,11 +50,16 @@ static bool find_up(const char *start, char *out, size_t n)  /* n >= RC_PATH_MAX
     return false;
 }
 
+#ifndef RC_REVISION
+#define RC_REVISION "unknown"
+#endif
+
 static void setup(void)
 {
     if (!rc_plat_init("Tropico")) {
         rc_fatal("no display");
     }
+    rc_plat_title_suffix(" (" RC_REVISION ")");
     rc_hle_all();
     tropico1_patches();
 }

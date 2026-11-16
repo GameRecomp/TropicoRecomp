@@ -97,6 +97,12 @@ enum Cmd {
         shell: PathBuf,
         #[arg(short, long)]
         out: PathBuf,
+        /// The program's version, 0.1.0+<revision> (tools/version).
+        #[arg(long, default_value = "")]
+        version: String,
+        /// The macOS bundle's icon (.icns, tools/make-icons).
+        #[arg(long)]
+        icon: Option<PathBuf>,
     },
     /// Extract a GOG installer (setup_*.exe, Inno Setup) into a directory:
     /// the game lands in <out>/app.
@@ -151,10 +157,24 @@ fn main() -> ExitCode {
             .map_err(|e| format!("{}: {e}", apk.display()))
             .and_then(|mut f| rc_convert::apk::verify(&mut f))
             .map(|()| eprintln!("{}: the v2 signature verifies", apk.display())),
-        Cmd::Template { system, shell, out } => {
-            let shell = read(&shell);
-            shell.and_then(|b| {
-                let z = rc_convert::make_template(&system, &b)?;
+        Cmd::Template {
+            system,
+            shell,
+            out,
+            version,
+            icon,
+        } => {
+            let icns = match icon {
+                Some(p) => read(&p).map(Some),
+                None => Ok(None),
+            };
+            read(&shell).and_then(|b| {
+                let icns = icns?;
+                let info = rc_convert::TemplateInfo {
+                    version: &version,
+                    icns: icns.as_deref(),
+                };
+                let z = rc_convert::make_template(&system, &b, &info)?;
                 fs::write(&out, z).map_err(|e| format!("{}: {e}", out.display()))
             })
         }

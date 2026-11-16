@@ -16,7 +16,20 @@ permissions:
   contents: read
 
 jobs:
+  icons:
+    # The program's icons, rendered from tools/appimage/tropico.svg.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y librsvg2-bin
+      - run: tools/make-icons build/icons
+      - uses: actions/upload-artifact@v4
+        with:
+          name: icons
+          path: build/icons
+
   shell-linux:
+    needs: icons
     # The oldest supported runner, so that the shell runs on older glibc.
     runs-on: ubuntu-22.04
     steps:
@@ -28,8 +41,12 @@ jobs:
           libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev
           libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev
           libdbus-1-dev libudev-dev libasound2-dev libpulse-dev libpipewire-0.3-dev
+      - uses: actions/download-artifact@v4
+        with:
+          name: icons
+          path: build/icons
       - run: tools/build-shell build/out/tropico1-shell
-      - run: tools/make-appimage build/out/tropico1-shell build/out/Tropico.AppImage
+      - run: tools/make-appimage build/out/tropico1-shell build/out/Tropico.AppImage build/icons
       - uses: actions/upload-artifact@v4
         with:
           name: shell-linux
@@ -46,12 +63,18 @@ jobs:
           path: build/out/Tropico
 
   shell-windows:
+    needs: icons
     runs-on: windows-latest
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      # The icon the program's resources carry (games/tropico1/tropico1.rc.in).
+      - uses: actions/download-artifact@v4
+        with:
+          name: icons
+          path: build/icons
       - run: tools/build-shell build/out/Tropico.exe
       - uses: actions/upload-artifact@v4
         with:
@@ -95,7 +118,7 @@ jobs:
           path: build/out/web
 
   site:
-    needs: [shell-linux, shell-macos, shell-windows, shell-android, shell-web]
+    needs: [icons, shell-linux, shell-macos, shell-windows, shell-android, shell-web]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -113,7 +136,8 @@ jobs:
           recomp/target/release/recomp template --system linux \
             --shell build/shells/shell-linux/Tropico.AppImage -o build/templates/Tropico-linux.zip
           recomp/target/release/recomp template --system macos \
-            --shell build/shells/shell-macos/Tropico -o build/templates/Tropico-macos.zip
+            --shell build/shells/shell-macos/Tropico -o build/templates/Tropico-macos.zip \
+            --version "$(tools/version)" --icon build/shells/icons/tropico.icns
           recomp/target/release/recomp template --system windows \
             --shell build/shells/shell-windows/Tropico.exe -o build/templates/Tropico-windows.zip
           recomp/target/release/recomp template --system android \

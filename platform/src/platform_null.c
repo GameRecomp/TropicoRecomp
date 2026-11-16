@@ -35,6 +35,7 @@ void rc_plat_display_store(void) {}
 
 void rc_plat_show(bool show) { (void)show; }
 void rc_plat_title(const char *title) { (void)title; }
+void rc_plat_title_suffix(const char *suffix) { (void)suffix; }
 
 bool rc_plat_poll(rc_event *e)
 {

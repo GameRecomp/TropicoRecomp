@@ -89,6 +89,17 @@ size. The environment variables `RC_SCALE`, `RC_PIXELS`, `RC_FULLSCREEN`
 and `RC_RESOLUTION` override it; in a scripted run `FRAME area W H` sets
 the window's size. The browser player has the same choices in its bar.
 
+### Version, icons and metadata
+
+`tools/version` gives the builds' version, `0.1.0+<short git revision>`; CMake
+puts the revision into the window's title, e.g. "Tropico (a695b1d)". The icons
+come from `tools/appimage/tropico.svg`: `tools/make-icons build/icons` renders
+the PNGs and packs `tropico.ico` and `tropico.icns` (CI does it once and hands
+them on). The Windows program carries the icon and version information
+(`games/tropico1/tropico1.rc.in`), the AppImage the icons, a desktop entry and
+AppStream metainfo (`tools/make-appimage`), and the macOS bundle the icon and
+its version in `Info.plist` (`recomp template --version --icon`).
+
 ## 3. The bring-up loop
 
 The daily work from M5 to M9. Each turn makes the game run a little further.

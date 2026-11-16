@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# The program's icons, from tools/appimage/tropico.svg:
+#
+#   tools/make-icons OUT_DIR
+#
+# writes OUT_DIR/png/<size>.png (16 to 1024), OUT_DIR/tropico.ico (Windows)
+# and OUT_DIR/tropico.icns (macOS). Rendering needs rsvg-convert (librsvg)
+# or ImageMagick; the containers are packed by tools/icons.py.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+out=${1:?output directory}
+svg=tools/appimage/tropico.svg
+mkdir -p "$out/png"
+command -v rsvg-convert > /dev/null ||
+    echo "make-icons: no rsvg-convert; ImageMagick draws no stroked paths (the palm's trunk)" >&2
+for s in 16 24 32 48 64 128 256 512 1024; do
+    if command -v rsvg-convert > /dev/null; then
+        rsvg-convert -w "$s" -h "$s" -o "$out/png/$s.png" "$svg"
+    else
+        magick -background none -density 384 "$svg" -resize "${s}x${s}" "PNG32:$out/png/$s.png"
+    fi
+done
+python3 tools/icons.py "$out"
+echo "make-icons: $out"

@@ -2,16 +2,23 @@
 # SPDX-License-Identifier: MIT
 # Wrap a built Linux shell into an AppImage (CI's Linux template).
 #
-#   tools/make-appimage SHELL OUT.AppImage
+#   tools/make-appimage SHELL OUT.AppImage [ICON_DIR]
 #
 # The shell is self-contained (SDL linked statically, X11, Wayland and
 # sound loaded at run time), so the AppImage holds just it, a desktop
-# entry and the icon. appimagetool is downloaded into build/ once.
+# entry, AppStream metainfo and the icon: the SVG, and the PNGs of
+# tools/make-icons in ICON_DIR (default build/icons) if they are there.
+# The version (tools/version) goes into the desktop entry and the
+# metainfo. appimagetool is downloaded into build/ once.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 shell=${1:?shell}
 out=${2:?output}
+icons=${3:-build/icons}
 arch=x86_64
+id=org.tropicorecomp.tropico1
+version=$(tools/version)
+date=$(git log -1 --format=%cs 2>/dev/null || date +%F)
 tool=build/appimage/appimagetool-$arch.AppImage
 if [ ! -x "$tool" ]; then
     mkdir -p build/appimage
@@ -23,17 +30,66 @@ dir=build/appimage/Tropico.AppDir
 rm -rf "$dir"
 mkdir -p "$dir/usr/bin"
 cp "$shell" "$dir/usr/bin/tropico"
-cp tools/appimage/tropico.svg "$dir/tropico.svg"
-cat > "$dir/tropico.desktop" <<'DESKTOP'
+share=$dir/usr/share
+mkdir -p "$share/icons/hicolor/scalable/apps" "$share/applications" "$share/metainfo"
+cp tools/appimage/tropico.svg "$share/icons/hicolor/scalable/apps/$id.svg"
+cp tools/appimage/tropico.svg "$dir/$id.svg"
+if [ -d "$icons/png" ]; then
+    for s in 16 24 32 48 64 128 256 512; do
+        mkdir -p "$share/icons/hicolor/${s}x${s}/apps"
+        cp "$icons/png/$s.png" "$share/icons/hicolor/${s}x${s}/apps/$id.png"
+    done
+    cp "$icons/png/256.png" "$dir/.DirIcon"
+fi
+cat > "$share/applications/$id.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Tropico
-Comment=Tropico, recompiled
+GenericName=Island dictatorship simulation
+Comment=Tropico, recompiled to run natively
 Exec=tropico
-Icon=tropico
-Categories=Game;StrategyGame;
+Icon=$id
+Categories=Game;StrategyGame;Simulation;
+Keywords=Tropico;PopTop;strategy;
 Terminal=false
+StartupWMClass=tropico
+X-AppImage-Name=Tropico
+X-AppImage-Version=$version
 DESKTOP
+cp "$share/applications/$id.desktop" "$dir/$id.desktop"
+cat > "$share/metainfo/$id.appdata.xml" <<METAINFO
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: MIT -->
+<component type="desktop-application">
+  <id>$id</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Tropico</name>
+  <summary>Tropico, recompiled to run natively</summary>
+  <description>
+    <p>
+      The 2001 strategy game Tropico, recompiled from your own GOG copy into a
+      native program by TropicoRecomp. This package holds the user's copy of
+      the game: it was made by the converter on the user's machine and is not
+      to be shared.
+    </p>
+  </description>
+  <developer id="org.tropicorecomp">
+    <name>TropicoRecomp</name>
+  </developer>
+  <launchable type="desktop-id">$id.desktop</launchable>
+  <url type="homepage">https://terminshock.github.io/TropicoRecomp/</url>
+  <url type="vcs-browser">https://github.com/TerminShock/TropicoRecomp</url>
+  <categories>
+    <category>Game</category>
+    <category>StrategyGame</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="$version" date="$date"/>
+  </releases>
+</component>
+METAINFO
 cat > "$dir/AppRun" <<'APPRUN'
 #!/bin/sh
 exec "$(dirname "$(readlink -f "$0")")/usr/bin/tropico" "$@"

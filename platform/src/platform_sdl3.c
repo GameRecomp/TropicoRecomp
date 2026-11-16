@@ -21,6 +21,23 @@ static SDL_Texture *texture;
 static int frame_w = 640, frame_h = 480;
 static rc_display display = {0, false, false, 0, 0};
 static char title_buf[128] = "recomp";
+static char title_suffix[64];
+
+/* The title with the suffix, for the window. */
+static const char *full_title(void)
+{
+    static char t[192];
+    SDL_snprintf(t, sizeof t, "%s%s", title_buf, title_suffix);
+    return t;
+}
+
+void rc_plat_title_suffix(const char *suffix)
+{
+    SDL_strlcpy(title_suffix, suffix, sizeof title_suffix);
+    if (window) {
+        SDL_SetWindowTitle(window, full_title());
+    }
+}
 
 bool rc_plat_init(const char *title)
 {
@@ -191,7 +208,7 @@ bool rc_plat_window(int width, int height)
         int scale = fitting_scale(display.scale, width, height);
         SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
 #endif
-        if (!SDL_CreateWindowAndRenderer(title_buf, width * scale, height * scale, flags, &window, &renderer)) {
+        if (!SDL_CreateWindowAndRenderer(full_title(), width * scale, height * scale, flags, &window, &renderer)) {
             SDL_Log("SDL_CreateWindowAndRenderer: %s", SDL_GetError());
             return false;
         }
@@ -234,7 +251,7 @@ void rc_plat_title(const char *title)
 {
     SDL_strlcpy(title_buf, title, sizeof title_buf);
     if (window) {
-        SDL_SetWindowTitle(window, title_buf);
+        SDL_SetWindowTitle(window, full_title());
     }
 }
 

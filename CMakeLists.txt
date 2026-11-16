@@ -2,6 +2,16 @@
 cmake_minimum_required(VERSION 3.25)
 project(tropicorecomp LANGUAGES C)
 
+# The builds' version, and the git revision they are built from (in the
+# window's title and the programs' metadata); tools/version says the same.
+set(RC_VERSION 0.1.0)
+execute_process(COMMAND git rev-parse --short HEAD
+                WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+                OUTPUT_VARIABLE RC_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT RC_REVISION)
+    set(RC_REVISION unknown)
+endif()
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
