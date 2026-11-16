@@ -13,7 +13,9 @@
 //   The canvas holds the game's frame at its own size; the page scales it:
 //   as large as fits, or by a whole number of device pixels.
 
-import createTropico from './player/tropico.js';
+// The web shell is loaded when the game starts (player/tropico.js): a
+// site built without it says so instead of failing to load the page.
+let createTropico = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,6 +36,13 @@ function savePrefs(p) {
   try {
     localStorage.setItem(PREFS, JSON.stringify(p));
   } catch (_) { /* storage blocked: the setting lasts for this visit */ }
+}
+
+/* An error as the player shows it: its message, then where it happened. */
+function describe(e) {
+  if (!e) return 'unknown error';
+  const msg = e.message || String(e);
+  return e.stack && !e.stack.includes(msg) ? `${msg}\n\n${e.stack}` : (e.stack || msg);
 }
 
 function fail(text) {
@@ -120,6 +129,14 @@ async function start() {
   $('start').disabled = true;
   $('status').textContent = 'Starting…';
   try {
+    if (!createTropico) {
+      try {
+        createTropico = (await import('./player/tropico.js')).default;
+      } catch (e) {
+        throw new Error('This site has no player for the browser yet (player/tropico.js is missing). '
+          + 'It comes with the next build of the site.');
+      }
+    }
     const [code, fonts] = await Promise.all([
       WebAssembly.compile(await game.code.arrayBuffer()),
       Promise.all(FONTS.map(async (f) => {
@@ -142,7 +159,7 @@ async function start() {
       canvas: $('canvas'),
       rcGameFiles: game.files,
       rcSave: save,
-      rcFailed: (e) => fail(String(e && e.stack ? e.stack : e)),
+      rcFailed: (e) => fail(describe(e)),
       print: (t) => console.log(t),
       printErr: (t) => console.warn(t),
       preRun: [(m) => {
@@ -191,7 +208,7 @@ async function start() {
       $('convert').hidden = true;
       return;
     }
-    fail(String(e && e.stack ? e.stack : e));
+    fail(describe(e));
   }
 }
 

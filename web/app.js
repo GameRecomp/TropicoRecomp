@@ -336,18 +336,29 @@ document.querySelector(`input[name=system][value=${guessSystem()}]`).checked = t
 for (const r of document.querySelectorAll('input[name=system]')) r.addEventListener('change', updateNote);
 $('remove').addEventListener('click', removeStored);
 $('reconvert').addEventListener('click', () => { reconvert = true; updateView(); });
-if (!browserCanPlay()) {
+function noBrowserChoice(why) {
   const choice = $('web-choice');
-  choice.querySelector('input').disabled = true;
-  choice.querySelector('small').textContent = 'needs a browser with WebAssembly stack switching (JSPI), '
-    + 'such as a current Chrome, Edge or Firefox';
+  const input = choice.querySelector('input');
+  input.disabled = true;
+  if (input.checked) document.querySelector(`input[name=system][value=${guessSystem()}]`).checked = true;
+  choice.querySelector('small').textContent = why;
+  updateNote();
+}
+if (!browserCanPlay()) {
+  noBrowserChoice('needs a browser with WebAssembly stack switching (JSPI), such as a current Chrome, Edge or Firefox');
+} else {
+  // A site built without the web shell cannot play: do not offer it.
+  fetch('player/tropico.js', { method: 'HEAD' }).then((r) => {
+    if (!r.ok) noBrowserChoice('not available on this site yet');
+  }).catch(() => {});
 }
 updateNote();
 // A stored game: the player is what the visitor most likely wants.
 storedGame().then((info) => {
   storedInfo = info;
-  if (info && browserCanPlay()) {
-    document.querySelector('input[name=system][value=web]').checked = true;
+  const web = document.querySelector('input[name=system][value=web]');
+  if (info && browserCanPlay() && !web.disabled) {
+    web.checked = true;
     updateNote();
   }
   updateView();

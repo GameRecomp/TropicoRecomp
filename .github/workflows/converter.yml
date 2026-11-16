@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # The converter site: the game shells for Windows, Linux, macOS and Android
-# (no game code in them), the converter compiled to WebAssembly, and the page,
+# and the web shell for playing in the browser (no game code in any of them),
+# the converter compiled to WebAssembly, and the pages,
 # published to GitHub Pages. Pages must be enabled with "GitHub Actions" as
 # its source.
 name: converter
@@ -72,8 +73,28 @@ jobs:
           name: shell-android
           path: build/out/Tropico-shell.apk
 
+  shell-web:
+    # The web shell: the runtime built with Emscripten (JSPI) for playing in
+    # the browser, with the Liberation fonts the game's text needs.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Emscripten and build tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build fonts-liberation
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install 7.0.0
+          "$RUNNER_TEMP/emsdk/emsdk" activate 7.0.0
+      - run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          tools/build-web-shell build/out/web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shell-web
+          path: build/out/web
+
   site:
-    needs: [shell-linux, shell-macos, shell-windows, shell-android]
+    needs: [shell-linux, shell-macos, shell-windows, shell-android, shell-web]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +117,7 @@ jobs:
             --shell build/shells/shell-windows/Tropico.exe -o build/templates/Tropico-windows.zip
           recomp/target/release/recomp template --system android \
             --shell build/shells/shell-android/Tropico-shell.apk -o build/templates/Tropico-android.zip
-      - run: tools/build-web build/site build/templates
+      - run: tools/build-web build/site build/templates build/shells/shell-web
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/site
