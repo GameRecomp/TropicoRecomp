@@ -50,10 +50,39 @@ the game finds a mode's slot by its width.
   them to "scale to the widget" and "keep the widget's size" for that one
   widget (the virtual rectangle 2572,1481 560x560).
 
-## The limits, for now
+## The art
 
 The HUD and the menus are drawn from art made for each of the five stock
-sizes, and slot 4 uses the 1600x1200 set. Until art is made for the chosen
-size, the resolution must be within it: wider than 1280, at most 1600x1200, a
-width that is a multiple of 4 (rows are not padded). At a smaller height than
-1200 the HUD's art is cut off at the bottom.
+sizes, picked by the file's extension (slot 4's is `.i16`); a loose file in
+`data\` is found before the one in the archives. `patch_art.c` drives the
+Tropico resolution patch's art generator (`third_party/tropico-resolution-patch`),
+which rescales the 1600x1200 set to the chosen size, its fonts by height/1080
+(drawn from a larger size of the same face where there is one), and writes
+it to `data/` in the user directory. A set is made once per resolution and
+set of archives (the marker `data/ARTSET-MODE.txt`) and removed when no
+resolution is chosen (`data/ARTSET-MANIFEST.txt`). It takes about 0.3 s
+natively and 4 s in a browser.
+
+The HUD's readouts (treasury, Swiss account, population, date) use colour 2
+of the text markup's `[Cn]` table at `0x00594fe8`, a grey that is hard to
+read on the rescaled art: it is made white (`0x7fff`).
+
+## Rotated labels at 16:9
+
+The tabs of the options book and of the yearbook, and the building panel's
+labels, are drawn rotated in a box laid out for 4:3. At 16:9 the label hangs
+out of its tab. Both tab layouts call the drawer at `0x004526d0` (through a
+jump at `0x00402ba3`) with the box and its clip as stack arguments, from
+`0x0040741e` and `0x0049179e`: a patch point on each call moves the box by
+(-14, -99) virtual units, makes it 340 high and the clip follow it. The
+building panel's labels reach the drawer with rotation 2: its wrapper moves
+their box by -111 and makes it 107 taller. These numbers were measured by the
+Tropico resolution patch; the error scales with the art, so they hold at
+every 16:9 resolution, and nothing is changed at other aspects or at the
+game's own resolutions.
+
+## The limits
+
+- Wider than 1280 (the stock widths must stay unique, and slot 4 is the
+  largest), at most 4096x3072.
+- A width that is a multiple of 4: rows are not padded.

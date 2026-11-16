@@ -52,9 +52,12 @@ image_base = 0x30000000
 hooks = [
     0x004e8710, # options: the function that adds a widget to a page
     0x00526220, # resolution: the painter of images (the world's)
+    0x004526d0, # resolution, vtext: the drawer of rotated text
 ]
 points = [
     0x00530a51, # resolution: a movie widget's flags, just copied from its record
+    0x0040741e, # resolution, vtext: the yearbook's tab labels are drawn
+    0x0049179e, # resolution, vtext: the options book's tab labels are drawn
 ]
 operands = [
     # resolution: the code that finds a mode's slot compares against slot 4

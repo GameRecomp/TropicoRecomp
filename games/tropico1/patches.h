@@ -22,4 +22,12 @@ void tropico1_patch_options(void);
 void tropico1_patch_resolution(void);
 void tropico1_patch_resolution_loaded(void);
 
+/* patch_vtext.c: rotated labels at a 16:9 resolution of the user's
+ * choosing (nothing at other aspects). */
+void tropico1_patch_vtext(int w, int h);
+
+/* patch_art.c: the interface art for a resolution the game has none for
+ * (0 x 0: remove what was made for one before). */
+void tropico1_patch_art(int w, int h);
+
 #endif

@@ -11,9 +11,8 @@
  * lift time and through the runtime (see patches.c). What the game does at
  * each place is in docs/notes/tropico1-resolution.md.
  *
- * Without art for the new size (the HUD and menus are drawn from art made
- * for each of the five stock sizes, and slot 4 uses the 1600x1200 set), the
- * resolution must stay within that art: wider than 1280, at most 1600x1200.
+ * The interface's art for the new size is made from the 1600x1200 set by
+ * patch_art.c, before the game reads any.
  */
 #include <stdio.h>
 
@@ -51,6 +50,12 @@
  * "size the widget to the movie" at +0x7e. */
 #define MOVIE_FLAGS_SET 0x00530a51u
 
+/* The colours of the text markup's [Cn] tags (RGB555 words). The HUD's
+ * readouts (treasury, Swiss account, population, and the date after them)
+ * use entry 2, a grey that is hard to read on the art made for other sizes:
+ * white instead. */
+#define TEXT_COLOURS 0x00594fe8u
+
 static unsigned mode_w, mode_h; /* the chosen resolution, 0 for none */
 
 /* The stock widths: a slot is found by its width, so they must stay unique. */
@@ -60,9 +65,9 @@ static int usable(int w, int h)
         rc_log("resolution %dx%d: the width must be a multiple of 4", w, h);
         return 0;
     }
-    if (w <= 1280 || w > 1600 || h > 1200 || h < 480) {
-        rc_log("resolution %dx%d: must be wider than 1280 and at most 1600x1200 "
-               "(the game has art for no larger size yet)",
+    if (w <= 1280 || w > 4096 || h < 480 || h > 3072) {
+        rc_log("resolution %dx%d: must be wider than 1280 (the game's own slots keep "
+               "their widths) and at most 4096x3072",
                w, h);
         return 0;
     }
@@ -120,15 +125,20 @@ void tropico1_patch_resolution(void)
         rc_ddraw_extra_mode(mode_w, mode_h);
         rc_hook(PAINTER, painter);
         rc_on_point(MOVIE_FLAGS_SET, movie_flags);
+        tropico1_patch_vtext((int)mode_w, (int)mode_h);
         rc_log("resolution: %ux%u in the game's largest slot", mode_w, mode_h);
     }
 }
 
 void tropico1_patch_resolution_loaded(void)
 {
+    tropico1_patch_art((int)mode_w, (int)mode_h);
     if (mode_w) {
         rc_st32(SLOT4, mode_w);
         rc_st32(SLOT4 + 4, mode_h);
+        if (rc_ld16(TEXT_COLOURS) == 0x7fff && rc_ld16(TEXT_COLOURS + 4) == 0x6318) {
+            rc_st16(TEXT_COLOURS + 4, 0x7fff);
+        }
     }
     uint32_t sw = rc_ld32(SLOT4), sh = rc_ld32(SLOT4 + 4);
     rc_st32(VAR_WORLD_W, 2 * sw);
