@@ -45,6 +45,27 @@ bool rc_plat_init(const char *title);
 
 /* Create the window, or change the size of the game's frame. */
 bool rc_plat_window(int width, int height);
+
+/* How the frame is shown in the window. */
+typedef struct rc_display {
+    /* 0: as large as fits, keeping the aspect ratio; 1 to 4: exactly that
+     * many host pixels per pixel of the frame (the window, when it is not
+     * full screen, is sized to it; smaller if the screen is too small). */
+    int scale;
+    bool smooth;     /* filter when scaling, instead of sharp pixels */
+    bool fullscreen; /* the whole screen, without a border */
+} rc_display;
+
+/* Apply display settings, at any time (before the window exists too). */
+void rc_plat_display(const rc_display *d);
+
+/* The display settings in effect (Alt+Enter changes full screen). */
+rc_display rc_plat_display_get(void);
+
+/* Read display settings from `settings.ini` in `user_dir` (created with
+ * the defaults and comments if it is missing), then from the environment
+ * (RC_SCALE, RC_PIXELS, RC_FULLSCREEN), and apply them. */
+void rc_plat_display_load(const char *user_dir);
 void rc_plat_show(bool show);
 void rc_plat_title(const char *title);
 

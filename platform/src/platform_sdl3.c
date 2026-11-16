@@ -1,8 +1,12 @@
 /* SPDX-License-Identifier: MIT */
 /*
  * The platform on SDL3: a resizable window, the game's frame in a streaming
- * texture scaled with letterboxing, and events converted to the frame's
- * coordinates and to Windows virtual keys.
+ * texture scaled as the display settings say (as large as fits, or by a
+ * whole number; sharp or smooth), and events converted to the frame's
+ * coordinates and to Windows virtual keys. Alt+Enter toggles full screen.
+ *
+ * In a browser the window is the page's canvas at the frame's own size,
+ * and the page scales it (web/play.js).
  */
 #include <stdlib.h>
 
@@ -15,6 +19,7 @@ static SDL_Window *window;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
 static int frame_w = 640, frame_h = 480;
+static rc_display display = {0, false, false};
 static char title_buf[128] = "recomp";
 
 bool rc_plat_init(const char *title)
@@ -30,6 +35,45 @@ bool rc_plat_init(const char *title)
     return true;
 }
 
+/* The largest scale, up to `want` (any if 0), at which a frame fits the
+ * screen with room for a window's border. */
+static int fitting_scale(int want, int w, int h)
+{
+    int fit = 1;
+    const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    if (m) {
+        while ((fit + 1) * w + 64 <= m->w && (fit + 1) * h + 96 <= m->h) {
+            fit++;
+        }
+    }
+    return want > 0 && want < fit ? want : fit;
+}
+
+/* The presentation and filter for the current settings. */
+static bool apply_presentation(void)
+{
+    if (!texture) {
+        return true;
+    }
+    SDL_SetTextureScaleMode(texture, display.smooth ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
+    return SDL_SetRenderLogicalPresentation(renderer, frame_w, frame_h,
+                                            display.scale > 0 ? SDL_LOGICAL_PRESENTATION_INTEGER_SCALE
+                                                              : SDL_LOGICAL_PRESENTATION_LETTERBOX);
+}
+
+/* A window that is not full screen gets the size of its scale (a whole
+ * number: as set, or as large as fits). */
+static void size_window(void)
+{
+#if !defined(SDL_PLATFORM_EMSCRIPTEN)
+    if (!window || display.fullscreen) {
+        return;
+    }
+    int s = fitting_scale(display.scale, frame_w, frame_h);
+    SDL_SetWindowSize(window, frame_w * s, frame_h * s);
+#endif
+}
+
 static bool make_texture(void)
 {
     if (texture) {
@@ -39,9 +83,29 @@ static bool make_texture(void)
     if (!texture) {
         return false;
     }
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-    return SDL_SetRenderLogicalPresentation(renderer, frame_w, frame_h, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    return apply_presentation();
 }
+
+void rc_plat_display(const rc_display *d)
+{
+    bool resize = d->scale != display.scale || d->fullscreen != display.fullscreen;
+    display = *d;
+    if (display.scale < 0 || display.scale > 8) {
+        display.scale = 0;
+    }
+    if (!window) {
+        return;
+    }
+#if !defined(SDL_PLATFORM_EMSCRIPTEN)
+    SDL_SetWindowFullscreen(window, display.fullscreen);
+#endif
+    apply_presentation();
+    if (resize) {
+        size_window();
+    }
+}
+
+rc_display rc_plat_display_get(void) { return display; }
 
 bool rc_plat_window(int width, int height)
 {
@@ -52,21 +116,40 @@ bool rc_plat_window(int width, int height)
     frame_w = width;
     frame_h = height;
     if (!window) {
-        /* Twice the frame, if it fits: frames of the time are small. */
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+        /* Not resizable: SDL would size the canvas to its size on the page,
+         * which the page sets to scale it. */
         int scale = 1;
-        const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
-        if (m && m->w >= 2 * width + 64 && m->h >= 2 * height + 96) {
-            scale = 2;
-        }
-        if (!SDL_CreateWindowAndRenderer(title_buf, width * scale, height * scale,
-                                         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN, &window, &renderer)) {
+        SDL_WindowFlags flags = SDL_WINDOW_HIDDEN;
+#else
+        int scale = fitting_scale(display.scale, width, height);
+        SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
+#endif
+        if (!SDL_CreateWindowAndRenderer(title_buf, width * scale, height * scale, flags, &window, &renderer)) {
             SDL_Log("SDL_CreateWindowAndRenderer: %s", SDL_GetError());
             return false;
         }
         SDL_SetRenderVSync(renderer, 1);
+#if !defined(SDL_PLATFORM_EMSCRIPTEN)
+        if (display.fullscreen) {
+            SDL_SetWindowFullscreen(window, true);
+        }
+#endif
         return make_texture();
     }
-    return resized ? make_texture() : true;
+    if (!resized) {
+        return true;
+    }
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+    /* The canvas follows the frame; the page scales it. */
+    SDL_SetWindowSize(window, width, height);
+#else
+    /* A new resolution: at a set scale the window follows it. */
+    if (display.scale > 0) {
+        size_window();
+    }
+#endif
+    return make_texture();
 }
 
 void rc_plat_show(bool show)
@@ -224,6 +307,17 @@ bool rc_plat_poll(rc_event *e)
             return true;
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP:
+#if !defined(SDL_PLATFORM_EMSCRIPTEN)
+            if (ev.key.scancode == SDL_SCANCODE_RETURN && (ev.key.mod & SDL_KMOD_ALT)) {
+                /* Alt+Enter: full screen, or back to the window. */
+                if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) {
+                    rc_display d = display;
+                    d.fullscreen = !d.fullscreen;
+                    rc_plat_display(&d);
+                }
+                continue;
+            }
+#endif
             key_codes(ev.key.scancode, &e->vk, &e->scancode, &e->extended);
             if (!e->vk) {
                 continue;

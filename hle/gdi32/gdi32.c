@@ -27,8 +27,11 @@ static void k_GetDeviceCaps(rc_cpu *c)
     case 2: v = 0x0003; break; /* DRIVERVERSION */
     case 4: v = 320; break;    /* HORZSIZE, mm */
     case 6: v = 240; break;    /* VERTSIZE, mm */
-    case 8: v = 1024; break;   /* HORZRES */
-    case 10: v = 768; break;   /* VERTRES */
+    /* A desktop larger than every resolution the game knows: Tropico offers
+     * only the resolutions narrower than the desktop, and the host window
+     * shows any of them at any size (rc/platform.h, rc_display). */
+    case 8: v = 2048; break;   /* HORZRES */
+    case 10: v = 1536; break;  /* VERTRES */
     case 12: v = 32; break;    /* BITSPIXEL */
     case 14: v = 1; break;     /* PLANES */
     case 24: v = 0xffffffffu; break; /* NUMCOLORS: more than 8 bits */

@@ -16,6 +16,11 @@ bool rc_plat_window(int width, int height)
     return true;
 }
 
+static rc_display display;
+void rc_plat_display(const rc_display *d) { display = *d; }
+rc_display rc_plat_display_get(void) { return display; }
+void rc_plat_display_load(const char *user_dir) { (void)user_dir; }
+
 void rc_plat_show(bool show) { (void)show; }
 void rc_plat_title(const char *title) { (void)title; }
 

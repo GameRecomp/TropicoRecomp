@@ -847,10 +847,10 @@ static void mode_desc(uint32_t d, uint32_t size, uint32_t w, uint32_t h, uint32_
 static void enum_modes(rc_cpu *c, uint32_t size)
 {
     uint32_t ctx = RC_ARG(c, 3), fn = RC_ARG(c, 4);
-    static const uint32_t sizes[][2] = {{640, 480}, {800, 600}, {1024, 768}, {1280, 1024}};
+    static const uint32_t sizes[][2] = {{640, 480}, {800, 600}, {1024, 768}, {1280, 1024}, {1600, 1200}};
     static const uint32_t depths[] = {8, 16, 32};
     uint32_t d = rc_heap_alloc(size, true);
-    for (unsigned i = 0; i < 4; i++) {
+    for (unsigned i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
         for (unsigned j = 0; j < 3; j++) {
             mode_desc(d, size, sizes[i][0], sizes[i][1], depths[j]);
             uint32_t args[2] = {d, ctx};

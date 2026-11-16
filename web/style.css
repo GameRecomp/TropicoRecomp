@@ -91,11 +91,12 @@ code { overflow-wrap: anywhere; }
 body.player { background: #000; color: #e8ecee; color-scheme: dark; overflow: hidden; }
 .player .stage { position: fixed; inset: 0; display: grid; place-items: center; }
 .player canvas {
+  /* The canvas is the game's frame; play.js sizes it on the page (the
+   * scale setting) and the page centres it. */
   display: block; background: #000; outline: none;
-  /* As large as fits, at the game's 4:3; SDL keeps its drawing at 640x480. */
-  width: min(100vw, calc(100vh * 4 / 3)) !important; height: min(100vh, calc(100vw * 3 / 4)) !important;
 }
 .player.sharp canvas { image-rendering: pixelated; }
+.player .bar select { font: inherit; }
 .player .bar {
   position: fixed; top: 0; left: 0; right: 0; display: flex; gap: 8px; align-items: center;
   padding: 6px 10px; background: rgba(0, 0, 0, 0.6); font-size: 0.9rem; opacity: 0; transition: opacity 0.2s;

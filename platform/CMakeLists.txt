@@ -13,7 +13,7 @@ if(SDL3_FOUND)
 endif()
 
 if(SDL3_FOUND AND SDL3_ttf_FOUND)
-    add_library(rc_platform STATIC src/frame.c src/platform_sdl3.c src/text_ttf.c)
+    add_library(rc_platform STATIC src/frame.c src/platform_sdl3.c src/settings.c src/text_ttf.c)
     target_link_libraries(rc_platform PUBLIC SDL3::SDL3 SDL3_ttf::SDL3_ttf)
     message(STATUS "platform: SDL3 ${SDL3_VERSION}, SDL3_ttf ${SDL3_ttf_VERSION}")
 else()

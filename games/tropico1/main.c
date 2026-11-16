@@ -179,6 +179,7 @@ int main(int argc, char **argv)
     if (!rc_host_exists(user, &is_dir, NULL)) {
         rc_host_mkdir(user);
     }
+    rc_plat_display_load(user);
     rc_config cfg = {
         .id = "tropico1",
         .game_dir = game,
