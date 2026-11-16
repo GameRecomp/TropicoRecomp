@@ -21,6 +21,7 @@
  * patch_art.c, before the game reads any.
  */
 #include <stdio.h>
+#include <string.h>
 
 #include "lang.h"
 #include "patches.h"
@@ -32,6 +33,7 @@
 #include "rc/log.h"
 #include "rc/platform.h"
 #include "rc/process.h"
+#include "rc/x87.h"
 
 /* The game's table of resolutions: five { width, height } dwords; slot 4 is
  * the largest. The code that maps a mode back to its slot compares against
@@ -160,6 +162,46 @@ static void movie_flags(rc_cpu *c)
         rc_ld16(w + 0x11) == 560) {
         rc_st32(w + 0x7a, 1);
         rc_st32(w + 0x7e, 0);
+    }
+}
+
+/* The movie scaler (in 0x00531990) draws the part of a movie widget that
+ * is to be drawn from the part of the movie under it. It divides the
+ * part's left, right and bottom by the widget's scale (widget / movie: the
+ * x scale in st(1), the y scale, a float, at [esp + 0x38]) but its top, at
+ * MOVIE_PART, by the x scale too; and it steps through the movie by the
+ * movie part's size over the whole widget's size less one (at [esp + 0x4c]
+ * and [esp + 0x40]) where it draws the part's (at [esp + 0x1c] and
+ * [esp + 0x20]). Drawing a whole widget, or at the same scale both ways,
+ * that is the same, and the game draws movies at their own size; scaled
+ * up to another shape (the window's size), a part drawn alone, such as the
+ * band behind the loading screen's text, showed a squeezed strip from the
+ * wrong rows. Before the top's division, st(0) is made top * x / y, so that
+ * it comes out divided by the y scale, and the steps are taken over the
+ * part's size. */
+#define MOVIE_PART 0x00531fcbu
+#define MP_Y_SCALE 0x38u
+#define MP_STEP_W 0x4cu
+#define MP_STEP_H 0x40u
+#define MP_PART_W 0x1cu
+#define MP_PART_H 0x20u
+
+static void movie_part(rc_cpu *c)
+{
+    uint32_t e = c->r[RC_ESP];
+    uint32_t v = rc_ld32(e + MP_Y_SCALE);
+    float ys;
+    memcpy(&ys, &v, sizeof ys);
+    double xs = RC_ST(c, 1);
+    if (ys > 0.0f && xs > 0.0) {
+        RC_ST(c, 0) = RC_ST(c, 0) * xs / ys;
+    }
+    int32_t pw = (int32_t)rc_ld32(e + MP_PART_W), ph = (int32_t)rc_ld32(e + MP_PART_H);
+    if (pw > 0) {
+        rc_st32(e + MP_STEP_W, (uint32_t)(pw - 1));
+    }
+    if (ph > 0) {
+        rc_st32(e + MP_STEP_H, (uint32_t)(ph - 1));
     }
 }
 
@@ -663,6 +705,7 @@ void tropico1_patch_resolution(void)
     rc_ddraw_extra_mode(mode_w, mode_h);
     rc_hook(PAINTER, painter);
     rc_on_point(MOVIE_FLAGS_SET, movie_flags);
+    rc_on_point(MOVIE_PART, movie_part);
     tropico1_patch_vtext((int)mode_w, (int)mode_h);
     rc_hook(APPLY_VIDEO, apply_video);
     rc_add_pump_hook(pump);

@@ -58,6 +58,20 @@ the game finds a mode's slot by its width.
   flags to `+0x7a` and `+0x7e`; at `0x00530a51`, just after, a patch point sets
   them to "scale to the widget" and "keep the widget's size" for that one
   widget (the virtual rectangle 2572,1481 560x560).
+- The scaler (in `0x00531990`) draws the part of a movie widget that is to be
+  drawn from the part of the movie under it. It divides the part's left,
+  right and bottom by the widget's scale (widget / movie: the x scale in
+  `st(1)`, the y scale, a float, at `[esp+0x38]`), but its top by the x scale
+  too, and it steps through the movie by the movie part's size over the
+  whole widget's size less one (`[esp+0x4c]`, `[esp+0x40]`) instead of the
+  part's (`[esp+0x1c]`, `[esp+0x20]`). Drawing a whole widget, or at the same
+  scale both ways, that is the same, and the game itself draws movies at
+  their own size. Scaled up to another shape (the window's size), the band
+  behind the loading screen's text (a part of the widget showing the last
+  frame of `s_f2o.bik`) showed a squeezed strip from the wrong rows. At
+  `0x00531fcb`, before the top's division, a patch point makes `st(0)` top
+  times x / y, so that it comes out divided by the y scale, and puts the
+  part's size less one into the two divisors.
 
 ## The art
 
