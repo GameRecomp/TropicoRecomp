@@ -34,7 +34,7 @@ jobs:
           path: build/out/Tropico.AppImage
 
   shell-macos:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - run: tools/build-shell build/out/Tropico
