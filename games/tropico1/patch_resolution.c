@@ -8,7 +8,8 @@
  * game's four smaller slots and then one for each size slot 4 may take
  * (common sizes from 1360x768 to 3840x2160, the game's own 1600x1200 among
  * them, and the one from the settings); its label gives the aspect ratio.
- * A stop beyond the fourth puts its size into slot 4 and changes to it.
+ * A stop beyond the fourth puts its size into slot 4 and changes to it,
+ * once the slider has stayed there for two seconds.
  *
  * Ported from the Tropico resolution patch (MIT, github.com/mulgrath/
  * tropico-resolution-patch), whose reverse-engineering notes found every
@@ -90,6 +91,40 @@ static int at_mode(void)
     return mode_w && w == mode_w && h == mode_h;
 }
 
+/* The screen is drawn from rectangles marked for drawing (INVALIDATE:
+ * fastcall, left and top in ecx and edx, then right, bottom and a layer on
+ * the stack, in pixels, cut to the screen's size at SCREEN_W and SCREEN_H).
+ * When the game changes to the chosen resolution it marks only what the
+ * world covered at the stock size, and the rest of the world stays black
+ * until something there is drawn again. So for a second after the world
+ * has been given the screen's size, the whole screen is marked every 50 ms,
+ * from the message loop. */
+#define INVALIDATE 0x004e6e40u
+#define SCREEN_W 0x0060c18cu /* 16-bit */
+#define SCREEN_H 0x0060c18eu
+static uint64_t redraw_until, last_redraw;
+
+static void want_redraw(void) { redraw_until = rc_ticks_peek_ms() + 1000; }
+
+static void redraw(rc_cpu *c)
+{
+    uint64_t now = rc_ticks_peek_ms();
+    if (now >= redraw_until || now - last_redraw < 50 || !at_mode()) {
+        return;
+    }
+    last_redraw = now;
+    int w = (int16_t)rc_ld16(SCREEN_W), h = (int16_t)rc_ld16(SCREEN_H);
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    rc_cpu saved = *c;
+    c->r[RC_ECX] = 0;
+    c->r[RC_EDX] = 0;
+    uint32_t args[3] = {(uint32_t)(w - 1), (uint32_t)(h - 1), 0};
+    rc_call_guest(c, INVALIDATE, 3, args);
+    *c = saved;
+}
+
 /* The world's image is sized for the stock slot 4 when it is made: at the
  * chosen resolution, give the painter the screen's size and the whole
  * virtual screen as the view, for the world's own call (the small detail
@@ -100,7 +135,11 @@ static void painter(rc_cpu *c)
     uint32_t img = c->r[RC_ECX];
     if (at_mode() && rc_ld32(c->r[RC_ESP]) == WORLD_CALL) {
         uint32_t guard = mode_w / 2 < 1600 ? mode_w / 2 : 1600;
-        if (rc_ld32(img + IMG_W) >= guard) {
+        uint32_t iw = rc_ld32(img + IMG_W);
+        if (iw >= guard && (iw != mode_w || rc_ld32(img + IMG_H) != mode_h)) {
+            want_redraw();
+        }
+        if (iw >= guard) {
             rc_st32(img + IMG_W, mode_w);
             rc_st32(img + IMG_H, mode_h);
             rc_st16(img + (uint32_t)IMG_VIRT_W, 3200);
@@ -378,8 +417,42 @@ static void add_widget(rc_cpu *c)
 
 static void slider_set(rc_cpu *c) { c->r[RC_EDX] = stop_of(c->r[RC_EDX]); }
 
-/* The label "W x H" of the slot in effect: its aspect after it, or that it
- * is the window's. */
+/* The label of a stop: "WxH (aspect)", or "(window)" for the window's
+ * size. (Without the spaces around the x of the game's own label, so that
+ * it keeps to one line.) */
+static void label_text(unsigned w, unsigned h, int window)
+{
+    char aspect[32], text[48];
+    if (window) {
+        snprintf(aspect, sizeof aspect, "window");
+    } else {
+        aspect_name(w, h, aspect, sizeof aspect);
+    }
+    snprintf(text, sizeof text, "%ux%u (%s)", w, h, aspect);
+    for (uint32_t i = 0; i < sizeof text; i++) {
+        rc_st8(LABEL_TEXT + i, (uint8_t)text[i]);
+        if (!text[i]) {
+            break;
+        }
+    }
+}
+
+/* The size a stop stands for, and whether it is the window's. */
+static void stop_size(unsigned stop, unsigned *w, unsigned *h, int *window)
+{
+    *window = stop >= WINDOW_STOP;
+    if (stop < 4) {
+        *w = rc_ld32(SLOTS + 8 * stop);
+        *h = rc_ld32(SLOTS + 8 * stop + 4);
+    } else if (*window) {
+        from_area(w, h);
+    } else {
+        *w = size_w[stop - 4];
+        *h = size_h[stop - 4];
+    }
+}
+
+/* The label "W x H" of the slot in effect, made again with the aspect. */
 static void label_made(rc_cpu *c)
 {
     (void)c;
@@ -388,22 +461,7 @@ static void label_made(rc_cpu *c)
     if (slot > 4) {
         return;
     }
-    unsigned w = rc_ld32(SLOTS + 8 * slot), h = rc_ld32(SLOTS + 8 * slot + 4);
-    char aspect[32], text[48];
-    if (follow) {
-        snprintf(aspect, sizeof aspect, "window");
-    } else {
-        aspect_name(w, h, aspect, sizeof aspect);
-    }
-    /* (Without the spaces around the x of the game's own label, so that
-     * it keeps to one line.) */
-    snprintf(text, sizeof text, "%ux%u (%s)", w, h, aspect);
-    for (uint32_t i = 0; i < sizeof text; i++) {
-        rc_st8(LABEL_TEXT + i, (uint8_t)text[i]);
-        if (!text[i]) {
-            break;
-        }
-    }
+    label_text(rc_ld32(SLOTS + 8 * slot), rc_ld32(SLOTS + 8 * slot + 4), follow && slot == 4);
 }
 
 /* Keep the choice in the settings (settings.ini): -1 x -1 for the window,
@@ -417,58 +475,110 @@ static void store(int w, int h)
     rc_plat_display_store();
 }
 
-/* The slider has moved: a stop beyond the fourth is slot 4 at its size, or
- * at the window's (which slot 4 then follows); one of the first four leaves
- * the window's size for the game's own sizes. On the setup screen the game
- * refuses any change, and nothing is changed here either. */
+/* The options page (null when it is closed), and how the page sets a
+ * widget's text (thiscall on the page: message 0x71, the widget, the text,
+ * 0) and fills itself from the settings in effect. */
+#define OPTIONS_PAGE 0x005f8014u
+#define PAGE_MESSAGE 0x004e8520u
+#define SET_TEXT 0x71u
+#define RESOLUTION_LABEL 0x1ea5u
+#define FILL_PAGE 0x00490a60u
+#define PAGE_FILLING 0x005f801cu /* nonzero while the page fills itself */
+
+/* A stop is taken once the slider has kept it for SETTLE_MS, so that
+ * dragging it does not change the resolution at every stop on the way;
+ * until then the label shows the stop. */
+#define SETTLE_MS 2000
+static int pending = -1;
+static uint64_t pending_at;
+
+/* The slider has moved. On the setup screen the game refuses any change
+ * (it says so), and nothing is changed here either; nor while the page
+ * sets the slider itself (the handler does nothing then). */
 static void options_changed(rc_cpu *c)
 {
     uint32_t msg = c->r[RC_ECX];
-    if (!msg || rc_ld16(msg + W_NUMBER) != RESOLUTION_SLIDER) {
+    if (!msg || rc_ld16(msg + W_NUMBER) != RESOLUTION_SLIDER || rc_ld32(GAME_STATE) == SETUP_SCREEN ||
+        rc_ld32(PAGE_FILLING)) {
         rc_lookup_lifted(OPTIONS_CHANGED)(c);
         return;
     }
     unsigned stop = c->r[RC_EDX];
-    int setup = rc_ld32(GAME_STATE) == SETUP_SCREEN;
-    int changed = 0;
+    uint32_t vs = rc_ld32(VIDEO_SETTINGS);
+    if (stop == stop_of(vs ? rc_ld32(vs + VS_SLOT) : 0)) {
+        pending = -1; /* (back where it is, or the page setting the slider) */
+    } else {
+        pending = (int)stop;
+        pending_at = rc_ticks_peek_ms();
+    }
+    uint32_t page = rc_ld32(OPTIONS_PAGE);
+    if (page) {
+        unsigned w, h;
+        int window;
+        stop_size(stop, &w, &h, &window);
+        label_text(w, h, window);
+        rc_cpu saved = *c;
+        c->r[RC_ECX] = page;
+        uint32_t args[4] = {SET_TEXT, RESOLUTION_LABEL, LABEL_TEXT, 0};
+        rc_call_guest(c, PAGE_MESSAGE, 4, args);
+        *c = saved;
+    }
+    RC_RETURN(c, 0, 0); /* (as the handler returns) */
+}
+
+/* From the message loop: a stop the slider has kept is taken. A stop
+ * beyond the fourth is slot 4 at its size, or at the window's (which slot
+ * 4 then follows); one of the first four leaves the window's size for the
+ * game's own sizes. */
+static void take_stop(rc_cpu *c)
+{
+    if (pending < 0 || rc_ticks_peek_ms() - pending_at < SETTLE_MS) {
+        return;
+    }
+    unsigned stop = (unsigned)pending;
+    pending = -1;
+    uint32_t vs = rc_ld32(VIDEO_SETTINGS);
+    if (!vs) {
+        return;
+    }
+    unsigned w, h;
+    int window;
+    stop_size(stop, &w, &h, &window);
+    uint32_t slot = stop < 4 ? stop : 4;
+    int resized = 0;
     if (stop < 4) {
-        if (follow && !setup) {
-            rc_log("resolution: the game's own sizes from the options page");
+        if (follow) {
             follow = 0;
             set_mode(0, 0);
             relist_loose(c);
             store(0, 0);
         }
-    } else {
-        c->r[RC_EDX] = 4;
-        unsigned w = 0, h = 0;
-        if (stop >= WINDOW_STOP) {
-            from_area(&w, &h);
-        } else {
-            w = size_w[stop - 4];
-            h = size_h[stop - 4];
-        }
-        int window = stop >= WINDOW_STOP;
-        if (!setup && (window != follow || w != rc_ld32(SLOT4) || h != rc_ld32(SLOT4 + 4))) {
-            rc_log("resolution: %ux%u%s from the options page", w, h, window ? " (the window's)" : "");
-            follow = window;
-            set_mode(w, h);
-            relist_loose(c);
-            store(window ? -1 : (int)mode_w, window ? -1 : (int)mode_h);
-            changed = 1;
-        }
+    } else if (window != follow || w != rc_ld32(SLOT4) || h != rc_ld32(SLOT4 + 4)) {
+        follow = window;
+        set_mode(w, h);
+        relist_loose(c);
+        store(window ? -1 : (int)mode_w, window ? -1 : (int)mode_h);
+        resized = 1;
     }
+    rc_log("resolution: %ux%u%s from the options page", w, h, window ? " (the window's)" : "");
     /* The routine does nothing when asked for the slot in effect. */
-    uint32_t vs = rc_ld32(VIDEO_SETTINGS);
-    if (changed && vs && rc_ld32(vs + VS_SLOT) == 4) {
-        rc_st32(vs + VS_SLOT, 3);
-        rc_lookup_lifted(OPTIONS_CHANGED)(c);
-        if (rc_ld32(vs + VS_SLOT) == 3) {
-            rc_st32(vs + VS_SLOT, 4); /* (it failed: still slot 4) */
-        }
-        return;
+    int forced = resized && rc_ld32(vs + VS_SLOT) == slot;
+    if (forced) {
+        rc_st32(vs + VS_SLOT, slot == 4 ? 3 : 4);
     }
-    rc_lookup_lifted(OPTIONS_CHANGED)(c);
+    rc_cpu saved = *c;
+    c->r[RC_ECX] = 0xffffffffu;
+    c->r[RC_EDX] = 0xffffffffu;
+    uint32_t args[3] = {0xffffffffu, slot, 0xffffffffu};
+    rc_call_guest(c, APPLY_VIDEO, 3, args);
+    if (forced && rc_ld32(vs + VS_SLOT) != slot) {
+        rc_st32(vs + VS_SLOT, slot); /* (it failed: still that slot) */
+    }
+    if (rc_ld32(OPTIONS_PAGE)) {
+        rc_call_guest(c, FILL_PAGE, 0, NULL);
+    }
+    *c = saved;
+    want_redraw();
 }
 
 /* While slot 4 follows the window, every resolution the game asks for is
@@ -529,6 +639,14 @@ static void watch_window(rc_cpu *c)
     *c = saved;
 }
 
+/* From the message loop. */
+static void pump(rc_cpu *c)
+{
+    watch_window(c);
+    take_stop(c);
+    redraw(c);
+}
+
 void tropico1_patch_resolution(void)
 {
     rc_display d = rc_plat_display_get();
@@ -546,7 +664,7 @@ void tropico1_patch_resolution(void)
     rc_on_point(MOVIE_FLAGS_SET, movie_flags);
     tropico1_patch_vtext((int)mode_w, (int)mode_h);
     rc_hook(APPLY_VIDEO, apply_video);
-    rc_add_pump_hook(watch_window);
+    rc_add_pump_hook(pump);
     for (size_t i = 0; i < sizeof common / sizeof common[0]; i++) {
         add_size(common[i][0], common[i][1]);
     }

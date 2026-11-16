@@ -38,6 +38,15 @@ the game finds a mode's slot by its width.
   its view (`-0x6b`, `-0x69`, 16-bit) to the whole virtual screen, 3200 x 2400.
   The small detail view in a corner is painted through the same call; it is
   told apart by its width (less than half the screen).
+- The screen is drawn from rectangles marked for drawing: `0x004e6e40`
+  (fastcall: left and top in `ecx` and `edx`, then right, bottom and a layer
+  on the stack, in pixels, cut to the screen's size, the 16-bit words at
+  `0x0060c18c` and `0x0060c18e`; `0x004e6dd0` is the same in virtual units).
+  After a change to the chosen resolution the game marks only what the world
+  covered at the stock size, and the rest stayed black (beside and above the
+  HUD) until something there was drawn again. When the wrapper gives the
+  world the screen's size, and after a change from the options page, the
+  whole screen is marked every 50 ms for a second, from the message loop.
 
 ## Movies
 
@@ -78,18 +87,27 @@ The HUD's readouts (treasury, Swiss account, population, date) use colour 2
 of the text markup's `[Cn]` table at `0x00594fe8`, a grey that is hard to
 read on the rescaled art: it is made white (`0x7fff`).
 
-## Rotated labels at 16:9
+## Rotated labels
 
 The tabs of the options book and of the yearbook, and the building panel's
-labels, are drawn rotated in a box laid out for 4:3. At 16:9 the label hangs
-out of its tab. Both tab layouts call the drawer at `0x004526d0` (through a
-jump at `0x00402ba3`) with the box and its clip as stack arguments, from
-`0x0040741e` and `0x0049179e`: a patch point on each call moves the box by
-(-14, -99) virtual units, makes it 340 high and the clip follow it. The
-building panel's labels reach the drawer with rotation 2: its wrapper moves
-their box by -111 and makes it 107 taller. These numbers were measured by the
-Tropico resolution patch; the error scales with the art, so they hold at
-every 16:9 resolution, and nothing is changed at other aspects or at the
+labels, are drawn rotated in a box laid out for 4:3. The drawer centres a
+label with half its length scaled by ys/xs of the screen (4h / 3w) where it
+should take half its length (the Tropico resolution patch found this), so
+away from 4:3 the label sits off its box by (1/2 - 2h/3w) of its length: at
+16:9 and 16:10 it hangs out of its tab. Both tab layouts call the drawer at
+`0x004526d0` (through a jump at `0x00402ba3`) with the box and its clip as
+stack arguments, from `0x0040741e` and `0x0049179e`: a patch point on each
+call moves the box and makes it taller, and the clip follow it. The building
+panel's labels reach the drawer with rotation 2: its wrapper moves their box
+and makes it taller.
+
+The Tropico resolution patch measured the numbers at 16:9: the tab's box
+moved by (-14, -99) virtual units and made 84 higher (340), the panel's moved
+by -111 and made 107 higher. The error scales with the art, so they hold at
+every resolution of an aspect; across aspects it scales with
+K = (1/2 - 2h/3w) / (1/8), which is 1 at 16:9. The patch uses K times the
+16:9 numbers (|K| times for the heights), which at 16:10 (K = 2/3) gives the
+numbers that patch predicted there. Nothing is changed at 4:3 or at the
 game's own resolutions.
 
 ## Following the window
@@ -139,14 +157,22 @@ host as before. How the game builds the page is in
   just after the formatting, a patch point writes it again with the aspect
   ratio.
 - The page's handler of changed widgets, `0x00491280` (fastcall: the message
-  in `ecx`, the widget's number at `+4`; the new value in `edx`), asks the
+  in `ecx`, the widget's number at `+4`; the new value in `edx`; it does
+  nothing while the page fills itself, `[0x005f801c]` nonzero), asks the
   routine that applies video settings for the slider's value as the slot,
-  if the table of available modes at `0x0060c998` has it. Its wrapper puts a
-  stop's size into slot 4 (with its art, as for the window) and passes slot 4;
-  the window's stop makes slot 4 follow the window, and one of the first
-  four stops ends that. The choice is written to `settings.ini`. On the setup
-  screen of the main menu (the game's state at `0x005d6af0` is `0xb`) the
-  game refuses to change the resolution and says so; nothing is changed then.
+  if the table of available modes at `0x0060c998` has it. Its wrapper takes
+  the slider's changes itself: the label shows the stop at once (message
+  `0x71` through `0x004e8520`, a method of the page at `[0x005f8014]`, which
+  is null once the page is closed), and a stop the slider has kept for two
+  seconds is taken from the message loop, so that dragging does not change
+  the resolution at every stop on the way. A stop beyond the fourth puts its
+  size into slot 4 (with its art, as for the window), and the routine is
+  asked for that slot; the window's stop makes slot 4 follow the window, and
+  one of the first four stops ends that. Then the page fills itself again
+  (`0x00490a60`) if it is still open. The choice is written to
+  `settings.ini`. On the setup screen of the main menu (the game's state at
+  `0x005d6af0` is `0xb`) the game refuses to change the resolution and says
+  so; the wrapper leaves that to the handler.
 
 ## The limits
 
