@@ -16,7 +16,7 @@ shell=${1:?shell}
 out=${2:?output}
 icons=${3:-build/icons}
 arch=x86_64
-id=io.github.terminshock.TropicoRecomp
+id=io.github.terminshock.Tropico1Recomp
 version=$(tools/version)
 date=$(git log -1 --format=%cs 2>/dev/null || date +%F)
 tool=build/appimage/appimagetool-$arch.AppImage

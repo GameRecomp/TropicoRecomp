@@ -4,7 +4,7 @@
      without lifted code), which unpacks the game data the converter puts
      in assets/data on its first start. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="io.github.terminshock.tropicorecomp"
+    package="io.github.terminshock.tropico1recomp"
     android:versionCode="1"
     android:versionName="1.0"
     android:installLocation="auto">
