@@ -177,6 +177,9 @@ jobs:
 
   deploy:
     needs: site
+    # Its own condition: without one, a skipped shell further up (a system
+    # that is off) would skip the deploy too.
+    if: ${{ !cancelled() && needs.site.result == 'success' }}
     runs-on: ubuntu-22.04
     permissions:
       pages: write
