@@ -19,18 +19,9 @@
     </div>
   </header>
 
-  <section id="stored" class="card stored" hidden>
-    <h2>Tropico is in this browser</h2>
-    <p id="stored-info"></p>
-    <div class="actions">
-      <a class="primary button" href="play.html">Play</a>
-      <button id="remove" type="button">Remove it from this browser</button>
-    </div>
-  </section>
-
   <p class="local">Everything happens in this browser tab. Your installer is not uploaded anywhere; this site only serves the converter itself.</p>
 
-  <section class="card">
+  <section class="card" id="step-file">
     <h2><span class="step">1</span> Your installer</h2>
     <div id="drop" class="drop">
       <p>The GOG installer, <code>setup_tropico_2.1.0.14.exe</code> (about 820 MiB).</p>
@@ -41,7 +32,7 @@
     </div>
   </section>
 
-  <section class="card">
+  <section class="card" id="step-system">
     <h2><span class="step">2</span> Your system</h2>
     <fieldset class="systems">
       <legend class="sr-only">System</legend>
@@ -53,7 +44,18 @@
     </fieldset>
   </section>
 
-  <section class="card">
+  <section id="stored" class="card stored" hidden>
+    <h2><img src="tropico.svg" alt="" width="28" height="28"><span><span id="stored-title">Tropico</span> is in this browser</span></h2>
+    <p id="stored-info"></p>
+    <div class="actions">
+      <a class="primary button" href="play.html">Play</a>
+      <button id="reconvert" type="button">Convert again</button>
+      <button id="remove" type="button">Remove it from this browser</button>
+    </div>
+    <p class="warn">The installer is needed only once. When a newer version of this site makes the game code differently, the player updates it from the stored game.</p>
+  </section>
+
+  <section class="card" id="step-convert">
     <h2><span class="step">3</span> Convert</h2>
     <p id="convert-note">The result is a zip (for Android an APK) of about 1.3 GiB with the game in it. You choose where it is saved.</p>
     <button id="start" class="primary" type="button" disabled>Convert</button>

@@ -160,6 +160,29 @@ async function start() {
   }
 }
 
+/* Compile the stored game's code again if this site's converter makes
+ * different code; the installer is not needed for that. */
+function updateCode() {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === 'progress' && m.stage === 'compile' && m.total) {
+        $('status').textContent = `Updating the game code for this version of the player… `
+          + `${Math.floor((100 * m.done) / m.total)} %`;
+      } else if (m.type === 'done') {
+        worker.terminate();
+        resolve(m.updated);
+      } else if (m.type === 'error') {
+        worker.terminate();
+        reject(new Error(m.message));
+      }
+    };
+    worker.onerror = (e) => { worker.terminate(); reject(new Error(e.message || 'the update stopped')); };
+    worker.postMessage({ mode: 'update' });
+  });
+}
+
 async function main() {
   const prefs = loadPrefs();
   $('sharp').checked = !!prefs.sharp;
@@ -180,6 +203,20 @@ async function main() {
       + 'which current versions of Chrome, Edge and Firefox have.';
     return;
   }
+  let stored = true;
+  try {
+    await findGame();
+  } catch (_) {
+    stored = false;
+  }
+  try {
+    if (stored) await updateCode();
+  } catch (e) {
+    fail(`Cannot update the game code: ${e.message}. Convert the game again on the converter page.`);
+    $('convert').hidden = false;
+    $('convert').textContent = 'Convert again';
+    return;
+  }
   try {
     game = await findGame();
   } catch (_) {
@@ -192,7 +229,7 @@ async function main() {
   $('status').textContent = `${game.info.release}, converted on ${new Date(game.info.converted).toLocaleDateString()}.`;
   $('start').hidden = false;
   // Not awaited: Firefox asks the user, who may not answer.
-    navigator.storage?.persist?.().catch(() => {});
+  navigator.storage?.persist?.().catch(() => {});
 }
 
 main();

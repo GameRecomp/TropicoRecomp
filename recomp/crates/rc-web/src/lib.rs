@@ -408,6 +408,44 @@ pub fn convert_web(
     ))
 }
 
+/// The version of the game code the converter makes for the browser: when
+/// a stored game's differs, its code is compiled again (`recompile_web`).
+#[wasm_bindgen]
+pub fn code_version() -> String {
+    env!("RC_CODE_VERSION").to_string()
+}
+
+/// Compile the game's code for the browser again from its stored files:
+/// `file(name)` returns a file of the game directory (any case) as a
+/// Uint8Array, or null. `progress(stage, done, total)` hears `lift` and
+/// `compile`. Returns the WebAssembly module.
+#[wasm_bindgen]
+pub fn recompile_web(file: Function, progress: Function) -> Result<Vec<u8>, JsValue> {
+    let err = |e: String| JsValue::from_str(&e);
+    let mut read = |name: &str| -> Option<Vec<u8>> {
+        let v = file.call1(&JsValue::NULL, &JsValue::from_str(name)).ok()?;
+        if v.is_null() || v.is_undefined() {
+            return None;
+        }
+        Some(Uint8Array::new(&v).to_vec())
+    };
+    let id = rc_convert::identify_files(&mut read).map_err(err)?;
+    tell(&progress, "lift", 0.0, 1.0);
+    let lifted = rc_convert::lift(&id).map_err(err)?;
+    tell(&progress, "lift", 1.0, 1.0);
+    let n = lifted.functions.len();
+    let mut done = 0usize;
+    let module = rc_convert::compile_wasm(&lifted, &mut |k| {
+        done += k;
+        if done.is_multiple_of(100) {
+            tell(&progress, "compile", done as f64, n as f64);
+        }
+    })
+    .map_err(err)?;
+    tell(&progress, "compile", n as f64, n as f64);
+    Ok(module)
+}
+
 /// The version of the converter, for the page to show.
 #[wasm_bindgen]
 pub fn version() -> String {

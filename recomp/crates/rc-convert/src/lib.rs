@@ -148,6 +148,53 @@ pub fn identify<R: Read + Seek>(inst: &Installer, input: &mut R) -> Result<Ident
     })
 }
 
+/// Which game `read(path)` holds, from files already extracted (paths
+/// relative to the game directory, any case): its executable and DLLs,
+/// checked by hash as [`identify`] checks them in an installer. The plan
+/// is empty: the files are not extracted again.
+pub fn identify_files(read: &mut dyn FnMut(&str) -> Option<Vec<u8>>) -> Result<Identified, Error> {
+    let mut tried = Vec::new();
+    for (id, text, runnable) in GAMES {
+        let m = Manifest::from_toml(text).map_err(|e| format!("manifest {id}: {e}"))?;
+        let Some(exe) = read(&m.game.exe) else {
+            continue;
+        };
+        if let Err(e) = m.check_exe(&exe) {
+            tried.push(format!("{} ({e})", m.game.title));
+            continue;
+        }
+        if !runnable {
+            return Err(format!("{} cannot be built yet", m.game.title));
+        }
+        let mut modules = Vec::new();
+        for md in &m.modules {
+            let data = read(&md.file).ok_or_else(|| format!("{} is missing", md.file))?;
+            md.check(&data)
+                .map_err(|e| format!("{} is not the expected file: {e}", md.file))?;
+            modules.push((md.file.clone(), data));
+        }
+        return Ok(Identified {
+            manifest: m,
+            plan: Plan {
+                targets: Default::default(),
+                dirs: Vec::new(),
+                overwritten: 0,
+            },
+            exe,
+            modules,
+            game_bytes: 0,
+        });
+    }
+    Err(if tried.is_empty() {
+        "no game this converter knows was found".into()
+    } else {
+        format!(
+            "the game's executable is not a known release: {}",
+            tried.join("; ")
+        )
+    })
+}
+
 /// The lifted program.
 #[derive(Debug)]
 pub struct Lifted {

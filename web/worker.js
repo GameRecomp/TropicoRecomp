@@ -7,7 +7,59 @@
 // module for the web shell) go into the origin's private file system
 // (OPFS) under tropico1/, through synchronous access handles, which also
 // only workers have; info.json, written last, marks a complete game.
-import init, { convert, convert_web, plan_web, version } from './rc_web.js';
+//
+// "update" compiles the stored game's code again from its stored files
+// when this converter makes different code (code_version), so that a game
+// is converted from the installer only once.
+import init, { code_version, convert, convert_web, plan_web, recompile_web, version } from './rc_web.js';
+
+const NO_ROOM = 'the browser has no room left for the game (about 1.3 GiB is needed)';
+
+/* Replace the file `name` in `dir` with `bytes`. */
+async function writeFile(dir, name, bytes) {
+  const h = await (await dir.getFileHandle(name, { create: true })).createSyncAccessHandle();
+  try {
+    h.truncate(0);
+    if (h.write(bytes, { at: 0 }) !== bytes.length) throw new Error(NO_ROOM);
+    h.flush();
+  } finally {
+    h.close();
+  }
+}
+
+/* The stored game's directory and info, or null. */
+async function stored() {
+  try {
+    const top = await (await navigator.storage.getDirectory()).getDirectoryHandle('tropico1');
+    const info = JSON.parse(await (await (await top.getFileHandle('info.json')).getFile()).text());
+    return { top, info };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function updateCode(progress) {
+  const s = await stored();
+  if (!s) throw new Error('the game is not stored in this browser');
+  const { top, info } = s;
+  if (info.codeVersion === code_version()) return { updated: false };
+  // The executable and DLLs, which is all the code is made from.
+  const files = new Map();
+  await Promise.all(info.files.map(async ([path]) => {
+    if (!/\.(exe|dll)$/i.test(path) || !path.startsWith('game/')) return;
+    let dir = top;
+    const parts = path.split('/');
+    for (const d of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(d);
+    const f = await (await dir.getFileHandle(parts.at(-1))).getFile();
+    files.set(path.slice(5).toLowerCase(), new Uint8Array(await f.arrayBuffer()));
+  }));
+  const module = recompile_web((name) => files.get(name.replace(/\\/g, '/').toLowerCase()) ?? null, progress);
+  await writeFile(top, 'code.wasm', module);
+  info.codeVersion = code_version();
+  info.converter = version();
+  await writeFile(top, 'info.json', new TextEncoder().encode(JSON.stringify(info)));
+  return { updated: true };
+}
 
 /* The directory `path` (slash-separated) under `top`, created. */
 async function dirFor(cache, top, path) {
@@ -52,7 +104,7 @@ async function convertForBrowser(file, read, progress) {
     while (off < used) {
       const n = current.write(buf.subarray(off, used), { at: at + off });
       // A full quota shows as a write that stores nothing.
-      if (!n) throw new Error('the browser has no room left for the game (about 1.3 GiB is needed)');
+      if (!n) throw new Error(NO_ROOM);
       off += n;
     }
     at += used;
@@ -83,9 +135,7 @@ async function convertForBrowser(file, read, progress) {
     },
     code(bytes) {
       codeHandle.truncate(0);
-      if (codeHandle.write(bytes, { at: 0 }) !== bytes.length) {
-        throw new Error('the browser has no room left for the game (about 1.3 GiB is needed)');
-      }
+      if (codeHandle.write(bytes, { at: 0 }) !== bytes.length) throw new Error(NO_ROOM);
       codeHandle.flush();
     },
   };
@@ -101,15 +151,12 @@ async function convertForBrowser(file, read, progress) {
     title: plan.title,
     release: plan.release,
     converter: version(),
+    codeVersion: code_version(),
     converted: new Date().toISOString(),
     dirs: plan.dirs,
     files: plan.files,
   };
-  const ih = await (await top.getFileHandle('info.json', { create: true })).createSyncAccessHandle();
-  ih.truncate(0);
-  ih.write(new TextEncoder().encode(JSON.stringify(info)), { at: 0 });
-  ih.flush();
-  ih.close();
+  await writeFile(top, 'info.json', new TextEncoder().encode(JSON.stringify(info)));
   return summary;
 }
 
@@ -122,6 +169,11 @@ self.onmessage = async (event) => {
       new Uint8Array(reader.readAsArrayBuffer(file.slice(offset, offset + length)));
     const progress = (stage, done, total) => self.postMessage({ type: 'progress', stage, done, total });
     let summary;
+    if (mode === 'update') {
+      const r = await updateCode(progress);
+      self.postMessage({ type: 'done', ...r });
+      return;
+    }
     if (mode === 'web') {
       summary = await convertForBrowser(file, read, progress);
     } else {

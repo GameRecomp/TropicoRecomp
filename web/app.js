@@ -64,14 +64,29 @@ async function storedGame() {
   }
 }
 
-async function showStored() {
-  const info = await storedGame();
-  $('stored').hidden = !info;
-  if (info) {
-    const when = new Date(info.converted).toLocaleDateString();
-    $('stored-info').textContent = `${info.title} (${info.release}), converted on ${when}. `
-      + 'Saved games and settings stay when you convert it again.';
+let storedInfo = null;
+let reconvert = false;
+
+/* With Browser chosen and the game stored, the player takes the place of
+ * the installer and convert steps (unless the user converts again). */
+function updateView() {
+  const web = document.querySelector('input[name=system]:checked')?.value === 'web';
+  const player = web && !!storedInfo && !reconvert && !running;
+  $('stored').hidden = !player;
+  $('step-file').hidden = player;
+  $('step-convert').hidden = player;
+  document.body.classList.toggle('playing', player);
+  if (storedInfo) {
+    const when = new Date(storedInfo.converted).toLocaleDateString();
+    $('stored-title').textContent = storedInfo.title;
+    $('stored-info').textContent = `${storedInfo.release}, converted on ${when}. `
+      + 'Saved games and settings are kept in this browser.';
   }
+}
+
+async function showStored() {
+  storedInfo = await storedGame();
+  updateView();
 }
 
 async function removeStored() {
@@ -82,6 +97,7 @@ async function removeStored() {
   } catch (err) {
     showError(`Cannot remove it: ${err}`);
   }
+  reconvert = false;
   showStored();
 }
 
@@ -90,6 +106,7 @@ function updateNote() {
   $('convert-note').textContent = web
     ? 'The game (about 1.3 GiB) is stored in this browser; nothing is downloaded. Converting takes a few minutes.'
     : 'The result is a zip (for Android an APK) of about 1.3 GiB with the game in it. You choose where it is saved.';
+  updateView();
 }
 
 function mib(n) {
@@ -283,7 +300,10 @@ async function start() {
     $('result-after').textContent = SYSTEMS[system].after;
     $('play').hidden = !webMode;
     $('result-warn').hidden = webMode;
-    if (webMode) showStored();
+    if (webMode) {
+      reconvert = false;
+      showStored();
+    }
     const link = $('download');
     if (url) {
       link.href = url;
@@ -315,6 +335,7 @@ drop.addEventListener('drop', (e) => {
 document.querySelector(`input[name=system][value=${guessSystem()}]`).checked = true;
 for (const r of document.querySelectorAll('input[name=system]')) r.addEventListener('change', updateNote);
 $('remove').addEventListener('click', removeStored);
+$('reconvert').addEventListener('click', () => { reconvert = true; updateView(); });
 if (!browserCanPlay()) {
   const choice = $('web-choice');
   choice.querySelector('input').disabled = true;
@@ -322,5 +343,13 @@ if (!browserCanPlay()) {
     + 'such as a current Chrome, Edge or Firefox';
 }
 updateNote();
-showStored();
+// A stored game: the player is what the visitor most likely wants.
+storedGame().then((info) => {
+  storedInfo = info;
+  if (info && browserCanPlay()) {
+    document.querySelector('input[name=system][value=web]').checked = true;
+    updateNote();
+  }
+  updateView();
+});
 setFile(null);
