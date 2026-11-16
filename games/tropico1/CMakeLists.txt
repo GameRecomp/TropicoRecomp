@@ -53,10 +53,11 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${TROPICO1_GENERATED}/dispatch.c")
 
 # tropico1 always exists, so an IDE can always select it. Without lifted code
-# it is main.c alone and fails to link until `recomp lift` has been run.
+# it is main.c alone, which cannot link until `recomp lift` has been run, so
+# it is then left out of the default build (CI builds without game code).
 if(NOT EXISTS "${TROPICO1_GENERATED}/dispatch.c")
     message(STATUS "tropico1: no generated code in ${TROPICO1_GENERATED}; run recomp lift first (tropico1 will not link)")
-    add_executable(tropico1 main.c)
+    add_executable(tropico1 EXCLUDE_FROM_ALL main.c)
     target_link_libraries(tropico1 PRIVATE rc_hle rc_runtime)
     return()
 endif()
