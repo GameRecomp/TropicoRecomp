@@ -23,8 +23,17 @@ endif()
 set(TROPICO1_GENERATED "${PROJECT_SOURCE_DIR}/generated/tropico1/c" CACHE PATH
     "Directory with the C that recomp lift generated for Tropico")
 
+# Configure again as soon as the lifted code appears (or changes), so that
+# the tropico1 target below follows `recomp lift` without a manual step.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${TROPICO1_GENERATED}/dispatch.c")
+
+# tropico1 always exists, so an IDE can always select it. Without lifted code
+# it is main.c alone and fails to link until `recomp lift` has been run.
 if(NOT EXISTS "${TROPICO1_GENERATED}/dispatch.c")
-    message(STATUS "tropico1: no generated code in ${TROPICO1_GENERATED}; run recomp lift first")
+    message(STATUS "tropico1: no generated code in ${TROPICO1_GENERATED}; run recomp lift first (tropico1 will not link)")
+    add_executable(tropico1 main.c)
+    target_link_libraries(tropico1 PRIVATE rc_hle rc_runtime)
     return()
 endif()
 
