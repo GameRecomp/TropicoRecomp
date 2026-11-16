@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Build the game shell (tropico1-shell: the game program without lifted
+# code) as one self-contained program, with SDL3, SDL3_ttf and SDL3_mixer
+# built from their releases and linked statically. CI runs this on Linux,
+# macOS (arm64 and x86-64 in one binary) and Windows.
+#
+#   tools/build-shell OUT_FILE
+#
+# Work happens in build/shell; the libraries are built once and reused.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+out=${1:?output file}
+
+SDL_TAG=release-3.4.20
+TTF_TAG=release-3.2.2
+MIXER_TAG=release-3.2.4
+
+work=build/shell
+prefix=$PWD/$work/prefix
+mkdir -p "$work"
+
+common=(-DCMAKE_BUILD_TYPE=Release "-DCMAKE_INSTALL_PREFIX=$prefix" "-DCMAKE_PREFIX_PATH=$prefix"
+        -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON)
+case "$(uname -s)" in
+    Darwin) common+=("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0) ;;
+    MINGW* | MSYS* | CYGWIN*) common+=(-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded) ;;
+esac
+
+# Build and install one library at a tag, unless it is installed already.
+# SUBMODULES names the submodules it needs (its bundled dependencies).
+lib() {
+    local name=$1 repo=$2 tag=$3 stamp
+    shift 3
+    stamp=$prefix/.$name-$tag
+    [ -f "$stamp" ] && return 0
+    rm -rf "$work/$name"
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$tag" "https://github.com/libsdl-org/$repo.git" "$work/$name"
+    for m in ${SUBMODULES:-}; do
+        git -C "$work/$name" submodule --quiet update --init --depth 1 "$m"
+    done
+    cmake -S "$work/$name" -B "$work/$name/build" "${common[@]}" "$@" > "$work/$name.log"
+    cmake --build "$work/$name/build" --config Release --parallel >> "$work/$name.log"
+    cmake --install "$work/$name/build" --config Release >> "$work/$name.log"
+    touch "$stamp"
+}
+
+lib sdl SDL "$SDL_TAG" -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_TEST_LIBRARY=OFF \
+    -DSDL_EXAMPLES=OFF -DSDL_X11_XTEST=OFF
+SUBMODULES=external/freetype lib ttf SDL_ttf "$TTF_TAG" -DSDLTTF_VENDORED=ON -DSDLTTF_HARFBUZZ=OFF -DSDLTTF_PLUTOSVG=OFF \
+    -DSDLTTF_SAMPLES=OFF
+lib mixer SDL_mixer "$MIXER_TAG" -DSDLMIXER_VENDORED=ON -DSDLMIXER_EXAMPLES=OFF -DSDLMIXER_TESTS=OFF \
+    -DSDLMIXER_MP3_MPG123=OFF -DSDLMIXER_FLAC=OFF -DSDLMIXER_MOD=OFF -DSDLMIXER_MIDI=OFF \
+    -DSDLMIXER_OPUS=OFF -DSDLMIXER_VORBIS_STB=OFF -DSDLMIXER_VORBIS_VORBISFILE=OFF \
+    -DSDLMIXER_WAVPACK=OFF -DSDLMIXER_GME=OFF
+
+cmake -S . -B "$work/rc" "${common[@]}" -DRC_BUILD_TESTS=OFF -DTROPICO1_GENERATED="$PWD/$work/none" \
+    | tee "$work/rc.log" | grep -E "^-- platform" || true
+grep -q "platform: SDL3" "$work/rc.log" || { echo "build-shell: SDL3 was not found" >&2; exit 1; }
+grep -q "platform: SDL3_mixer" "$work/rc.log" || { echo "build-shell: SDL3_mixer was not found" >&2; exit 1; }
+cmake --build "$work/rc" --config Release --target tropico1-shell --parallel
+for f in "$work/rc/games/tropico1/tropico1-shell" "$work/rc/games/tropico1/Release/tropico1-shell.exe" \
+         "$work/rc/games/tropico1/tropico1-shell.exe"; do
+    if [ -f "$f" ]; then
+        mkdir -p "$(dirname "$out")"
+        cp "$f" "$out"
+        echo "build-shell: $out"
+        exit 0
+    fi
+done
+echo "build-shell: no shell was built" >&2
+exit 1

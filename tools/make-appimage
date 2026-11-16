@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Wrap a built Linux shell into an AppImage (CI's Linux template).
+#
+#   tools/make-appimage SHELL OUT.AppImage
+#
+# The shell is self-contained (SDL linked statically, X11, Wayland and
+# sound loaded at run time), so the AppImage holds just it, a desktop
+# entry and the icon. appimagetool is downloaded into build/ once.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+shell=${1:?shell}
+out=${2:?output}
+arch=x86_64
+tool=build/appimage/appimagetool-$arch.AppImage
+if [ ! -x "$tool" ]; then
+    mkdir -p build/appimage
+    curl -fsSL -o "$tool" \
+        "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
+    chmod +x "$tool"
+fi
+dir=build/appimage/Tropico.AppDir
+rm -rf "$dir"
+mkdir -p "$dir/usr/bin"
+cp "$shell" "$dir/usr/bin/tropico"
+cp tools/appimage/tropico.svg "$dir/tropico.svg"
+cat > "$dir/tropico.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Tropico
+Comment=Tropico, recompiled
+Exec=tropico
+Icon=tropico
+Categories=Game;StrategyGame;
+Terminal=false
+DESKTOP
+cat > "$dir/AppRun" <<'APPRUN'
+#!/bin/sh
+exec "$(dirname "$(readlink -f "$0")")/usr/bin/tropico" "$@"
+APPRUN
+chmod +x "$dir/AppRun"
+mkdir -p "$(dirname "$out")"
+# Without FUSE (containers, CI) the tool runs from its extracted self.
+ARCH=$arch APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --no-appstream "$dir" "$out" > build/appimage/tool.log 2>&1 \
+    || { cat build/appimage/tool.log; exit 1; }
+echo "make-appimage: $out"
