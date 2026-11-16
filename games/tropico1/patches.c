@@ -24,6 +24,7 @@ void tropico1_patches(void)
     tropico1_patch_options();
     tropico1_patch_resolution();
     tropico1_patch_textedit();
+    tropico1_patch_preview();
     tropico1_patch_fullscreen();
 }
 

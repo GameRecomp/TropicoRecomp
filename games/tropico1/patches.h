@@ -36,6 +36,10 @@ void tropico1_patch_fullscreen(void);
  * game's name) and reaches the dialog, instead of being ignored. */
 void tropico1_patch_textedit(void);
 
+/* patch_preview.c: a scenario's island preview scaled to its box at any
+ * menu resolution, instead of read past its rows. */
+void tropico1_patch_preview(void);
+
 /* patch_art.c: the interface art for a resolution the game has none for
  * (0 x 0: remove what was made for one before). */
 void tropico1_patch_art(int w, int h);

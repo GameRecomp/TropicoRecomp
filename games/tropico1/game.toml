@@ -55,6 +55,7 @@ hooks = [
     0x004526d0, # resolution, vtext: the drawer of rotated text
     0x00515450, # resolution, fullscreen: the routine that applies video settings
     0x00491280, # resolution: the options page's handler of changed widgets
+    0x0044da90, # preview: the drawer of a scenario's island preview
 ]
 points = [
     0x00530a51, # resolution: a movie widget's flags, just copied from its record
