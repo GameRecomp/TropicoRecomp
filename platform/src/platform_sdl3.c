@@ -252,3 +252,8 @@ const char *rc_plat_user_dir(const char *org, const char *app)
     }
     return dir;
 }
+
+void rc_plat_error(const char *title, const char *message)
+{
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message, NULL);
+}

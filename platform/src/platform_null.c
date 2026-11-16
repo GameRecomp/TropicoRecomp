@@ -40,3 +40,9 @@ const char *rc_plat_user_dir(const char *org, const char *app)
     (void)app;
     return 0;
 }
+
+void rc_plat_error(const char *title, const char *message)
+{
+    (void)title;
+    (void)message;
+}

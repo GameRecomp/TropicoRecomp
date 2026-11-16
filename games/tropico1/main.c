@@ -109,8 +109,12 @@ static bool find_data(char *out, size_t n)
     return true;
 }
 
+/* Started from a desktop, the program has no terminal to print to. */
+static void show_fatal(const char *message) { rc_plat_error("Tropico", message); }
+
 int main(int argc, char **argv)
 {
+    rc_set_fatal_hook(show_fatal);
     const char *game = getenv("TROPICO1_DIR");
     const char *user = getenv("TROPICO1_USER");
     static char args[1024];

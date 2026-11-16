@@ -7,6 +7,10 @@
 # finds in data/ beside it, which the converter puts there.
 add_executable(tropico1-shell main.c shell.c)
 target_link_libraries(tropico1-shell PRIVATE rc_hle rc_runtime)
+if(MSVC)
+    # A windowed program (no console window) that still starts at main().
+    target_link_options(tropico1-shell PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
+endif()
 
 set(TROPICO1_GENERATED "${PROJECT_SOURCE_DIR}/generated/tropico1/c" CACHE PATH
     "Directory with the C that recomp lift generated for Tropico")

@@ -25,6 +25,10 @@ void rc_log(const char *fmt, ...) RC_PRINTF(1, 2);
 int rc_trace(const char *what);
 RC_NORETURN void rc_fatal(const char *fmt, ...) RC_PRINTF(1, 2);
 
+/* Also tell the user about a fatal error some other way (a message box,
+ * where the program has no terminal); called with the message once. */
+void rc_set_fatal_hook(void (*hook)(const char *message));
+
 #ifdef __cplusplus
 }
 #endif

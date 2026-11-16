@@ -15,15 +15,25 @@ void rc_log(const char *fmt, ...)
     fputc('\n', stderr);
 }
 
+static void (*fatal_hook)(const char *message);
+
+void rc_set_fatal_hook(void (*hook)(const char *message)) { fatal_hook = hook; }
+
 void rc_fatal(const char *fmt, ...)
 {
+    char msg[1024];
     va_list ap;
     va_start(ap, fmt);
-    fputs("fatal: ", stderr);
-    vfprintf(stderr, fmt, ap);
+    vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
+    fprintf(stderr, "fatal: %s\n", msg);
     fflush(stderr);
+    /* Once only: the hook itself might fail fatally. */
+    void (*hook)(const char *) = fatal_hook;
+    fatal_hook = NULL;
+    if (hook) {
+        hook(msg);
+    }
     abort();
 }
 

@@ -67,6 +67,10 @@ const char *rc_plat_base_dir(void);
  * NULL if there is none. */
 const char *rc_plat_user_dir(const char *org, const char *app);
 
+/* Show an error to the user in a message box (nothing on the null
+ * platform). */
+void rc_plat_error(const char *title, const char *message);
+
 /* Write the last frame to a 24-bit BMP file. */
 bool rc_plat_screenshot(const char *path);
 
