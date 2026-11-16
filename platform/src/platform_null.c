@@ -50,6 +50,17 @@ void rc_plat_present(const uint32_t *pixels, int width, int height, int pitch)
 
 void rc_plat_cursor_visible(bool visible) { (void)visible; }
 
+void rc_plat_cursor_image(const uint32_t *argb, int width, int height, int hot_x, int hot_y)
+{
+    (void)argb;
+    (void)width;
+    (void)height;
+    (void)hot_x;
+    (void)hot_y;
+}
+
+void rc_plat_cursor_system(int which) { (void)which; }
+
 const char *rc_plat_base_dir(void) { return 0; }
 
 const char *rc_plat_user_dir(const char *org, const char *app)

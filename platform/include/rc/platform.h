@@ -98,6 +98,28 @@ void rc_plat_present(const uint32_t *pixels, int width, int height, int pitch);
 
 void rc_plat_cursor_visible(bool visible);
 
+/* The mouse cursor over the frame: an image of 0xAARRGGBB pixels (copied)
+ * with its hot spot, in frame pixels; the platform scales it with the
+ * frame. */
+void rc_plat_cursor_image(const uint32_t *argb, int width, int height, int hot_x, int hot_y);
+
+/* The system's cursors, for those a program takes from Windows. */
+enum {
+    RC_CURSOR_ARROW,
+    RC_CURSOR_TEXT,
+    RC_CURSOR_WAIT,
+    RC_CURSOR_PROGRESS,
+    RC_CURSOR_CROSSHAIR,
+    RC_CURSOR_MOVE,
+    RC_CURSOR_NOT_ALLOWED,
+    RC_CURSOR_POINTER,
+    RC_CURSOR_SIZE_NWSE,
+    RC_CURSOR_SIZE_NESW,
+    RC_CURSOR_SIZE_WE,
+    RC_CURSOR_SIZE_NS,
+};
+void rc_plat_cursor_system(int which);
+
 /* The last frame shown, for screenshots: its pixels (width * height) and
  * size, or NULL before the first. */
 const uint32_t *rc_plat_last_frame(int *width, int *height);

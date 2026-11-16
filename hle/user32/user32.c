@@ -6,11 +6,14 @@
  * the SDL3 platform layer.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "rc/hle.h"
 #include "rc/log.h"
+#include "rc/platform.h"
 #include "rc/process.h"
+#include "rc/vm.h"
 #include "gdi32/gdi32.h"
 #include "user32.h"
 
@@ -60,11 +63,6 @@ static void k_RegisterClassA(rc_cpu *c)
 /* ---- resources: handles only, for now ---- */
 static uint32_t next_resource = 0x00010100u;
 
-static void k_LoadCursorA(rc_cpu *c)
-{
-    next_resource += 4;
-    RC_RETURN(c, next_resource, 2);
-}
 
 static void k_LoadIconA(rc_cpu *c)
 {
@@ -78,26 +76,197 @@ static void k_LoadAcceleratorsA(rc_cpu *c)
     RC_RETURN(c, next_resource, 2);
 }
 
-static void k_CreateIconIndirect(rc_cpu *c)
+/* ---- cursors ----
+ * A cursor is one of the system's (LoadCursorA with a standard id) or an
+ * image a program made (CreateIconIndirect), shown by the platform over the
+ * window as the mouse's own pointer. */
+#define CURSORS 64
+#define CURSOR_HANDLE 0x00030000u
+typedef struct ucursor {
+    bool used;
+    int system; /* RC_CURSOR_*, or -1 for the image */
+    uint32_t *argb;
+    int w, h, hx, hy;
+} ucursor;
+static ucursor cursors[CURSORS];
+
+static uint32_t cursor_new(void)
 {
-    next_resource += 4;
-    RC_RETURN(c, next_resource, 1);
+    for (uint32_t i = 1; i < CURSORS; i++) {
+        if (!cursors[i].used) {
+            cursors[i] = (ucursor){.used = true, .system = RC_CURSOR_ARROW};
+            return CURSOR_HANDLE + 4 * i;
+        }
+    }
+    return 0;
 }
 
-/* The cursor: which one, and the display counter ShowCursor keeps. */
+static ucursor *cursor_get(uint32_t h)
+{
+    if (h < CURSOR_HANDLE || (h - CURSOR_HANDLE) % 4 || (h - CURSOR_HANDLE) / 4 >= CURSORS) {
+        return NULL;
+    }
+    ucursor *u = &cursors[(h - CURSOR_HANDLE) / 4];
+    return u->used ? u : NULL;
+}
+
+/* The standard cursors (IDC_*) as the system's. */
+static int system_cursor(uint32_t id)
+{
+    switch (id) {
+    case 32513: return RC_CURSOR_TEXT;        /* IDC_IBEAM */
+    case 32514: return RC_CURSOR_WAIT;        /* IDC_WAIT */
+    case 32515: return RC_CURSOR_CROSSHAIR;   /* IDC_CROSS */
+    case 32642: return RC_CURSOR_SIZE_NWSE;   /* IDC_SIZENWSE */
+    case 32643: return RC_CURSOR_SIZE_NESW;   /* IDC_SIZENESW */
+    case 32644: return RC_CURSOR_SIZE_WE;     /* IDC_SIZEWE */
+    case 32645: return RC_CURSOR_SIZE_NS;     /* IDC_SIZENS */
+    case 32646: return RC_CURSOR_MOVE;        /* IDC_SIZEALL */
+    case 32648: return RC_CURSOR_NOT_ALLOWED; /* IDC_NO */
+    case 32649: return RC_CURSOR_POINTER;     /* IDC_HAND */
+    case 32650: return RC_CURSOR_PROGRESS;    /* IDC_APPSTARTING */
+    default: return RC_CURSOR_ARROW;          /* IDC_ARROW and the rest */
+    }
+}
+
+static void k_LoadCursorA(rc_cpu *c)
+{
+    uint32_t inst = RC_ARG(c, 0), name = RC_ARG(c, 1);
+    /* The program's own cursor resources are not read: the arrow. */
+    int sys = inst == 0 && name < 0x10000u ? system_cursor(name) : RC_CURSOR_ARROW;
+    for (uint32_t i = 1; i < CURSORS; i++) {
+        if (cursors[i].used && !cursors[i].argb && cursors[i].system == sys) {
+            RC_RETURN(c, CURSOR_HANDLE + 4 * i, 2);
+        }
+    }
+    uint32_t h = cursor_new();
+    if (h) {
+        cursor_get(h)->system = sys;
+    }
+    RC_RETURN(c, h, 2);
+}
+
+/* The pixels of an icon's masks (ICONINFO): a monochrome cursor has an AND
+ * mask over an XOR mask in one bitmap twice its height; a colour one has
+ * an AND mask and a colour bitmap. Pixels that would invert the screen are
+ * drawn black. */
+static uint32_t *icon_pixels(uint32_t mask, uint32_t color, int *w_out, int *h_out)
+{
+    uint32_t mw, mh, mbpp, mwb, mpx;
+    if (!rc_gdi_bitmap(mask, &mw, &mh, &mbpp, &mwb, &mpx) || mbpp != 1) {
+        return NULL;
+    }
+    uint32_t cw = 0, ch = 0, cbpp = 0, cwb = 0, cpx = 0;
+    if (color && (!rc_gdi_bitmap(color, &cw, &ch, &cbpp, &cwb, &cpx) || (cbpp != 24 && cbpp != 32))) {
+        return NULL;
+    }
+    uint32_t w = mw, h = color ? mh : mh / 2;
+    if (w == 0 || h == 0 || w > 256 || h > 256 || (color && (cw < w || ch < h))) {
+        return NULL;
+    }
+    uint32_t *out = malloc((size_t)w * h * 4);
+    if (!out) {
+        return NULL;
+    }
+    const uint8_t *mb = rc_ptr(mpx);
+    const uint8_t *cb = color ? rc_ptr(cpx) : NULL;
+    bool alpha = false;
+    for (uint32_t y = 0; cb && cbpp == 32 && y < h; y++) {
+        for (uint32_t x = 0; x < w; x++) {
+            alpha |= cb[y * cwb + x * 4 + 3] != 0;
+        }
+    }
+    for (uint32_t y = 0; y < h; y++) {
+        for (uint32_t x = 0; x < w; x++) {
+            int and = (mb[y * mwb + x / 8] >> (7 - x % 8)) & 1;
+            uint32_t px;
+            if (cb) {
+                const uint8_t *p = cb + y * cwb + x * (cbpp / 8);
+                uint32_t a = alpha ? p[3] : and ? 0 : 0xff;
+                px = a ? a << 24 | (uint32_t)p[2] << 16 | (uint32_t)p[1] << 8 | p[0] : 0;
+            } else {
+                int xor = (mb[(y + h) * mwb + x / 8] >> (7 - x % 8)) & 1;
+                px = and && !xor ? 0 : xor && !and ? 0xffffffffu : 0xff000000u;
+            }
+            out[y * w + x] = px;
+        }
+    }
+    *w_out = (int)w;
+    *h_out = (int)h;
+    return out;
+}
+
+static void k_CreateIconIndirect(rc_cpu *c)
+{
+    uint32_t info = RC_ARG(c, 0);
+    uint32_t h = cursor_new();
+    ucursor *u = cursor_get(h);
+    if (u) {
+        u->argb = icon_pixels(rc_ld32(info + 12), rc_ld32(info + 16), &u->w, &u->h);
+        if (u->argb) {
+            u->system = -1;
+            if (rc_ld32(info) == 0) { /* a cursor: its own hot spot */
+                u->hx = (int)rc_ld32(info + 4);
+                u->hy = (int)rc_ld32(info + 8);
+            } else {
+                u->hx = u->w / 2;
+                u->hy = u->h / 2;
+            }
+        }
+    }
+    RC_RETURN(c, h, 1);
+}
+
+static void k_DestroyCursor(rc_cpu *c)
+{
+    ucursor *u = cursor_get(RC_ARG(c, 0));
+    if (u && u->argb) {
+        free(u->argb);
+        *u = (ucursor){0};
+    }
+    RC_RETURN(c, 1, 1);
+}
+
+/* The cursor set (none at first: the window class's arrow) and the display
+ * counter ShowCursor keeps; it is shown while the counter is not negative. */
 static uint32_t cursor;
+static bool cursor_set;
 static int32_t cursor_count;
+static int cursor_shown = -1;
+
+static void cursor_update(void)
+{
+    ucursor *u = cursor_get(cursor);
+    int show = cursor_count >= 0 && (cursor || !cursor_set);
+    if (show) {
+        if (u && u->argb) {
+            rc_plat_cursor_image(u->argb, u->w, u->h, u->hx, u->hy);
+        } else {
+            rc_plat_cursor_system(u ? u->system : RC_CURSOR_ARROW);
+        }
+    }
+    if (show != cursor_shown) {
+        rc_plat_cursor_visible(show);
+        cursor_shown = show;
+    }
+}
 
 static void k_SetCursor(rc_cpu *c)
 {
     uint32_t old = cursor;
     cursor = RC_ARG(c, 0);
+    bool changed = cursor != old || !cursor_set;
+    cursor_set = true;
+    if (changed) {
+        cursor_update();
+    }
     RC_RETURN(c, old, 1);
 }
 
 static void k_ShowCursor(rc_cpu *c)
 {
     cursor_count += RC_ARG(c, 0) ? 1 : -1;
+    cursor_update();
     RC_RETURN(c, (uint32_t)cursor_count, 1);
 }
 
@@ -228,6 +397,8 @@ const rc_import_def rc_user32_setup[] = {
     {U32, "LoadIconA", k_LoadIconA},
     {U32, "LoadAcceleratorsA", k_LoadAcceleratorsA},
     {U32, "CreateIconIndirect", k_CreateIconIndirect},
+    {U32, "DestroyCursor", k_DestroyCursor},
+    {U32, "DestroyIcon", k_DestroyCursor},
     {U32, "RegisterWindowMessageA", k_RegisterWindowMessageA},
     {U32, "GetDC", k_GetDC},
     {U32, "ReleaseDC", k_ReleaseDC},

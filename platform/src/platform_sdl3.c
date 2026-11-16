@@ -264,6 +264,142 @@ void rc_plat_cursor_visible(bool visible)
     }
 }
 
+/* ---- the cursor ----
+ * A program's own cursor is kept at the frame's size and made into an SDL
+ * cursor at the size the frame is shown at, again when that changes. */
+static uint32_t *cur_pixels;
+static int cur_w, cur_h, cur_hx, cur_hy;
+static int cur_system = RC_CURSOR_ARROW; /* -1: the image */
+static SDL_Cursor *cur_sdl;
+static int cur_made_w = -1; /* the width it was made at, in points */
+
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+/* The page scales the canvas: CSS pixels per canvas pixel. */
+EM_JS(double, canvas_css_scale, (void), {
+    const c = Module.canvas;
+    return c && c.width ? c.getBoundingClientRect().width / c.width : 1;
+});
+#endif
+
+/* Points (the cursor's unit) per frame pixel, and pixels per point. */
+static void shown_scale(float *points, float *density)
+{
+    *points = 1.0f;
+    *density = 1.0f;
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+    *points = (float)canvas_css_scale();
+#else
+    SDL_FRect r;
+    if (window && renderer && frame_w > 0 && SDL_GetRenderLogicalPresentationRect(renderer, &r) && r.w > 0) {
+        float d = SDL_GetWindowPixelDensity(window);
+        if (d > 0) {
+            *density = d;
+        }
+        *points = r.w / (float)frame_w / *density;
+    }
+#endif
+    if (!(*points > 0.1f && *points < 64.0f)) {
+        *points = 1.0f;
+    }
+}
+
+static SDL_Surface *scaled_cursor(SDL_Surface *src, int w, int h)
+{
+    if (w == src->w && h == src->h) {
+        return SDL_DuplicateSurface(src);
+    }
+    return SDL_ScaleSurface(src, w, h, SDL_SCALEMODE_NEAREST);
+}
+
+static void cursor_apply(void)
+{
+    SDL_Cursor *made = NULL;
+    if (cur_system >= 0) {
+        static const SDL_SystemCursor sys[] = {
+            SDL_SYSTEM_CURSOR_DEFAULT,     SDL_SYSTEM_CURSOR_TEXT,        SDL_SYSTEM_CURSOR_WAIT,
+            SDL_SYSTEM_CURSOR_PROGRESS,    SDL_SYSTEM_CURSOR_CROSSHAIR,   SDL_SYSTEM_CURSOR_MOVE,
+            SDL_SYSTEM_CURSOR_NOT_ALLOWED, SDL_SYSTEM_CURSOR_POINTER,     SDL_SYSTEM_CURSOR_NWSE_RESIZE,
+            SDL_SYSTEM_CURSOR_NESW_RESIZE, SDL_SYSTEM_CURSOR_EW_RESIZE,   SDL_SYSTEM_CURSOR_NS_RESIZE,
+        };
+        int i = cur_system < (int)SDL_arraysize(sys) ? cur_system : 0;
+        made = SDL_CreateSystemCursor(sys[i]);
+        cur_made_w = 0;
+    } else {
+        float points, density;
+        shown_scale(&points, &density);
+        int w = (int)SDL_lroundf((float)cur_w * points), h = (int)SDL_lroundf((float)cur_h * points);
+        w = w < 1 ? 1 : w;
+        h = h < 1 ? 1 : h;
+        SDL_Surface *src = SDL_CreateSurfaceFrom(cur_w, cur_h, SDL_PIXELFORMAT_ARGB8888, cur_pixels, cur_w * 4);
+        SDL_Surface *s = src ? scaled_cursor(src, w, h) : NULL;
+        if (s && density > 1.0f) {
+            /* The same at the screen's pixels, for a sharp cursor there. */
+            SDL_Surface *hi = scaled_cursor(src, (int)SDL_lroundf((float)w * density),
+                                            (int)SDL_lroundf((float)h * density));
+            if (hi) {
+                SDL_AddSurfaceAlternateImage(s, hi);
+                SDL_DestroySurface(hi);
+            }
+        }
+        if (s) {
+            made = SDL_CreateColorCursor(s, (int)((float)cur_hx * (float)w / (float)cur_w),
+                                         (int)((float)cur_hy * (float)h / (float)cur_h));
+            SDL_DestroySurface(s);
+        }
+        SDL_DestroySurface(src);
+        cur_made_w = w;
+    }
+    if (!made) {
+        return; /* no cursors here (a scripted run): keep the one there is */
+    }
+    SDL_SetCursor(made);
+    if (cur_sdl) {
+        SDL_DestroyCursor(cur_sdl);
+    }
+    cur_sdl = made;
+}
+
+/* Remake the program's cursor when the frame is shown at another size. */
+static void cursor_follow(void)
+{
+    if (cur_system >= 0 || !cur_pixels) {
+        return;
+    }
+    float points, density;
+    shown_scale(&points, &density);
+    if ((int)SDL_lroundf((float)cur_w * points) != cur_made_w) {
+        cursor_apply();
+    }
+}
+
+void rc_plat_cursor_image(const uint32_t *argb, int width, int height, int hot_x, int hot_y)
+{
+    if (width <= 0 || height <= 0 || width > 256 || height > 256) {
+        return;
+    }
+    uint32_t *p = SDL_realloc(cur_pixels, (size_t)width * (size_t)height * 4);
+    if (!p) {
+        return;
+    }
+    SDL_memcpy(p, argb, (size_t)width * (size_t)height * 4);
+    cur_pixels = p;
+    cur_w = width;
+    cur_h = height;
+    cur_hx = hot_x;
+    cur_hy = hot_y;
+    cur_system = -1;
+    cursor_apply();
+}
+
+void rc_plat_cursor_system(int which)
+{
+    if (which == cur_system && cur_sdl) {
+        return;
+    }
+    cur_system = which < 0 ? RC_CURSOR_ARROW : which;
+    cursor_apply();
+}
+
 void rc_plat_present(const uint32_t *pixels, int width, int height, int pitch)
 {
     rc_frame_keep(pixels, width, height, pitch);
@@ -275,6 +411,7 @@ void rc_plat_present(const uint32_t *pixels, int width, int height, int pitch)
     SDL_RenderClear(renderer);
     SDL_RenderTexture(renderer, texture, NULL, NULL);
     SDL_RenderPresent(renderer);
+    cursor_follow();
 }
 
 /* SDL scancodes to Windows virtual keys and PC scan codes (set 1). */

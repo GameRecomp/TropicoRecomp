@@ -87,6 +87,21 @@ static void k_CreateBitmapIndirect(rc_cpu *c)
     RC_RETURN(c, hb, 1);
 }
 
+bool rc_gdi_bitmap(uint32_t h, uint32_t *width, uint32_t *height, uint32_t *bpp, uint32_t *widthbytes,
+                   uint32_t *pixels)
+{
+    gobj *b = obj_get(h, OB_BITMAP);
+    if (!b) {
+        return false;
+    }
+    *width = b->w;
+    *height = b->h;
+    *bpp = b->bpp;
+    *widthbytes = b->widthbytes;
+    *pixels = b->pixels;
+    return true;
+}
+
 static void k_GetBitmapBits(rc_cpu *c)
 {
     gobj *b = obj_get(RC_ARG(c, 0), OB_BITMAP);
