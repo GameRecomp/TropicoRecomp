@@ -53,6 +53,7 @@ hooks = [
     0x004e8710, # options: the function that adds a widget to a page
     0x00526220, # resolution: the painter of images (the world's)
     0x004526d0, # resolution, vtext: the drawer of rotated text
+    0x00515450, # resolution: the routine that applies video settings
 ]
 points = [
     0x00530a51, # resolution: a movie widget's flags, just copied from its record

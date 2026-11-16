@@ -19,6 +19,17 @@ bool rc_plat_window(int width, int height)
 static rc_display display;
 void rc_plat_display(const rc_display *d) { display = *d; }
 rc_display rc_plat_display_get(void) { return display; }
+static int area_w = 1024, area_h = 768;
+void rc_plat_area(int *width, int *height)
+{
+    *width = area_w;
+    *height = area_h;
+}
+void rc_plat_area_set(int width, int height)
+{
+    area_w = width;
+    area_h = height;
+}
 void rc_plat_display_load(const char *user_dir) { (void)user_dir; }
 
 void rc_plat_show(bool show) { (void)show; }

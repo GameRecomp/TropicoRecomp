@@ -20,6 +20,11 @@ void rc_hle_winmm(void);
 /* Everything above. */
 void rc_hle_all(void);
 
+/* Work for a game project's patches that needs the guest CPU and must
+ * happen regularly: `fn` runs whenever the program looks for messages. */
+struct rc_cpu;
+void rc_add_pump_hook(void (*fn)(struct rc_cpu *c));
+
 /* DirectDraw's display mode (0 x 0 before one is set). */
 void rc_ddraw_mode(uint32_t *w, uint32_t *h);
 

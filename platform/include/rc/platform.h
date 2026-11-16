@@ -56,12 +56,20 @@ typedef struct rc_display {
     bool fullscreen; /* the whole screen, without a border */
     /* A resolution of the user's choosing for the game, beyond those it
      * knows (the game project's patch decides whether it can have it);
-     * 0 x 0 for none. */
+     * 0 x 0 for none, -1 x -1 for the size of the window (rc_plat_area)
+     * divided by the scale, following it. */
     int game_w, game_h;
 } rc_display;
 
 /* Apply display settings, at any time (before the window exists too). */
 void rc_plat_display(const rc_display *d);
+
+/* The size, in host pixels, the frame is shown in: the window's (the
+ * screen's when full screen), before the window exists the size a large
+ * window would have, and in a browser the page's. A scripted run may set it
+ * (rc_plat_area_set). */
+void rc_plat_area(int *width, int *height);
+void rc_plat_area_set(int width, int height);
 
 /* The display settings in effect (Alt+Enter changes full screen). */
 rc_display rc_plat_display_get(void);

@@ -25,7 +25,9 @@ static const char DEFAULTS[] =
     "fullscreen = no\n"
     "\n"
     "# A resolution for the game besides its own (640x480 to 1600x1200), for\n"
-    "# example 1600x900; it is then the highest one on the game's options page.\n"
+    "# example 1920x1080; it is then the highest one on the game's options page.\n"
+    "# window: the size of the window (divided by the scale), following it when\n"
+    "# the window changes size; the game then always plays at it.\n"
     "# off: only the game's own.\n"
     "resolution = off\n";
 
@@ -42,7 +44,9 @@ static void set(rc_display *d, const char *key, const char *value)
         d->fullscreen = !strcmp(value, "yes") || !strcmp(value, "1") || !strcmp(value, "true");
     } else if (!strcmp(key, "resolution")) {
         int w = 0, h = 0;
-        if (sscanf(value, "%dx%d", &w, &h) == 2 && w > 0 && h > 0 && w <= 8192 && h <= 8192) {
+        if (!strcmp(value, "window")) {
+            d->game_w = d->game_h = -1;
+        } else if (sscanf(value, "%dx%d", &w, &h) == 2 && w > 0 && h > 0 && w <= 8192 && h <= 8192) {
             d->game_w = w;
             d->game_h = h;
         } else {

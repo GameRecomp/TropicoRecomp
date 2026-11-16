@@ -81,6 +81,27 @@ Tropico resolution patch; the error scales with the art, so they hold at
 every 16:9 resolution, and nothing is changed at other aspects or at the
 game's own resolutions.
 
+## Following the window
+
+With `resolution = window` (settings.ini; "This window's size" in the browser
+player) slot 4 is the size the game is shown in (`rc_plat_area`: the window,
+the screen in full screen, the page in a browser) divided by the scale, and
+the game plays everything there:
+
+- The routine that applies video settings, `0x00515450` (fastcall: two
+  settings in `ecx` and `edx`, then on the stack another, the resolution slot
+  and the windowed flag; -1 keeps a setting), is wrapped: a request for slots
+  0 to 3 becomes slot 4, so the menus too are drawn at it, from the art the
+  generator makes for them.
+- From the message loop, when the window has kept a new size for half a
+  second, slot 4 takes it (with new art) and the routine is called for slot 4.
+  It does nothing when asked for the settings already in effect (it compares
+  them with the video settings at `[0x00612fec]`, the slot at `+0x18`), so
+  that slot is first made to differ.
+
+A window too narrow for slot 4 (1280 or less after the scale) gets the
+smallest width slot 4 may have, at the window's shape, shown smaller.
+
 ## The limits
 
 - Wider than 1280 (the stock widths must stay unique, and slot 4 is the

@@ -9,6 +9,7 @@
  *       FRAME move X Y         the mouse moves to (X, Y)
  *       FRAME down|up BUTTON   a mouse button (1 left, 2 right, 3 middle)
  *       FRAME key|keyup VK     a key, by Windows virtual-key code
+ *       FRAME area W H         the window becomes W x H (rc_plat_area_set)
  *   Lines starting with '#' are comments. Keying input to frames rather
  *   than time makes a run replay the same on a fast and a slow machine.
  */
@@ -72,6 +73,13 @@ static void run_script(unsigned frame)
             e.type = RC_EV_KEY;
             e.vk = (int)a;
             e.down = !strcmp(what, "key");
+        } else if (!strcmp(what, "area")) {
+            rc_plat_area_set((int)a, (int)b);
+            if (!read_line()) {
+                script_done = 1;
+                return;
+            }
+            continue;
         } else {
             rc_log("RC_INPUT: cannot read \"%s\"", next_line);
         }

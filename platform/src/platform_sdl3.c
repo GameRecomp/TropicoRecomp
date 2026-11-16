@@ -107,6 +107,43 @@ void rc_plat_display(const rc_display *d)
 
 rc_display rc_plat_display_get(void) { return display; }
 
+static int area_override_w, area_override_h;
+
+void rc_plat_area_set(int width, int height)
+{
+    area_override_w = width;
+    area_override_h = height;
+}
+
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+#include <emscripten.h>
+EM_JS(int, page_size, (int which), {
+    const dpr = window.devicePixelRatio || 1;
+    return Math.floor((which ? window.innerHeight : window.innerWidth) * dpr);
+});
+#endif
+
+void rc_plat_area(int *width, int *height)
+{
+    if (area_override_w > 0 && area_override_h > 0) {
+        *width = area_override_w;
+        *height = area_override_h;
+        return;
+    }
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+    *width = page_size(0);
+    *height = page_size(1);
+#else
+    if (window && SDL_GetWindowSizeInPixels(window, width, height) && *width > 0 && *height > 0) {
+        return;
+    }
+    /* No window yet: a large one, as fitting_scale leaves room for. */
+    const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    *width = m ? (display.fullscreen ? m->w : m->w - 64) : 1024;
+    *height = m ? (display.fullscreen ? m->h : m->h - 96) : 768;
+#endif
+}
+
 bool rc_plat_window(int width, int height)
 {
     if (width <= 0 || height <= 0) {
@@ -144,8 +181,9 @@ bool rc_plat_window(int width, int height)
     /* The canvas follows the frame; the page scales it. */
     SDL_SetWindowSize(window, width, height);
 #else
-    /* A new resolution: at a set scale the window follows it. */
-    if (display.scale > 0) {
+    /* A new resolution: at a set scale the window follows it (unless the
+     * resolution follows the window). */
+    if (display.scale > 0 && display.game_w >= 0) {
         size_window();
     }
 #endif

@@ -24,6 +24,7 @@
 #include "rc/lifted.h"
 #include "rc/log.h"
 #include "rc/platform.h"
+#include "rc/process.h"
 
 /* The game's table of resolutions: five { width, height } dwords; slot 4 is
  * the largest. The code that maps a mode back to its slot compares against
@@ -116,31 +117,155 @@ static void movie_flags(rc_cpu *c)
     }
 }
 
+/* ---- the resolution following the window (settings: resolution = window) */
+
+/* The routine that applies video settings: fastcall, ecx and edx two of
+ * them (-1: keep), then on the stack another, the resolution slot and the
+ * windowed flag (-1: keep). Every change of resolution goes through it. */
+#define APPLY_VIDEO 0x00515450u
+
+/* The video settings in effect (a pointer at this address); the routine
+ * above does nothing when asked for what they already say, so the slot
+ * (+0x18) is made to differ when slot 4 itself has changed size. */
+#define VIDEO_SETTINGS 0x00612fecu
+#define VS_SLOT 0x18u
+
+static int follow;                /* the resolution follows the window */
+static unsigned want_w, want_h;   /* what the window asks for */
+static uint64_t want_since, last_look;
+
+/* The resolution for the window's size now: at the scale (1 when it is "as
+ * large as fits"), a multiple of 4 wide, wider than the game's own 1280. */
+static void from_area(unsigned *w, unsigned *h)
+{
+    int aw, ah;
+    rc_plat_area(&aw, &ah);
+    rc_display d = rc_plat_display_get();
+    int s = d.scale > 0 ? d.scale : 1;
+    aw /= s;
+    ah /= s;
+    if (aw < 1 || ah < 1) {
+        aw = 1600;
+        ah = 900;
+    }
+    if (aw <= 1280) {
+        /* Too narrow for the game's largest slot: as small as it may be, at
+         * the window's shape; the window shows it smaller. */
+        ah = ah * 1284 / aw;
+        aw = 1284;
+    }
+    if (aw > 4096) {
+        ah = ah * 4096 / aw;
+        aw = 4096;
+    }
+    ah = ah < 480 ? 480 : ah > 3072 ? 3072 : ah;
+    *w = (unsigned)(aw & ~3);
+    *h = (unsigned)ah;
+}
+
+/* Make (w, h) slot 4's: the table, the world's extent, what DirectDraw
+ * offers, the rotated labels' correction, and the art. */
+static void set_mode(unsigned w, unsigned h)
+{
+    mode_w = w;
+    mode_h = h;
+    rc_ddraw_extra_mode(w, h);
+    tropico1_patch_vtext((int)w, (int)h);
+    tropico1_patch_art((int)w, (int)h);
+    rc_st32(SLOT4, w);
+    rc_st32(SLOT4 + 4, h);
+    rc_st32(VAR_WORLD_W, 2 * w);
+    rc_st32(VAR_WORLD_H, 2 * h);
+}
+
+/* Every resolution the game asks for is slot 4's: the window's. */
+static void apply_video(rc_cpu *c)
+{
+    uint32_t slot = rc_ld32(c->r[RC_ESP] + 8);
+    if (follow && slot < 4) {
+        rc_st32(c->r[RC_ESP] + 8, 4);
+    }
+    rc_lookup_lifted(APPLY_VIDEO)(c);
+}
+
+/* From the message loop: when the window has kept a new size for half a
+ * second, the game changes to it. */
+static void watch_window(rc_cpu *c)
+{
+    uint64_t now = rc_ticks_peek_ms();
+    if (now - last_look < 100) {
+        return;
+    }
+    last_look = now;
+    unsigned w, h;
+    from_area(&w, &h);
+    if (w == mode_w && h == mode_h) {
+        want_w = want_h = 0;
+        return;
+    }
+    if (w != want_w || h != want_h) {
+        want_w = w;
+        want_h = h;
+        want_since = now;
+        return;
+    }
+    if (now - want_since < 500) {
+        return;
+    }
+    int showing = at_mode();
+    rc_log("resolution: the window asks for %ux%u", w, h);
+    set_mode(w, h);
+    want_w = want_h = 0;
+    if (!showing) {
+        return; /* (the game is between modes; it will take slot 4 next) */
+    }
+    uint32_t vs = rc_ld32(VIDEO_SETTINGS);
+    if (vs) {
+        rc_st32(vs + VS_SLOT, 3);
+    }
+    rc_cpu saved = *c;
+    c->r[RC_ECX] = 0xffffffffu;
+    c->r[RC_EDX] = 0xffffffffu;
+    uint32_t args[3] = {0xffffffffu, 4, 0xffffffffu};
+    rc_call_guest(c, APPLY_VIDEO, 3, args);
+    *c = saved;
+}
+
 void tropico1_patch_resolution(void)
 {
     rc_display d = rc_plat_display_get();
-    if (d.game_w && d.game_h && usable(d.game_w, d.game_h)) {
+    if (d.game_w < 0) {
+        follow = 1;
+        from_area(&mode_w, &mode_h);
+    } else if (d.game_w && d.game_h && usable(d.game_w, d.game_h)) {
         mode_w = (unsigned)d.game_w;
         mode_h = (unsigned)d.game_h;
-        rc_ddraw_extra_mode(mode_w, mode_h);
-        rc_hook(PAINTER, painter);
-        rc_on_point(MOVIE_FLAGS_SET, movie_flags);
-        tropico1_patch_vtext((int)mode_w, (int)mode_h);
-        rc_log("resolution: %ux%u in the game's largest slot", mode_w, mode_h);
     }
+    if (!mode_w) {
+        return;
+    }
+    rc_ddraw_extra_mode(mode_w, mode_h);
+    rc_hook(PAINTER, painter);
+    rc_on_point(MOVIE_FLAGS_SET, movie_flags);
+    tropico1_patch_vtext((int)mode_w, (int)mode_h);
+    if (follow) {
+        rc_hook(APPLY_VIDEO, apply_video);
+        rc_add_pump_hook(watch_window);
+    }
+    rc_log("resolution: %ux%u in the game's largest slot%s", mode_w, mode_h,
+           follow ? ", following the window" : "");
 }
 
 void tropico1_patch_resolution_loaded(void)
 {
-    tropico1_patch_art((int)mode_w, (int)mode_h);
     if (mode_w) {
-        rc_st32(SLOT4, mode_w);
-        rc_st32(SLOT4 + 4, mode_h);
+        set_mode(mode_w, mode_h);
         if (rc_ld16(TEXT_COLOURS) == 0x7fff && rc_ld16(TEXT_COLOURS + 4) == 0x6318) {
             rc_st16(TEXT_COLOURS + 4, 0x7fff);
         }
+    } else {
+        tropico1_patch_art(0, 0);
+        rc_st32(VAR_WORLD_W, 2 * rc_ld32(SLOT4));
+        rc_st32(VAR_WORLD_H, 2 * rc_ld32(SLOT4 + 4));
     }
-    uint32_t sw = rc_ld32(SLOT4), sh = rc_ld32(SLOT4 + 4);
-    rc_st32(VAR_WORLD_W, 2 * sw);
-    rc_st32(VAR_WORLD_H, 2 * sh);
 }
