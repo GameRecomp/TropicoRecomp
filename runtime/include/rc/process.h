@@ -30,6 +30,9 @@ typedef struct rc_config {
     /* Called after the image is loaded, before the entry point: game
      * projects register their HLE modules and patches here. */
     void (*setup)(void);
+    /* Called once the executable and its DLLs are in guest memory, before
+     * any of their code runs (the game project's data patches); may be NULL. */
+    void (*loaded)(void);
 } rc_config;
 
 extern const rc_config *rc_cfg;

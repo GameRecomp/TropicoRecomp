@@ -46,8 +46,31 @@ sha256 = "f2ad88706cf898ff489c5b3f19fac5a4d51dd59110b8e919b518c1d0f9a9b73a"
 size = 291328
 image_base = 0x30000000
 
-# Changes to what the game does; the wrappers are in patches.c.
+# Changes to what the game does: the code is in patches.c and the files it
+# includes; each entry names the patch it belongs to.
 [patch]
-# The function that adds a widget to a page: the options page loses the
-# settings that do nothing here (see patches.c).
-hooks = [0x004e8710]
+hooks = [
+    0x004e8710, # options: the function that adds a widget to a page
+    0x00526220, # resolution: the painter of images (the world's)
+]
+points = [
+    0x00530a51, # resolution: a movie widget's flags, just copied from its record
+]
+operands = [
+    # resolution: the code that finds a mode's slot compares against slot 4
+    # of the table at 0x005a0fa0; it reads the table instead.
+    { at = 0x0052d15a, value = 1600, load = 0x005a0fc0 },
+    { at = 0x0052d162, value = 1200, load = 0x005a0fc4 },
+    # resolution: the world's extent (twice slot 4, in virtual units), from
+    # the patch variables at 0x0001f000.
+    { at = 0x0046b146, value = 3200, load = 0x0001f000 },
+    { at = 0x0046b150, value = 3200, load = 0x0001f000 },
+    { at = 0x0046b167, value = 2400, load = 0x0001f004 },
+    { at = 0x0046b172, value = 2400, load = 0x0001f004 },
+]
+code = [
+    # resolution: the movie scaler may make a movie larger than it is (two
+    # clamps of the destination to the source, jl -> jmp).
+    { at = 0x00532065, from = "7c 06", to = "eb 06" },
+    { at = 0x00532075, from = "7c 04", to = "eb 04" },
+]

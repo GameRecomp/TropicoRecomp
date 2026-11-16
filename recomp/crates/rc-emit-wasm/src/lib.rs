@@ -15,7 +15,7 @@
 //! | `env.memory` | the runtime's linear memory; guest memory is a region of it at `c->mem` |
 //! | `env.table` | the runtime's function table; the module's functions go to `env.table_base` on |
 //! | `env.table_base` | the first table slot the page grew the table by for this module |
-//! | `rc.dispatch`, `rc.trap`, `rc.cpuid`, `rc.rdtsc`, `rc.fpu`, `rc.fstsw` | the runtime functions native code reaches through `c->helpers` (runtime/src/native.c), with the same arguments |
+//! | `rc.dispatch`, `rc.trap`, `rc.cpuid`, `rc.rdtsc`, `rc.fpu`, `rc.fstsw`, `rc.point` | the runtime functions native code reaches through `c->helpers` (runtime/src/native.c), with the same arguments |
 //!
 //! Calls between lifted functions are direct `call`s. A function pointer of
 //! the runtime is a table slot, so the runtime calls lifted function `i` (in
@@ -104,7 +104,8 @@ const F_CPUID: u32 = 2;
 const F_RDTSC: u32 = 3;
 const F_FPU: u32 = 4;
 const F_FSTSW: u32 = 5;
-const IMPORTED_FUNCS: u32 = 6;
+const F_POINT: u32 = 6;
+const IMPORTED_FUNCS: u32 = 7;
 
 // Types.
 const T_LIFTED: u32 = 0; // (i32) -> ()
@@ -175,6 +176,7 @@ pub fn link(funcs: &[Compiled], modules: &[String]) -> Result<Vec<u8>, Error> {
     imports.import("rc", "rdtsc", EntityType::Function(T_LIFTED));
     imports.import("rc", "fpu", EntityType::Function(T_FPU));
     imports.import("rc", "fstsw", EntityType::Function(T_FSTSW));
+    imports.import("rc", "point", EntityType::Function(T_DISPATCH));
     imports.import(
         "env",
         "memory",
@@ -1156,6 +1158,11 @@ impl<'a> Emitter<'a> {
                     }
                 }
                 self.i().call(F_FPU);
+            }
+            S::Point(at) => {
+                self.spill(true);
+                self.i().local_get(L_C).i32_const(*at as i32).call(F_POINT);
+                self.load_state(true);
             }
             S::Trap(why) => {
                 let n = self.trap_no;

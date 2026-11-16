@@ -77,6 +77,29 @@ impl Image {
         self.bytes.get(start..)
     }
 
+    /// Replace the bytes `from` at `va` by `to` (same length): a patch of
+    /// the game project's, applied before the image is analysed.
+    pub fn patch(&mut self, va: u32, from: &[u8], to: &[u8]) -> Result<(), String> {
+        if from.len() != to.len() {
+            return Err(format!("patch at {va:#010x}: lengths differ"));
+        }
+        let start = va
+            .checked_sub(self.base)
+            .ok_or_else(|| format!("patch at {va:#010x}: outside the image"))?
+            as usize;
+        let here = self
+            .bytes
+            .get_mut(start..start + from.len())
+            .ok_or_else(|| format!("patch at {va:#010x}: outside the image"))?;
+        if here != from {
+            return Err(format!(
+                "patch at {va:#010x}: the bytes there are not the expected ones"
+            ));
+        }
+        here.copy_from_slice(to);
+        Ok(())
+    }
+
     pub fn u8(&self, va: u32) -> Option<u8> {
         self.slice(va, 1).map(|b| b[0])
     }

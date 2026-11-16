@@ -8,12 +8,12 @@
 if(ANDROID)
     # On Android the shell is libmain.so, which SDL's activity loads and
     # starts at SDL_main.
-    add_library(main SHARED main.c patches.c shell.c)
+    add_library(main SHARED main.c patches.c patch_options.c patch_resolution.c shell.c)
     target_compile_definitions(main PRIVATE main=SDL_main)
     target_link_libraries(main PRIVATE rc_hle rc_runtime)
     return()
 endif()
-add_executable(tropico1-shell main.c patches.c shell.c)
+add_executable(tropico1-shell main.c patches.c patch_options.c patch_resolution.c shell.c)
 target_link_libraries(tropico1-shell PRIVATE rc_hle rc_runtime)
 if(EMSCRIPTEN)
     # The web shell: an ES module (createTropico) that web/play.js starts
@@ -57,7 +57,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 # it is then left out of the default build (CI builds without game code).
 if(NOT EXISTS "${TROPICO1_GENERATED}/dispatch.c")
     message(STATUS "tropico1: no generated code in ${TROPICO1_GENERATED}; run recomp lift first (tropico1 will not link)")
-    add_executable(tropico1 EXCLUDE_FROM_ALL main.c patches.c)
+    add_executable(tropico1 EXCLUDE_FROM_ALL main.c patches.c patch_options.c patch_resolution.c)
     target_link_libraries(tropico1 PRIVATE rc_hle rc_runtime)
     return()
 endif()
@@ -71,5 +71,5 @@ if(NOT MSVC)
     target_compile_options(tropico1_lifted PRIVATE -O1 -w)
 endif()
 
-add_executable(tropico1 main.c patches.c $<TARGET_OBJECTS:tropico1_lifted>)
+add_executable(tropico1 main.c patches.c patch_options.c patch_resolution.c $<TARGET_OBJECTS:tropico1_lifted>)
 target_link_libraries(tropico1 PRIVATE rc_hle rc_runtime)

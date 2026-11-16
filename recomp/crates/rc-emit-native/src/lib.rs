@@ -66,6 +66,8 @@ mod helper {
     pub const FPU: i32 = 4;
     /// `uint32_t (rc_cpu *c)`: the x87 status word.
     pub const FSTSW: i32 = 5;
+    /// `void (rc_cpu *c, uint32_t addr)`: a patch point, on the state in `c`.
+    pub const POINT: i32 = 6;
 }
 
 /// What a trap reports (the `kind` argument of the trap helper).
@@ -866,6 +868,12 @@ impl<'a, 'b> Emitter<'a, 'b> {
                 };
                 let code = self.c32(code);
                 self.helper(helper::FPU, &[code, arg], false);
+            }
+            S::Point(at) => {
+                self.spill(true);
+                let a = self.c32(*at);
+                self.helper(helper::POINT, &[a], false);
+                self.load_state(true);
             }
             S::Trap(why) => {
                 let n = self.trap_no;

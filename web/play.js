@@ -163,6 +163,7 @@ async function start() {
         m.ENV.TROPICO1_USER = '/user';
         m.ENV.RC_FONT_DIR = '/fonts';
         // ?trace=imports,files (as RC_TRACE) logs to the console.
+        if (prefs.resolution) m.ENV.RC_RESOLUTION = prefs.resolution;
         const trace = new URLSearchParams(location.search).get('trace');
         if (trace) m.ENV.RC_TRACE = trace;
       }],
@@ -217,14 +218,21 @@ function updateCode() {
   });
 }
 
+const prefs = loadPrefs();
+
 async function main() {
-  const prefs = loadPrefs();
   $('sharp').checked = !!prefs.sharp;
   document.body.classList.toggle('sharp', !!prefs.sharp);
   $('sharp').addEventListener('change', () => {
     prefs.sharp = $('sharp').checked;
     document.body.classList.toggle('sharp', prefs.sharp);
     savePrefs(prefs);
+  });
+  $('resolution').value = prefs.resolution || '';
+  $('resolution').addEventListener('change', () => {
+    prefs.resolution = $('resolution').value;
+    savePrefs(prefs);
+    if (module) $('saved').textContent = 'The resolution takes effect when the game is started again.';
   });
   const scale = () => Number(prefs.scale) || 0;
   $('scale').value = String(scale());

@@ -188,6 +188,7 @@ int main(int argc, char **argv)
         .guest_dir = "C:\\Tropico",
         .args = args,
         .setup = setup,
+        .loaded = tropico1_patches_loaded,
     };
     return rc_run(&cfg);
 }

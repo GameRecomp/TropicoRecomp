@@ -19,7 +19,7 @@ static SDL_Window *window;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
 static int frame_w = 640, frame_h = 480;
-static rc_display display = {0, false, false};
+static rc_display display = {0, false, false, 0, 0};
 static char title_buf[128] = "recomp";
 
 bool rc_plat_init(const char *title)

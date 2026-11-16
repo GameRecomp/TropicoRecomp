@@ -15,6 +15,7 @@
 
 #include "ddraw.h"
 #include "rc/hle.h"
+#include "rc/hle_modules.h"
 #include "rc/log.h"
 #include "rc/platform.h"
 #include "rc/process.h"
@@ -799,6 +800,20 @@ static void k_SetCooperativeLevel(rc_cpu *c)
     RC_RETURN(c, DD_OK, 3);
 }
 
+void rc_ddraw_mode(uint32_t *w, uint32_t *h)
+{
+    *w = display.w;
+    *h = display.h;
+}
+
+static uint32_t extra_w, extra_h;
+
+void rc_ddraw_extra_mode(uint32_t w, uint32_t h)
+{
+    extra_w = w;
+    extra_h = h;
+}
+
 static void set_mode(uint32_t w, uint32_t h, uint32_t bpp)
 {
     display.w = w;
@@ -850,9 +865,14 @@ static void enum_modes(rc_cpu *c, uint32_t size)
     static const uint32_t sizes[][2] = {{640, 480}, {800, 600}, {1024, 768}, {1280, 1024}, {1600, 1200}};
     static const uint32_t depths[] = {8, 16, 32};
     uint32_t d = rc_heap_alloc(size, true);
-    for (unsigned i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
+    unsigned n = sizeof sizes / sizeof sizes[0];
+    for (unsigned i = 0; i <= n; i++) {
+        uint32_t w = i < n ? sizes[i][0] : extra_w, h = i < n ? sizes[i][1] : extra_h;
+        if (!w || !h) {
+            continue;
+        }
         for (unsigned j = 0; j < 3; j++) {
-            mode_desc(d, size, sizes[i][0], sizes[i][1], depths[j]);
+            mode_desc(d, size, w, h, depths[j]);
             uint32_t args[2] = {d, ctx};
             if (!rc_call_guest(c, fn, 2, args)) {
                 rc_heap_free(d);

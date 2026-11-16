@@ -42,7 +42,7 @@ EM_JS(uint32_t, instantiate, (const uint8_t *bytes, uint32_t len, const uint32_t
     const base = table.grow(n);
     const h = (i) => table.get(HEAPU32[(helpers >> 2) + i]);
     new WebAssembly.Instance(m, {
-        rc: {dispatch: h(0), trap: h(1), cpuid: h(2), rdtsc: h(3), fpu: h(4), fstsw: h(5)},
+        rc: {dispatch: h(0), trap: h(1), cpuid: h(2), rdtsc: h(3), fpu: h(4), fstsw: h(5), point: h(6)},
         env: {memory: wasmMemory, table: table,
               table_base: new WebAssembly.Global({value: 'i32', mutable: false}, base)},
     });

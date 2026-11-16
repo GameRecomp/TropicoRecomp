@@ -209,7 +209,8 @@ pub struct Lifted {
 pub fn lift(id: &Identified) -> Result<Lifted, Error> {
     let m = &id.manifest;
     let pe = PeFile::parse(&id.exe).map_err(|e| e.to_string())?;
-    let image = Image::new(&pe);
+    let mut image = Image::new(&pe);
+    patch_image(&mut image, m)?;
     let tables: Vec<(u32, i32, u32)> = m
         .discover
         .tables
@@ -251,7 +252,7 @@ pub fn lift(id: &Identified) -> Result<Lifted, Error> {
         modules.push(name.clone());
     }
     functions.sort_by_key(|f| f.addr);
-    patch_hooks(&mut functions, m)?;
+    apply_patches(&mut functions, m)?;
     Ok(Lifted {
         functions,
         entries,
@@ -259,22 +260,56 @@ pub fn lift(id: &Identified) -> Result<Lifted, Error> {
     })
 }
 
-/// Route calls to the functions the game project wraps through dispatch
-/// (the manifest's `[patch] hooks`).
-pub fn patch_hooks(functions: &mut [rc_ir::Function], m: &Manifest) -> Result<(), Error> {
-    let hooks: BTreeSet<u32> = m.patch.hooks.iter().copied().collect();
-    if hooks.is_empty() {
-        return Ok(());
+/// The game project's code patches (the manifest's `[patch] code`), into
+/// the executable's image before it is analysed.
+pub fn patch_image(image: &mut Image, m: &Manifest) -> Result<(), Error> {
+    for c in &m.patch.code {
+        let (from, to) = c.bytes()?;
+        image.patch(c.at, &from, &to)?;
     }
+    Ok(())
+}
+
+/// The game project's patches on the lifted program (the manifest's
+/// `[patch]` hooks, points and operands; see rc_manifest::Patch).
+pub fn apply_patches(functions: &mut [rc_ir::Function], m: &Manifest) -> Result<(), Error> {
+    let p = &m.patch;
+    let hooks: BTreeSet<u32> = p.hooks.iter().copied().collect();
     for h in &hooks {
         if functions.binary_search_by_key(h, |f| f.addr).is_err() {
             return Err(format!("[patch] hook {h:#010x} is not a function entry"));
         }
     }
-    for f in functions.iter_mut() {
-        if let Some(at) = rc_ir::route_through_dispatch(f, &hooks).first() {
+    if !hooks.is_empty() {
+        for f in functions.iter_mut() {
+            if let Some(at) = rc_ir::route_through_dispatch(f, &hooks).first() {
+                return Err(format!(
+                    "[patch] conditional jump to a hooked function at {at:#010x}"
+                ));
+            }
+        }
+    }
+    for &at in &p.points {
+        let n = functions
+            .iter_mut()
+            .filter(|f| f.insns.first().is_some_and(|i| i.addr <= at))
+            .map(|f| rc_ir::insert_point(f, at) as usize)
+            .sum::<usize>();
+        if n == 0 {
             return Err(format!(
-                "[patch] conditional jump to a hooked function at {at:#010x}"
+                "[patch] point {at:#010x} is not a lifted instruction"
+            ));
+        }
+    }
+    for o in &p.operands {
+        let n: usize = functions
+            .iter_mut()
+            .map(|f| rc_ir::load_operand(f, o.at, o.value, o.load))
+            .sum();
+        if n == 0 {
+            return Err(format!(
+                "[patch] operand {:#x} not found in the instruction at {:#010x}",
+                o.value, o.at
             ));
         }
     }

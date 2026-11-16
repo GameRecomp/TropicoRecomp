@@ -42,6 +42,18 @@ void rc_hook(uint32_t addr, rc_fn wrapper);
 /* The lifted function at `addr`, not its wrapper; NULL if none. */
 rc_fn rc_lookup_lifted(uint32_t addr);
 
+/* Patch points: `fn` runs before the instruction at `addr`, which the
+ * manifest's [patch] points lists, with the registers and flags in `c`; it
+ * may change them and guest memory. A point nothing is registered for does
+ * nothing. */
+void rc_on_point(uint32_t addr, rc_fn fn);
+
+/* Patch variables: guest memory the runtime keeps for the game project's
+ * patches (the manifest's [patch] operands load from it), RC_PATCH_VARS_SIZE
+ * bytes at RC_PATCH_VARS, zero until written. */
+#define RC_PATCH_VARS 0x0001f000u
+#define RC_PATCH_VARS_SIZE 0x1000u
+
 /* Where rc_dispatch goes for addresses that are not lifted code (the
  * reserved import addresses). Returns NULL if `addr` is not one. */
 typedef rc_fn (*rc_import_resolver)(uint32_t addr);

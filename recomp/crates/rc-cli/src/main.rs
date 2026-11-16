@@ -497,7 +497,8 @@ fn analyse(
 ) -> Result<(Manifest, PeFile, Image, rc_discover::CodeMap)> {
     let (m, exe) = ingest(game_dir, arg)?;
     let pe = PeFile::parse(&exe).map_err(|e| e.to_string())?;
-    let image = Image::new(&pe);
+    let mut image = Image::new(&pe);
+    rc_convert::patch_image(&mut image, &m)?;
     let tables: Vec<(u32, i32, u32)> = m
         .discover
         .tables
@@ -586,7 +587,7 @@ fn lift(
         modules.push(md.file.clone());
     }
     functions.sort_by_key(|f| f.addr);
-    rc_convert::patch_hooks(&mut functions, &m)?;
+    rc_convert::apply_patches(&mut functions, &m)?;
     report::lift(&functions);
     let names = rc_emit_c::Entries {
         prefix: "f_".into(),

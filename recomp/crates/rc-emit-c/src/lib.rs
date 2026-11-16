@@ -420,6 +420,14 @@ fn spill_all() -> String {
     s
 }
 
+fn reload_all() -> String {
+    let mut s = reload_regs();
+    for (n, _) in FLAGS {
+        let _ = write!(s, "{n} = c->{n}; ");
+    }
+    s
+}
+
 fn reload_regs() -> String {
     let mut s = String::new();
     for (i, r) in REGS.iter().enumerate() {
@@ -539,6 +547,10 @@ impl Emitter<'_> {
             S::Helper(Helper::Cpuid) => self.line("rc_cpuid(&eax, &ebx, &ecx, &edx);"),
             S::Helper(Helper::Rdtsc) => self.line("rc_rdtsc(&eax, &edx);"),
             S::Fpu(f) => self.line(&fpu(f)),
+            S::Point(at) => {
+                let l = format!("{}rc_point(c, {at:#010x}u); {}", spill_all(), reload_all());
+                self.line(&l);
+            }
             S::Trap(why) => {
                 let l = format!("{}rc_trap(c, {addr:#010x}u, {});", spill_all(), cstr(why));
                 self.line(&l);

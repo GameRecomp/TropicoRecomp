@@ -3,7 +3,23 @@
 #ifndef TROPICO1_PATCHES_H
 #define TROPICO1_PATCHES_H
 
-/* Register every patch with the runtime. Call before the game starts. */
+/* Register every patch with the runtime. Call before the game is loaded
+ * (rc_config.setup). */
 void tropico1_patches(void);
+
+/* The patches to the game's data, once it is in guest memory
+ * (rc_config.loaded). */
+void tropico1_patches_loaded(void);
+
+/* ---- the patches, one file each ---- */
+
+/* patch_options.c: the options page without the settings that do nothing
+ * here. */
+void tropico1_patch_options(void);
+
+/* patch_resolution.c: a resolution of the user's choosing in the game's
+ * slot for its largest one. */
+void tropico1_patch_resolution(void);
+void tropico1_patch_resolution_loaded(void);
 
 #endif

@@ -326,8 +326,11 @@ sha256 = "f2ad8870…"
 size = 291328
 image_base = 0x30000000
 
-[patch]
-hooks = [0x004e8710]           # functions the game project wraps (patches.c)
+[patch]                        # the game project's patches (patches.c)
+hooks = [0x004e8710]           # functions it wraps
+points = [0x00530a51]          # instructions before which it runs
+operands = [{ at = 0x0052d15a, value = 1600, load = 0x005a0fc0 }]
+code = [{ at = 0x00532065, from = "7c 06", to = "eb 06" }]
 
 # Planned, not read yet:
 # [lift] exact_x87 = []        # functions with exact 80-bit x87
@@ -338,17 +341,29 @@ hooks = [0x004e8710]           # functions the game project wraps (patches.c)
 
 Everything in it is an address, a number, or a name we made up.
 
-**Patches.** Where the game project changes what the game does, it wraps
-a function of the game, and all of that is in one place per game:
-`games/<id>/patches.c`, with the wrapped functions listed under `[patch]
-hooks`. The lifter turns every call and jump to a hooked function into a
-transfer through `rc_dispatch` (`rc_ir::route_through_dispatch`), so all
-three back ends reach it through the runtime, where the game project has
-registered its wrapper (`rc_hook`). The wrapper is entered as the function
-would be and calls the lifted original (`rc_lookup_lifted`). Patches change
-behaviour, never the game's files, and how each was found is written up in
-`docs/notes/`. Tropico 1's only patch so far takes the settings that do
-nothing here off its options page.
+**Patches.** Where the game project changes what the game does, all of it
+is in one place per game: `games/<id>/patches.c` and one file per patch, with
+what the lifter must know listed under `[patch]` in the manifest
+(`rc_manifest::Patch`). Everything is applied at lift time, to the image or
+to the IR, so all three back ends get it:
+
+- `hooks`: every call and jump to the function goes through `rc_dispatch`
+  (`rc_ir::route_through_dispatch`), where the game project has registered a
+  wrapper (`rc_hook`); the wrapper is entered as the function would be and
+  calls the lifted original (`rc_lookup_lifted`).
+- `points`: an `Stmt::Point` before the instruction; the runtime calls the
+  code registered for it (`rc_on_point`) with the registers and flags in `c`,
+  which it may change.
+- `operands`: a constant of the instruction becomes a load from guest memory,
+  where the game project puts the value it wants (the game's own data, or the
+  patch variables the runtime keeps at `RC_PATCH_VARS`).
+- `code`: instruction bytes replaced, length for length, before discovery.
+
+The game's data is changed in the game project's `rc_config.loaded`, once it
+is in guest memory. Patches change behaviour, never the game's files, and how
+each was found is written up in `docs/notes/`. Tropico 1 has two so far: its
+options page without the settings that do nothing here, and a resolution of
+the user's choosing (ported from the Tropico resolution patch).
 
 **Lifted DLLs.** A DLL listed under `[[modules]]` is checked by hash like
 the executable, discovered from its entry point and its exports, and lifted

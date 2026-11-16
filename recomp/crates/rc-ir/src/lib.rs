@@ -313,6 +313,10 @@ pub enum Stmt {
     Fpu(Fpu),
     /// Stop with a fatal error naming the reason.
     Trap(String),
+    /// A patch of the game project's: the runtime calls the code it
+    /// registered for this address with the whole CPU state, which it may
+    /// change (rc_point). Registers and flags are in `c` around it.
+    Point(u32),
 }
 
 /// An x87 operand: a stack register, or memory of a format at an address.
@@ -517,6 +521,65 @@ pub fn route_through_dispatch(
     missed
 }
 
+/// Put a [`Stmt::Point`] at the start of the instruction at `at`, if this
+/// function has it. Returns whether it did.
+pub fn insert_point(f: &mut Function, at: u32) -> bool {
+    match f.insns.iter_mut().find(|i| i.addr == at) {
+        Some(ins) => {
+            ins.stmts.insert(0, Stmt::Point(at));
+            true
+        }
+        None => false,
+    }
+}
+
+/// In the instruction at `at`, every 32-bit constant `value` becomes a load
+/// of the dword at `load`. Returns how many were replaced (0 if the
+/// function does not have the instruction).
+pub fn load_operand(f: &mut Function, at: u32, value: u32, load: u32) -> usize {
+    fn expr(e: &mut Expr, value: u32, load: u32) -> usize {
+        match e {
+            Expr::Const(W::B32, v) if *v == u64::from(value) => {
+                *e = Expr::load(W::B32, Expr::c32(load));
+                1
+            }
+            Expr::Load(_, a)
+            | Expr::Un(_, _, a)
+            | Expr::Zext(_, a)
+            | Expr::Sext(_, _, a)
+            | Expr::Trunc(_, a) => expr(a, value, load),
+            Expr::Bin(_, _, a, b) => expr(a, value, load) + expr(b, value, load),
+            Expr::Select(_, c, a, b) => {
+                expr(c, value, load) + expr(a, value, load) + expr(b, value, load)
+            }
+            _ => 0,
+        }
+    }
+    fn stmts(body: &mut [Stmt], value: u32, load: u32) -> usize {
+        let mut n = 0;
+        for s in body {
+            n += match s {
+                Stmt::Let(_, e) | Stmt::SetReg(_, e) | Stmt::SetFlag(_, e) | Stmt::BreakIf(e) => {
+                    expr(e, value, load)
+                }
+                Stmt::Store(a, v) => expr(a, value, load) + expr(v, value, load),
+                Stmt::If(c, b) => expr(c, value, load) + stmts(b, value, load),
+                Stmt::Loop(b) => stmts(b, value, load),
+                _ => 0,
+            };
+        }
+        n
+    }
+    let Some(ins) = f.insns.iter_mut().find(|i| i.addr == at) else {
+        return 0;
+    };
+    let mut n = stmts(&mut ins.stmts, value, load);
+    if let Term::Branch(c, _) = &mut ins.term {
+        n += expr(c, value, load);
+    }
+    n
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,5 +631,39 @@ mod tests {
             }
         );
         assert_eq!(f.insns[2].term, Term::JumpIndirect(Expr::c32(0x900)));
+    }
+
+    #[test]
+    fn points_and_operands() {
+        let mut f = Function {
+            addr: 0x100,
+            insns: vec![Insn {
+                addr: 0x100,
+                len: 5,
+                text: String::new(),
+                stmts: vec![Stmt::SetFlag(
+                    Flag::Zf,
+                    Expr::bin(BinOp::Eq, W::B32, Expr::Reg(Reg::d(0)), Expr::c32(1600)),
+                )],
+                term: Term::Next,
+            }],
+            labels: vec![0x100],
+        };
+        assert_eq!(load_operand(&mut f, 0x100, 1600, 0x5a0fc0), 1);
+        assert!(insert_point(&mut f, 0x100));
+        assert!(!insert_point(&mut f, 0x200));
+        assert_eq!(f.insns[0].stmts[0], Stmt::Point(0x100));
+        assert_eq!(
+            f.insns[0].stmts[1],
+            Stmt::SetFlag(
+                Flag::Zf,
+                Expr::bin(
+                    BinOp::Eq,
+                    W::B32,
+                    Expr::Reg(Reg::d(0)),
+                    Expr::load(W::B32, Expr::c32(0x5a0fc0))
+                )
+            )
+        );
     }
 }

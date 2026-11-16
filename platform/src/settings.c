@@ -22,7 +22,12 @@ static const char DEFAULTS[] =
     "pixels = sharp\n"
     "\n"
     "# yes or no. Alt+Enter switches while playing.\n"
-    "fullscreen = no\n";
+    "fullscreen = no\n"
+    "\n"
+    "# A resolution for the game besides its own (640x480 to 1600x1200), for\n"
+    "# example 1600x900; it is then the highest one on the game's options page.\n"
+    "# off: only the game's own.\n"
+    "resolution = off\n";
 
 static void set(rc_display *d, const char *key, const char *value)
 {
@@ -35,6 +40,14 @@ static void set(rc_display *d, const char *key, const char *value)
         d->smooth = !strcmp(value, "smooth");
     } else if (!strcmp(key, "fullscreen")) {
         d->fullscreen = !strcmp(value, "yes") || !strcmp(value, "1") || !strcmp(value, "true");
+    } else if (!strcmp(key, "resolution")) {
+        int w = 0, h = 0;
+        if (sscanf(value, "%dx%d", &w, &h) == 2 && w > 0 && h > 0 && w <= 8192 && h <= 8192) {
+            d->game_w = w;
+            d->game_h = h;
+        } else {
+            d->game_w = d->game_h = 0;
+        }
     }
 }
 
@@ -65,7 +78,7 @@ static void parse(rc_display *d, FILE *f)
 
 void rc_plat_display_load(const char *user_dir)
 {
-    rc_display d = {0, false, false};
+    rc_display d = {0, false, false, 0, 0};
 #if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
     /* (A browser's page and Android's full screen decide for themselves.) */
     if (user_dir && *user_dir) {
@@ -85,7 +98,8 @@ void rc_plat_display_load(const char *user_dir)
 #else
     (void)user_dir;
 #endif
-    static const char *const env[][2] = {{"RC_SCALE", "scale"}, {"RC_PIXELS", "pixels"}, {"RC_FULLSCREEN", "fullscreen"}};
+    static const char *const env[][2] = {{"RC_SCALE", "scale"}, {"RC_PIXELS", "pixels"}, {"RC_FULLSCREEN", "fullscreen"},
+                                         {"RC_RESOLUTION", "resolution"}};
     for (size_t i = 0; i < sizeof env / sizeof env[0]; i++) {
         const char *v = getenv(env[i][0]);
         if (v && *v) {

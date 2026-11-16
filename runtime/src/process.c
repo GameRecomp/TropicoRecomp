@@ -41,7 +41,8 @@ static uint32_t proc_next = PROC_DATA;
 uint32_t rc_proc_alloc(uint32_t size)
 {
     size = (size + 15) & ~15u;
-    if (proc_next + size > PROC_DATA + PROC_DATA_SIZE) {
+    /* (The last page is the patch variables', rc/dispatch.h.) */
+    if (proc_next + size > RC_PATCH_VARS) {
         rc_fatal("process data area full");
     }
     uint32_t a = proc_next;
@@ -330,6 +331,10 @@ int rc_run(const rc_config *cfg)
     rc_st32(TIB_ADDR + 0x24, 1);        /* thread id */
     rc_st32(TIB_ADDR + 0x30, PEB_ADDR);
     rc_st32(PEB_ADDR + 0x08, rc_proc.image_base);
+
+    if (cfg->loaded) {
+        cfg->loaded();
+    }
 
     if (rc_trace("imports")) {
         rc_set_import_trace(true);

@@ -28,6 +28,11 @@ void rc_dispatch(rc_cpu *c, uint32_t target);
  * model. The registers are in `c`. */
 RC_NORETURN void rc_trap(rc_cpu *c, uint32_t addr, const char *why);
 
+/* A patch point (the manifest's [patch] points): run the code the game
+ * project registered for `addr` (rc/dispatch.h, rc_on_point) on the state
+ * in `c`, before the instruction at `addr`. */
+void rc_point(rc_cpu *c, uint32_t addr);
+
 void rc_cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx);
 void rc_rdtsc(uint32_t *eax, uint32_t *edx);
 

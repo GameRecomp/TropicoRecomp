@@ -93,6 +93,8 @@ static void h_rdtsc(rc_cpu *c) { rc_rdtsc(&c->r[RC_EAX], &c->r[RC_EDX]); }
 
 static uint32_t h_fstsw(rc_cpu *c) { return rc_fstsw(c); }
 
+static void h_point(rc_cpu *c, uint32_t addr) { rc_point(c, addr); }
+
 /* An x87 operand's value, as the C back end reads it. */
 static double fsrc(rc_cpu *c, uint32_t code, uint32_t a)
 {
@@ -215,7 +217,7 @@ static void h_fpu(rc_cpu *c, uint32_t code, uint32_t a)
 
 /* In the order of rc-emit-native's `helper` module. Function pointers are
  * stored as data pointers, which every platform this runs on allows. */
-static const void *helper_table[6];
+static const void *helper_table[7];
 
 static void init_helpers(void)
 {
@@ -232,6 +234,7 @@ static void init_helpers(void)
     SET(3, h_rdtsc);
     SET(4, h_fpu);
     SET(5, h_fstsw);
+    SET(6, h_point);
 #undef SET
 }
 
@@ -256,13 +259,14 @@ static uint32_t wasm_table_base;
 EMSCRIPTEN_KEEPALIVE const uint32_t *rc_wasm_helpers(void)
 {
     /* Function pointers are table slots: the module imports these. */
-    static uint32_t slots[6];
+    static uint32_t slots[7];
     slots[0] = (uint32_t)(uintptr_t)h_dispatch;
     slots[1] = (uint32_t)(uintptr_t)h_trap;
     slots[2] = (uint32_t)(uintptr_t)h_cpuid;
     slots[3] = (uint32_t)(uintptr_t)h_rdtsc;
     slots[4] = (uint32_t)(uintptr_t)h_fpu;
     slots[5] = (uint32_t)(uintptr_t)h_fstsw;
+    slots[6] = (uint32_t)(uintptr_t)h_point;
     return slots;
 }
 
