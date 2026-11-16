@@ -53,7 +53,8 @@ typedef struct rc_display {
      * full screen, is sized to it; smaller if the screen is too small). */
     int scale;
     bool smooth;     /* filter when scaling, instead of sharp pixels */
-    bool fullscreen; /* the whole screen, without a border */
+    bool fullscreen; /* the whole screen, without a border (always on Android;
+                      * in a browser the page's full screen) */
     /* A resolution of the user's choosing for the game, beyond those it
      * knows (the game project's patch decides whether it can have it);
      * 0 x 0 for none, -1 x -1 for the size of the window (rc_plat_area)
@@ -78,6 +79,10 @@ rc_display rc_plat_display_get(void);
  * the defaults and comments if it is missing), then from the environment
  * (RC_SCALE, RC_PIXELS, RC_FULLSCREEN, RC_RESOLUTION), and apply them. */
 void rc_plat_display_load(const char *user_dir);
+
+/* Write the display settings that change while playing (full screen) back
+ * to the settings.ini rc_plat_display_load read. */
+void rc_plat_display_store(void);
 void rc_plat_show(bool show);
 void rc_plat_title(const char *title);
 

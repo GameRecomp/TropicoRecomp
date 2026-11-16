@@ -23,6 +23,7 @@ void tropico1_patches(void)
 {
     tropico1_patch_options();
     tropico1_patch_resolution();
+    tropico1_patch_fullscreen();
 }
 
 void tropico1_patches_loaded(void) { tropico1_patch_resolution_loaded(); }

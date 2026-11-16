@@ -29,12 +29,13 @@ static struct {
 } hooks[HOOKS];
 static uint32_t nhooks;
 
-void rc_hook(uint32_t addr, rc_fn wrapper)
+rc_fn rc_hook(uint32_t addr, rc_fn wrapper)
 {
     for (uint32_t i = 0; i < nhooks; i++) {
         if (hooks[i].addr == addr) {
+            rc_fn before = hooks[i].fn;
             hooks[i].fn = wrapper;
-            return;
+            return before;
         }
     }
     if (nhooks == HOOKS) {
@@ -43,6 +44,7 @@ void rc_hook(uint32_t addr, rc_fn wrapper)
     hooks[nhooks].addr = addr;
     hooks[nhooks].fn = wrapper;
     nhooks++;
+    return NULL;
 }
 
 static struct {

@@ -65,3 +65,26 @@ logging the text lookups (with the code addresses on the guest stack) while
 opening the page, which led to the widget method that looks up a widget's
 text and so to the function that adds widgets; then by logging the widgets
 it adds. None of that logging is kept.
+
+## The full screen box
+
+The page's "full screen" box is the game's windowed flag, `+0x1c` of the video
+settings at `[0x00612fec]` (1: windowed). Windowed, the game draws through
+another path (no display mode of its own, a clipper), about twenty places read
+the flag, and a settings file with it set makes the start-up (`0x0047c370`)
+skip the whole video set-up. `games/tropico1/patch_fullscreen.c` keeps it 0 and
+makes the box the host's full screen instead:
+
+- The page ticks the box from the flag, read into `edx` at `0x00491124`; at
+  `0x00491127` (a patch point) `edx` is made the host's state.
+- A click calls the routine that applies video settings, `0x00515450`, from
+  `0x00490662` (returning to `0x00490667`), with "windowed" as its third
+  stack argument when the box is no longer ticked (the box's state is
+  `[esi+8]` there). The wrapper sets the host's full screen from it (and
+  `settings.ini`), and asks for the value in effect, so the game changes
+  nothing; the page is built again and shows the host's state. On Android
+  the host is always full screen, so the box comes back ticked.
+- At `0x0047c375` the start-up reads the flag: it is made 0 first.
+
+The start-up's own requests to that routine are left alone: the second one
+passes 1 in the same argument, so it is not the windowed flag everywhere.

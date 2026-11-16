@@ -10,6 +10,8 @@
 
 #include "rc/platform.h"
 
+#include <stdbool.h>
+
 static const char DEFAULTS[] =
     "# How the game is shown. Change a value and start the game again.\n"
     "\n"
@@ -80,6 +82,52 @@ static void parse(rc_display *d, FILE *f)
     }
 }
 
+static char settings_path[1024];
+
+void rc_plat_display_store(void)
+{
+    if (!settings_path[0]) {
+        return;
+    }
+    /* The file as it is, with the full screen line replaced. */
+    char text[8192] = "";
+    size_t n = 0;
+    FILE *f = fopen(settings_path, "r");
+    if (f) {
+        n = fread(text, 1, sizeof text - 1, f);
+        fclose(f);
+    }
+    text[n] = 0;
+    rc_display d = rc_plat_display_get();
+    char out[8400] = "";
+    size_t o = 0;
+    bool done = false;
+    for (char *line = text; *line;) {
+        char *nl = strchr(line, '\n');
+        size_t len = nl ? (size_t)(nl - line) + 1 : strlen(line);
+        const char *p = line;
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        if (!strncmp(p, "fullscreen", 10) && strchr(p, '=') && (size_t)(strchr(p, '=') - line) < len) {
+            o += (size_t)snprintf(out + o, sizeof out - o, "fullscreen = %s\n", d.fullscreen ? "yes" : "no");
+            done = true;
+        } else if (o + len < sizeof out) {
+            memcpy(out + o, line, len);
+            o += len;
+            out[o] = 0;
+        }
+        line += len;
+    }
+    if (!done) {
+        snprintf(out + o, sizeof out - o, "fullscreen = %s\n", d.fullscreen ? "yes" : "no");
+    }
+    if ((f = fopen(settings_path, "w")) != NULL) {
+        fputs(out, f);
+        fclose(f);
+    }
+}
+
 void rc_plat_display_load(const char *user_dir)
 {
     rc_display d = {0, false, false, 0, 0};
@@ -90,6 +138,7 @@ void rc_plat_display_load(const char *user_dir)
         size_t n = strlen(user_dir);
         snprintf(path, sizeof path, "%s%ssettings.ini", user_dir,
                  n && (user_dir[n - 1] == '/' || user_dir[n - 1] == '\\') ? "" : "/");
+        snprintf(settings_path, sizeof settings_path, "%s", path);
         FILE *f = fopen(path, "r");
         if (f) {
             parse(&d, f);

@@ -36,8 +36,11 @@ rc_fn rc_lookup(uint32_t addr);
  * place of the lifted function at `addr` whenever it is reached through
  * rc_dispatch. The manifest's [patch] hooks makes the lifter route every
  * call of that function through dispatch. The wrapper is entered as the
- * function would be and calls the original with rc_lookup_lifted. */
-void rc_hook(uint32_t addr, rc_fn wrapper);
+ * function would be and calls the original with rc_lookup_lifted. Returns
+ * the wrapper registered for `addr` before, or NULL: two patches wrapping
+ * one function chain, the later calling the earlier instead of the
+ * original. */
+rc_fn rc_hook(uint32_t addr, rc_fn wrapper);
 
 /* The lifted function at `addr`, not its wrapper; NULL if none. */
 rc_fn rc_lookup_lifted(uint32_t addr);

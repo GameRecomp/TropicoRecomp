@@ -86,8 +86,30 @@ static bool make_texture(void)
     return apply_presentation();
 }
 
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+#include <emscripten.h>
+/* In a browser full screen is the page's: asked for here, it is granted
+ * while the click that led to it is recent; Escape leaves it. */
+EM_JS(void, page_fullscreen, (int on), {
+    try {
+        if (on && !document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        } else if (!on && document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+        }
+    } catch (e) {
+    }
+});
+EM_JS(int, page_is_fullscreen, (void), { return document.fullscreenElement ? 1 : 0; });
+#endif
+
 void rc_plat_display(const rc_display *d)
 {
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+    if (d->fullscreen != (page_is_fullscreen() != 0)) {
+        page_fullscreen(d->fullscreen);
+    }
+#endif
     bool resize = d->scale != display.scale || d->fullscreen != display.fullscreen;
     display = *d;
     if (display.scale < 0 || display.scale > 8) {
@@ -105,7 +127,15 @@ void rc_plat_display(const rc_display *d)
     }
 }
 
-rc_display rc_plat_display_get(void) { return display; }
+rc_display rc_plat_display_get(void)
+{
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+    display.fullscreen = page_is_fullscreen() != 0;
+#elif defined(SDL_PLATFORM_ANDROID)
+    display.fullscreen = true;
+#endif
+    return display;
+}
 
 static int area_override_w, area_override_h;
 
@@ -116,7 +146,6 @@ void rc_plat_area_set(int width, int height)
 }
 
 #if defined(SDL_PLATFORM_EMSCRIPTEN)
-#include <emscripten.h>
 EM_JS(int, page_size, (int which), {
     const dpr = window.devicePixelRatio || 1;
     return Math.floor((which ? window.innerHeight : window.innerWidth) * dpr);
@@ -352,6 +381,7 @@ bool rc_plat_poll(rc_event *e)
                     rc_display d = display;
                     d.fullscreen = !d.fullscreen;
                     rc_plat_display(&d);
+                    rc_plat_display_store();
                 }
                 continue;
             }

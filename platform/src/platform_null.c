@@ -31,6 +31,7 @@ void rc_plat_area_set(int width, int height)
     area_h = height;
 }
 void rc_plat_display_load(const char *user_dir) { (void)user_dir; }
+void rc_plat_display_store(void) {}
 
 void rc_plat_show(bool show) { (void)show; }
 void rc_plat_title(const char *title) { (void)title; }
