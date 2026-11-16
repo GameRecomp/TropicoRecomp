@@ -487,3 +487,86 @@ pub struct Function {
     /// after branches.
     pub labels: Vec<u32>,
 }
+
+/// Make every call and jump to one of `hooks` (function entries) a transfer
+/// through the runtime's dispatch, so that a function the game project
+/// wraps is reached through its wrapper. Jumps inside a function and
+/// conditional branches are left alone (a conditional tail jump to a hooked
+/// function is reported in the result).
+pub fn route_through_dispatch(
+    f: &mut Function,
+    hooks: &std::collections::BTreeSet<u32>,
+) -> Vec<u32> {
+    let mut missed = Vec::new();
+    let here: std::collections::BTreeSet<u32> = f.insns.iter().map(|i| i.addr).collect();
+    for ins in &mut f.insns {
+        match &ins.term {
+            Term::Call { target, ret } if hooks.contains(target) => {
+                ins.term = Term::CallIndirect {
+                    target: Expr::c32(*target),
+                    ret: *ret,
+                };
+            }
+            Term::Jump(t) if hooks.contains(t) && !here.contains(t) => {
+                ins.term = Term::JumpIndirect(Expr::c32(*t));
+            }
+            Term::Branch(_, t) if hooks.contains(t) && !here.contains(t) => missed.push(ins.addr),
+            _ => {}
+        }
+    }
+    missed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calls_and_tail_jumps_to_hooks_go_through_dispatch() {
+        let insn = |addr, term| Insn {
+            addr,
+            len: 5,
+            text: String::new(),
+            stmts: vec![],
+            term,
+        };
+        let mut f = Function {
+            addr: 0x100,
+            insns: vec![
+                insn(
+                    0x100,
+                    Term::Call {
+                        target: 0x900,
+                        ret: 0x105,
+                    },
+                ),
+                insn(
+                    0x105,
+                    Term::Call {
+                        target: 0x800,
+                        ret: 0x10a,
+                    },
+                ),
+                insn(0x10a, Term::Jump(0x900)),
+            ],
+            labels: vec![0x100],
+        };
+        let hooks = [0x900].into_iter().collect();
+        assert!(route_through_dispatch(&mut f, &hooks).is_empty());
+        assert_eq!(
+            f.insns[0].term,
+            Term::CallIndirect {
+                target: Expr::c32(0x900),
+                ret: 0x105
+            }
+        );
+        assert_eq!(
+            f.insns[1].term,
+            Term::Call {
+                target: 0x800,
+                ret: 0x10a
+            }
+        );
+        assert_eq!(f.insns[2].term, Term::JumpIndirect(Expr::c32(0x900)));
+    }
+}

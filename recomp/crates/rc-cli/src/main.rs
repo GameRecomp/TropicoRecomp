@@ -586,6 +586,7 @@ fn lift(
         modules.push(md.file.clone());
     }
     functions.sort_by_key(|f| f.addr);
+    rc_convert::patch_hooks(&mut functions, &m)?;
     report::lift(&functions);
     let names = rc_emit_c::Entries {
         prefix: "f_".into(),

@@ -32,6 +32,16 @@ void rc_set_call_hook(void (*hook)(rc_cpu *c, uint32_t target));
 /* The lifted function at `addr`, or NULL. */
 rc_fn rc_lookup(uint32_t addr);
 
+/* Patches (the game project's, games/<id>/patches.c): `wrapper` runs in
+ * place of the lifted function at `addr` whenever it is reached through
+ * rc_dispatch. The manifest's [patch] hooks makes the lifter route every
+ * call of that function through dispatch. The wrapper is entered as the
+ * function would be and calls the original with rc_lookup_lifted. */
+void rc_hook(uint32_t addr, rc_fn wrapper);
+
+/* The lifted function at `addr`, not its wrapper; NULL if none. */
+rc_fn rc_lookup_lifted(uint32_t addr);
+
 /* Where rc_dispatch goes for addresses that are not lifted code (the
  * reserved import addresses). Returns NULL if `addr` is not one. */
 typedef rc_fn (*rc_import_resolver)(uint32_t addr);

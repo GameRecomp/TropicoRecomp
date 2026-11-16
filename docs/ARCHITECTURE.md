@@ -326,6 +326,9 @@ sha256 = "f2ad8870…"
 size = 291328
 image_base = 0x30000000
 
+[patch]
+hooks = [0x004e8710]           # functions the game project wraps (patches.c)
+
 # Planned, not read yet:
 # [lift] exact_x87 = []        # functions with exact 80-bit x87
 # [functions]                  # replacement directives, by address
@@ -334,6 +337,18 @@ image_base = 0x30000000
 ```
 
 Everything in it is an address, a number, or a name we made up.
+
+**Patches.** Where the game project changes what the game does, it wraps
+a function of the game, and all of that is in one place per game:
+`games/<id>/patches.c`, with the wrapped functions listed under `[patch]
+hooks`. The lifter turns every call and jump to a hooked function into a
+transfer through `rc_dispatch` (`rc_ir::route_through_dispatch`), so all
+three back ends reach it through the runtime, where the game project has
+registered its wrapper (`rc_hook`). The wrapper is entered as the function
+would be and calls the lifted original (`rc_lookup_lifted`). Patches change
+behaviour, never the game's files, and how each was found is written up in
+`docs/notes/`. Tropico 1's only patch so far takes the settings that do
+nothing here off its options page.
 
 **Lifted DLLs.** A DLL listed under `[[modules]]` is checked by hash like
 the executable, discovered from its entry point and its exports, and lifted

@@ -22,6 +22,20 @@ pub struct Manifest {
     /// DLLs shipped with the game that are lifted with it.
     #[serde(default)]
     pub modules: Vec<Module>,
+    #[serde(default)]
+    pub patch: Patch,
+}
+
+/// Where the game project changes what the game does (its patches live in
+/// `games/<id>/patches.c`).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Patch {
+    /// Functions the game project wraps: calls and jumps to them are lifted
+    /// as transfers through the runtime's dispatch, where the wrapper is
+    /// registered (rc_hook); it calls the lifted original itself.
+    #[serde(default)]
+    pub hooks: Vec<u32>,
 }
 
 /// A DLL of the game's own, lifted into the same program.

@@ -21,7 +21,41 @@ void rc_set_lifted(const rc_fn_entry *t, uint32_t count)
 
 void rc_set_import_resolver(rc_import_resolver r) { import_resolver = r; }
 
+/* Patches: few, so a short list searched in order. */
+#define HOOKS 16
+static struct {
+    uint32_t addr;
+    rc_fn fn;
+} hooks[HOOKS];
+static uint32_t nhooks;
+
+void rc_hook(uint32_t addr, rc_fn wrapper)
+{
+    for (uint32_t i = 0; i < nhooks; i++) {
+        if (hooks[i].addr == addr) {
+            hooks[i].fn = wrapper;
+            return;
+        }
+    }
+    if (nhooks == HOOKS) {
+        rc_fatal("too many patches");
+    }
+    hooks[nhooks].addr = addr;
+    hooks[nhooks].fn = wrapper;
+    nhooks++;
+}
+
 rc_fn rc_lookup(uint32_t addr)
+{
+    for (uint32_t i = 0; i < nhooks; i++) {
+        if (hooks[i].addr == addr) {
+            return hooks[i].fn;
+        }
+    }
+    return rc_lookup_lifted(addr);
+}
+
+rc_fn rc_lookup_lifted(uint32_t addr)
 {
     uint32_t lo = 0, hi = table_count;
     while (lo < hi) {

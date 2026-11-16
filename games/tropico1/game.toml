@@ -45,3 +45,9 @@ file = "binkw32.dll"
 sha256 = "f2ad88706cf898ff489c5b3f19fac5a4d51dd59110b8e919b518c1d0f9a9b73a"
 size = 291328
 image_base = 0x30000000
+
+# Changes to what the game does; the wrappers are in patches.c.
+[patch]
+# The function that adds a widget to a page: the options page loses the
+# settings that do nothing here (see patches.c).
+hooks = [0x004e8710]

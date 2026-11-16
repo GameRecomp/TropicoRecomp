@@ -251,11 +251,34 @@ pub fn lift(id: &Identified) -> Result<Lifted, Error> {
         modules.push(name.clone());
     }
     functions.sort_by_key(|f| f.addr);
+    patch_hooks(&mut functions, m)?;
     Ok(Lifted {
         functions,
         entries,
         modules,
     })
+}
+
+/// Route calls to the functions the game project wraps through dispatch
+/// (the manifest's `[patch] hooks`).
+pub fn patch_hooks(functions: &mut [rc_ir::Function], m: &Manifest) -> Result<(), Error> {
+    let hooks: BTreeSet<u32> = m.patch.hooks.iter().copied().collect();
+    if hooks.is_empty() {
+        return Ok(());
+    }
+    for h in &hooks {
+        if functions.binary_search_by_key(h, |f| f.addr).is_err() {
+            return Err(format!("[patch] hook {h:#010x} is not a function entry"));
+        }
+    }
+    for f in functions.iter_mut() {
+        if let Some(at) = rc_ir::route_through_dispatch(f, &hooks).first() {
+            return Err(format!(
+                "[patch] conditional jump to a hooked function at {at:#010x}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Compile functions `range` (indices into `lifted.functions`).

@@ -25,6 +25,8 @@
 #include "rc/platform.h"
 #include "rc/process.h"
 
+#include "patches.h"
+
 /* Whether `dir` holds the game. */
 static bool has_game(const char *dir)
 {
@@ -54,6 +56,7 @@ static void setup(void)
         rc_fatal("no display");
     }
     rc_hle_all();
+    tropico1_patches();
 }
 
 /* Load a native-code blob (recomp lift --native) to run instead of the C
