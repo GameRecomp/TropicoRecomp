@@ -6,6 +6,13 @@
  * pages as the loader and the guest heap need them. Other hosts (32-bit,
  * Emscripten) allocate the region outright, so they reserve less.
  */
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE
+#elif !defined(_WIN32)
+/* MAP_ANONYMOUS and MAP_NORESERVE are not ISO C: glibc hides them in a
+ * strict C11 build unless asked (older releases, at least). */
+#define _DEFAULT_SOURCE
+#endif
 #include "rc/mem.h"
 
 #include <stdlib.h>
