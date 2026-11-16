@@ -16,7 +16,7 @@ shell=${1:?shell}
 out=${2:?output}
 icons=${3:-build/icons}
 arch=x86_64
-id=org.tropicorecomp.tropico1
+id=io.github.terminshock.TropicoRecomp
 version=$(tools/version)
 date=$(git log -1 --format=%cs 2>/dev/null || date +%F)
 tool=build/appimage/appimagetool-$arch.AppImage
@@ -74,7 +74,7 @@ cat > "$share/metainfo/$id.appdata.xml" <<METAINFO
       to be shared.
     </p>
   </description>
-  <developer id="org.tropicorecomp">
+  <developer id="io.github.terminshock">
     <name>TropicoRecomp</name>
   </developer>
   <launchable type="desktop-id">$id.desktop</launchable>
