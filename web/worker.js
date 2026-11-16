@@ -41,8 +41,23 @@ async function convertForBrowser(file, read, progress) {
   }
   const codeHandle = await (await top.getFileHandle('code.wasm', { create: true })).createSyncAccessHandle();
 
+  // Writes are collected into 8 MiB pieces: each write to a handle is a
+  // round trip, and Firefox is slow with many small ones.
   let current = null;
   let at = 0;
+  const buf = new Uint8Array(8 << 20);
+  let used = 0;
+  const flush = () => {
+    let off = 0;
+    while (off < used) {
+      const n = current.write(buf.subarray(off, used), { at: at + off });
+      // A full quota shows as a write that stores nothing.
+      if (!n) throw new Error('the browser has no room left for the game (about 1.3 GiB is needed)');
+      off += n;
+    }
+    at += used;
+    used = 0;
+  };
   const sink = {
     dir() {},
     begin(path) {
@@ -50,18 +65,27 @@ async function convertForBrowser(file, read, progress) {
       if (!current) throw new Error(`unexpected file ${path}`);
       current.truncate(0);
       at = 0;
+      used = 0;
     },
     write(chunk) {
       let off = 0;
       while (off < chunk.length) {
-        off += current.write(chunk.subarray(off), { at: at + off });
+        const n = Math.min(chunk.length - off, buf.length - used);
+        buf.set(chunk.subarray(off, off + n), used);
+        used += n;
+        off += n;
+        if (used === buf.length) flush();
       }
-      at += chunk.length;
     },
-    end() { current.flush(); },
+    end() {
+      flush();
+      current.flush();
+    },
     code(bytes) {
       codeHandle.truncate(0);
-      codeHandle.write(bytes, { at: 0 });
+      if (codeHandle.write(bytes, { at: 0 }) !== bytes.length) {
+        throw new Error('the browser has no room left for the game (about 1.3 GiB is needed)');
+      }
       codeHandle.flush();
     },
   };

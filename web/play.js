@@ -191,7 +191,8 @@ async function main() {
   $('title').textContent = game.info.title;
   $('status').textContent = `${game.info.release}, converted on ${new Date(game.info.converted).toLocaleDateString()}.`;
   $('start').hidden = false;
-  try { await navigator.storage.persist(); } catch (_) { /* not offered */ }
+  // Not awaited: Firefox asks the user, who may not answer.
+    navigator.storage?.persist?.().catch(() => {});
 }
 
 main();

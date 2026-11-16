@@ -169,7 +169,8 @@ async function start() {
     // Nothing to save: the worker stores the game. Ask the browser to keep
     // it (and the saved games) rather than clear it when space runs low.
     out = { write: () => Promise.resolve(), close: async () => null, abort: async () => {} };
-    try { await navigator.storage.persist(); } catch (_) { /* not offered */ }
+    // Not awaited: Firefox asks the user, who may not answer.
+    navigator.storage?.persist?.().catch(() => {});
   } else {
     try {
       out = await openOutput(outName, sys.type);
