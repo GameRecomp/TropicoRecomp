@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: MIT */
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "rc/dispatch.h"
 
 #include <time.h>
@@ -86,7 +89,13 @@ void rc_rdtsc(uint32_t *eax, uint32_t *edx)
 {
     struct timespec ts;
     uint64_t t = 0;
+#if defined(_WIN32)
     if (timespec_get(&ts, TIME_UTC) == TIME_UTC) {
+#else
+    /* Monotonic, as a TSC is; timespec_get is missing from older C
+     * libraries (Android's before API 29). */
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+#endif
         t = (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
     }
     *eax = (uint32_t)t;

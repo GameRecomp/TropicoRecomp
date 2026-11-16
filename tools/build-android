@@ -64,8 +64,7 @@ for abi in "${abis[@]}"; do
         -DSDLMIXER_MP3_MPG123=OFF -DSDLMIXER_FLAC=OFF -DSDLMIXER_MOD=OFF -DSDLMIXER_MIDI=OFF \
         -DSDLMIXER_OPUS=OFF -DSDLMIXER_VORBIS_STB=OFF -DSDLMIXER_VORBIS_VORBISFILE=OFF \
         -DSDLMIXER_WAVPACK=OFF -DSDLMIXER_GME=OFF
-    cmake -S . -B "$work/rc-$abi" "${common[@]}" -DRC_BUILD_TESTS=OFF \
-        -DTROPICO1_GENERATED="$work/none" > "$work/rc-$abi.log"
+    cmake -S . -B "$work/rc-$abi" "${common[@]}" -DRC_BUILD_TESTS=OFF > "$work/rc-$abi.log"
     grep -q "platform: SDL3_mixer" "$work/rc-$abi.log" \
         || { echo "build-android: SDL3 was not found for $abi" >&2; exit 1; }
     cmake --build "$work/rc-$abi" --target main --parallel
