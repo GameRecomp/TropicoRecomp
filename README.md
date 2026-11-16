@@ -2,7 +2,7 @@
 
 # TropicoRecomp
 
-## 👉 [**Open the converter: terminshock.github.io/TropicoRecomp**](https://terminshock.github.io/TropicoRecomp/) 👈
+## 👉 [**Open the converter: gamerecomp.github.io/TropicoRecomp**](https://gamerecomp.github.io/TropicoRecomp/) 👈
 
 **Turn your GOG installer into a native Tropico for Windows, Linux, macOS or Android, right in your browser.**
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-package io.github.terminshock.tropico1recomp;
+package io.github.gamerecomp.tropico1recomp;
 
 import org.libsdl.app.SDLActivity;
 

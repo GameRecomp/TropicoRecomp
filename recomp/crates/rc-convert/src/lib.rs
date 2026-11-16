@@ -608,7 +608,7 @@ const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key><string>Tropico</string>
-    <key>CFBundleIdentifier</key><string>io.github.terminshock.Tropico1Recomp</string>
+    <key>CFBundleIdentifier</key><string>io.github.gamerecomp.Tropico1Recomp</string>
     <key>CFBundleName</key><string>Tropico</string>
     <key>CFBundleDisplayName</key><string>Tropico</string>
     <key>CFBundleIconFile</key><string>Tropico</string>

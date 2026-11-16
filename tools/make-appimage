@@ -16,7 +16,7 @@ shell=${1:?shell}
 out=${2:?output}
 icons=${3:-build/icons}
 arch=x86_64
-id=io.github.terminshock.Tropico1Recomp
+id=io.github.gamerecomp.Tropico1Recomp
 version=$(tools/version)
 date=$(git log -1 --format=%cs 2>/dev/null || date +%F)
 tool=build/appimage/appimagetool-$arch.AppImage
@@ -74,12 +74,12 @@ cat > "$share/metainfo/$id.appdata.xml" <<METAINFO
       to be shared.
     </p>
   </description>
-  <developer id="io.github.terminshock">
+  <developer id="io.github.gamerecomp">
     <name>TropicoRecomp</name>
   </developer>
   <launchable type="desktop-id">$id.desktop</launchable>
-  <url type="homepage">https://terminshock.github.io/TropicoRecomp/</url>
-  <url type="vcs-browser">https://github.com/TerminShock/TropicoRecomp</url>
+  <url type="homepage">https://gamerecomp.github.io/TropicoRecomp/</url>
+  <url type="vcs-browser">https://github.com/GameRecomp/TropicoRecomp</url>
   <categories>
     <category>Game</category>
     <category>StrategyGame</category>
