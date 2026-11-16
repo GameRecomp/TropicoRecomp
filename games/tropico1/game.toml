@@ -65,6 +65,7 @@ points = [
     0x00503a11, # textedit: a text field's loop has read an event
     0x00490c83, # resolution: the options page has made the resolution's label
     0x00490cab, # resolution: the options page sets the resolution slider
+    0x004f1e9c, # texts: the game has found the language of its texts
 ]
 operands = [
     # resolution: the code that finds a mode's slot compares against slot 4

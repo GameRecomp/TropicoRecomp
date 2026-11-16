@@ -138,7 +138,8 @@ smaller slots (640x480 to 1280x1024) a stop for each size slot 4 may take
 (1360x768 to 3840x2160, the game's own 1600x1200 among them, and the one from
 `settings.ini` if it is another), and last the window's size. Its label gives
 the aspect ratio in brackets ("1920x1080 (16:9)"; "(window)" for the
-window's). A size of another shape than the window is letterboxed by the
+window's, in the language of the game's texts: see
+[tropico1-texts.md](tropico1-texts.md)). A size of another shape than the window is letterboxed by the
 host as before. How the game builds the page is in
 [tropico1-options.md](tropico1-options.md).
 

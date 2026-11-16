@@ -361,9 +361,12 @@ to the IR, so all three back ends get it:
 
 The game's data is changed in the game project's `rc_config.loaded`, once it
 is in guest memory. Patches change behaviour, never the game's files, and how
-each was found is written up in `docs/notes/`. Tropico 1 has two so far: its
-options page without the settings that do nothing here, and a resolution of
-the user's choosing (ported from the Tropico resolution patch).
+each was found is written up in `docs/notes/`. Tropico 1 has, among others,
+its options page without the settings that do nothing here and a resolution
+of the user's choosing (ported from the Tropico resolution patch). The few
+words the patches show are in the language of the game's own texts, which
+the window's title names (`games/tropico1/lang.c`,
+`docs/notes/tropico1-texts.md`).
 
 **Lifted DLLs.** A DLL listed under `[[modules]]` is checked by hash like
 the executable, discovered from its entry point and its exports, and lifted

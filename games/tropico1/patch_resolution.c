@@ -22,6 +22,7 @@
  */
 #include <stdio.h>
 
+#include "lang.h"
 #include "patches.h"
 
 #include "rc/dispatch.h"
@@ -418,13 +419,13 @@ static void add_widget(rc_cpu *c)
 static void slider_set(rc_cpu *c) { c->r[RC_EDX] = stop_of(c->r[RC_EDX]); }
 
 /* The label of a stop: "WxH (aspect)", or "(window)" for the window's
- * size. (Without the spaces around the x of the game's own label, so that
+ * size, in the game's language (lang.c). (Without the spaces around the x of the game's own label, so that
  * it keeps to one line.) */
 static void label_text(unsigned w, unsigned h, int window)
 {
     char aspect[32], text[48];
     if (window) {
-        snprintf(aspect, sizeof aspect, "window");
+        snprintf(aspect, sizeof aspect, "%s", tropico1_tr(TROPICO1_T_WINDOW));
     } else {
         aspect_name(w, h, aspect, sizeof aspect);
     }

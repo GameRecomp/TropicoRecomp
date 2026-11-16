@@ -25,6 +25,7 @@
 #include "rc/platform.h"
 #include "rc/process.h"
 
+#include "lang.h"
 #include "patches.h"
 
 /* Whether `dir` holds the game. */
@@ -59,7 +60,7 @@ static void setup(void)
     if (!rc_plat_init("Tropico")) {
         rc_fatal("no display");
     }
-    rc_plat_title_suffix(" (" RC_REVISION ")");
+    tropico1_lang_init(RC_REVISION);
     rc_hle_all();
     tropico1_patches();
 }
