@@ -273,10 +273,19 @@ recomp convert orig/setup_tropico_2.1.0.14.exe \
 tools/build-web build/site build/templates               # the page, for a local server
 ```
 
+Android: `tools/build-android build/android/Tropico-shell.apk` builds the
+shell APK (it needs the Android SDK and NDK and a JDK; CI has them), and
+`recomp template --system android` makes its template. `recomp convert`
+then writes a signed APK and needs `--apk-key FILE` (made if missing; keep
+it, so that a new APK installs over the old one); `recomp verify-apk`
+checks a signature as Android does. The page keeps its key in the
+browser.
+
 - `recomp convert` runs the same pipeline as the page (rc-convert); the
   page's WebAssembly build and the native command give byte-identical zips.
 - The shell is the game program without lifted code. It runs the native
-  code and game files in `data/` beside it; `RC_NATIVE=blob` and
+  code and game files in `data/` beside it (on Android: in the APK's
+  `assets/data`, unpacked into the app's storage on the first start); `RC_NATIVE=blob` and
   `TROPICO1_DATA=dir` point it elsewhere for testing.
 - The site serves only our tools and the shells, which contain no game
   code. A converted build is made in the user's browser and saved on their

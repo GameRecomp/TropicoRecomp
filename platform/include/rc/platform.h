@@ -11,6 +11,7 @@
 #define RC_PLATFORM_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -66,6 +67,12 @@ const char *rc_plat_base_dir(void);
 /* A per-user directory for what a program writes (created if needed), or
  * NULL if there is none. */
 const char *rc_plat_user_dir(const char *org, const char *app);
+
+/* The game data an app package carries (Android: the APK's assets/data,
+ * unpacked into the app's own storage on the first start and after an
+ * update, with a progress bar): its directory, or false where there is
+ * none. */
+bool rc_plat_bundled_data(char *out, size_t n);
 
 /* Show an error to the user in a message box (nothing on the null
  * platform). */

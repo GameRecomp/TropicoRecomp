@@ -46,3 +46,10 @@ void rc_plat_error(const char *title, const char *message)
     (void)title;
     (void)message;
 }
+
+bool rc_plat_bundled_data(char *out, size_t n)
+{
+    (void)out;
+    (void)n;
+    return false;
+}

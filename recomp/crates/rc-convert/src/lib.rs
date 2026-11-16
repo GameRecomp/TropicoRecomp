@@ -13,6 +13,7 @@
 //! Nothing here touches the file system: inputs are readers and bytes,
 //! outputs a writer, so the crate runs in a browser as it does natively.
 
+pub mod apk;
 pub mod zip;
 
 use std::collections::BTreeSet;
@@ -272,6 +273,8 @@ pub fn compile(
 #[derive(Debug)]
 pub struct Template<'a> {
     pub entries: Vec<zip::StoredEntry<'a>>,
+    /// An Android package (the output is a signed APK, not a zip).
+    pub apk: bool,
     /// The `data/` directory's path in the zip, ending in `/`.
     pub data: String,
     pub targets: Vec<Target>,
@@ -288,15 +291,17 @@ pub fn template(bytes: &[u8]) -> Result<Template<'_>, Error> {
         .iter()
         .find(|e| e.name == format!("{data}targets"))
         .ok_or("shell template: no data/targets")?;
-    let targets = String::from_utf8_lossy(list.data)
+    let targets = String::from_utf8_lossy(&list.data)
         .split_whitespace()
         .map(|t| Target::from_name(t).ok_or_else(|| format!("shell template: target {t}")))
         .collect::<Result<Vec<_>, _>>()?;
     if targets.is_empty() {
         return Err("shell template: no targets".into());
     }
+    let apk = entries.iter().any(|e| e.name == "AndroidManifest.xml");
     Ok(Template {
         entries,
+        apk,
         data,
         targets,
     })
@@ -306,6 +311,9 @@ pub fn template(bytes: &[u8]) -> Result<Template<'_>, Error> {
 struct ZipSink<'a, W: Write> {
     zip: &'a mut zip::ZipWriter<W>,
     prefix: &'a str,
+    align: u32,
+    /// No directory entries (an APK; its index lists the directories).
+    no_dirs: bool,
     progress: &'a mut dyn FnMut(u64),
 }
 
@@ -315,12 +323,17 @@ fn zip_err(e: std::io::Error) -> rc_inno::Error {
 
 impl<W: Write> Sink for ZipSink<'_, W> {
     fn dir(&mut self, path: &Path) -> Result<(), rc_inno::Error> {
+        if self.no_dirs {
+            return Ok(());
+        }
         let name = format!("{}{}/", self.prefix, slashes(path));
         self.zip.dir(&name).map_err(zip_err)
     }
     fn begin(&mut self, path: &Path, _: u64, _: Option<SystemTime>) -> Result<(), rc_inno::Error> {
         let name = format!("{}{}", self.prefix, slashes(path));
-        self.zip.begin(&name, 0o644).map_err(zip_err)
+        self.zip
+            .begin_aligned(&name, 0o644, self.align)
+            .map_err(zip_err)
     }
     fn write(&mut self, data: &[u8]) -> Result<(), rc_inno::Error> {
         (self.progress)(data.len() as u64);
@@ -340,7 +353,11 @@ fn slashes(p: &Path) -> String {
 
 /// Write the build: the template's files, then `data/code-<target>.bin`
 /// for each blob, then the game's files extracted from the installer.
-/// `progress` hears the bytes of game files written.
+/// For an Android template the result is an APK signed with `key`, its
+/// data under `assets/data/` with an index, `files.txt` (a line per file:
+/// its size and path; directories end in `/`), that the app unpacks from
+/// on its first start. `progress` hears the bytes of game
+/// files written.
 #[allow(clippy::too_many_arguments)]
 pub fn package<R: Read + Seek, W: Write>(
     out: W,
@@ -349,32 +366,86 @@ pub fn package<R: Read + Seek, W: Write>(
     inst: &Installer,
     input: &mut R,
     id: &Identified,
+    key: Option<&apk::ApkKey>,
     progress: &mut dyn FnMut(u64),
 ) -> Result<W, Error> {
-    let mut z = zip::ZipWriter::new(out);
+    let io = |e: std::io::Error| e.to_string();
+    if !tpl.apk {
+        let mut z = zip::ZipWriter::new(out);
+        write_contents(&mut z, tpl, blobs, inst, input, id, 1, progress)?;
+        return z.finish().map_err(io);
+    }
+    let key = key.ok_or("an Android package needs a signing key")?;
+    let mut z = zip::ZipWriter::new(apk::Chunked::new(out));
+    write_contents(&mut z, tpl, blobs, inst, input, id, 4, progress)?;
+    // The index the app unpacks from.
+    let mut list = String::new();
+    for (t, blob) in blobs {
+        list.push_str(&format!("{} code-{}.bin\n", blob.len(), t.name()));
+    }
+    for d in &id.plan.dirs {
+        list.push_str(&format!("0 {}/\n", slashes(d)));
+    }
+    for (&loc, paths) in &id.plan.targets {
+        for p in paths {
+            let size = inst.setup.locations[loc as usize].size;
+            list.push_str(&format!("{size} {}\n", slashes(p)));
+        }
+    }
+    z.file_aligned(&format!("{}files.txt", tpl.data), 0o644, list.as_bytes(), 4)
+        .map_err(io)?;
+    apk::finish(z, key).map_err(io)
+}
+
+/// The template's entries, the code and the game's files.
+#[allow(clippy::too_many_arguments)]
+fn write_contents<R: Read + Seek, W: Write>(
+    z: &mut zip::ZipWriter<W>,
+    tpl: &Template<'_>,
+    blobs: &[(Target, Vec<u8>)],
+    inst: &Installer,
+    input: &mut R,
+    id: &Identified,
+    align: u32,
+    progress: &mut dyn FnMut(u64),
+) -> Result<(), Error> {
     let io = |e: std::io::Error| e.to_string();
     for e in &tpl.entries {
-        if e.name == format!("{}targets", tpl.data) {
+        if e.name == format!("{}targets", tpl.data) || (tpl.apk && e.is_dir) {
             continue;
         }
         if e.is_dir {
             z.dir(&e.name).map_err(io)?;
         } else {
-            z.file(&e.name, e.mode, e.data).map_err(io)?;
+            // Native libraries page-aligned, everything else to 4 bytes,
+            // as zipalign does (only for APKs).
+            let a = if align > 1 && e.name.ends_with(".so") {
+                4096
+            } else {
+                align
+            };
+            z.file_aligned(&e.name, e.mode, &e.data, a).map_err(io)?;
         }
     }
     for (t, blob) in blobs {
-        z.file(&format!("{}code-{}.bin", tpl.data, t.name()), 0o644, blob)
-            .map_err(io)?;
+        z.file_aligned(
+            &format!("{}code-{}.bin", tpl.data, t.name()),
+            0o644,
+            blob,
+            align,
+        )
+        .map_err(io)?;
     }
     let mut sink = ZipSink {
-        zip: &mut z,
+        zip: z,
         prefix: &tpl.data,
+        align,
+        no_dirs: tpl.apk,
         progress,
     };
     inst.extract_to(input, &id.plan, &mut sink, &mut |_, _| {})
         .map_err(inno)?;
-    z.finish().map_err(io)
+    Ok(())
 }
 
 /// The target names a template should list for each system.
@@ -383,6 +454,7 @@ pub fn default_targets(system: &str) -> Option<&'static [&'static str]> {
         "windows" => Some(&["x86_64-windows"]),
         "linux" => Some(&["x86_64-sysv"]),
         "macos" => Some(&["arm64-apple", "x86_64-sysv"]),
+        "android" => Some(&["arm64-linux", "x86_64-sysv"]),
         _ => None,
     }
 }
@@ -422,12 +494,27 @@ const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 "#;
 
-/// A shell template for `system` (windows, linux, macos) around the shell
-/// program `shell` (for Linux, an AppImage). CI makes one per system.
+/// A shell template for `system` (windows, linux, macos, android) around
+/// the shell program `shell` (for Linux an AppImage, for Android the
+/// unsigned APK). CI makes one per system.
 pub fn make_template(system: &str, shell: &[u8]) -> Result<Vec<u8>, Error> {
     let targets = default_targets(system).ok_or_else(|| format!("unknown system {system}"))?;
     let io = |e: std::io::Error| e.to_string();
     let mut z = zip::ZipWriter::new(Vec::new());
+    if system == "android" {
+        // The shell is the unsigned APK: its entries, stored, and the
+        // data directory in its assets.
+        for e in zip::read_stored(shell)? {
+            if e.is_dir || e.name.starts_with("META-INF/") {
+                continue;
+            }
+            z.file(&e.name, e.mode, &e.data).map_err(io)?;
+        }
+        z.dir("assets/data/").map_err(io)?;
+        z.file("assets/data/targets", 0o644, targets.join("\n").as_bytes())
+            .map_err(io)?;
+        return z.finish().map_err(io);
+    }
     let (exe, data, readme) = match system {
         "windows" => ("Tropico/Tropico.exe", "Tropico/data/", "Tropico/README.txt"),
         "linux" => (

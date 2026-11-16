@@ -4,6 +4,8 @@
  * texture scaled with letterboxing, and events converted to the frame's
  * coordinates and to Windows virtual keys.
  */
+#include <stdlib.h>
+
 #include <SDL3/SDL.h>
 
 #include "frame.h"
@@ -256,4 +258,165 @@ const char *rc_plat_user_dir(const char *org, const char *app)
 void rc_plat_error(const char *title, const char *message)
 {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message, NULL);
+}
+
+#if defined(SDL_PLATFORM_ANDROID)
+/* A hash of the index, to tell whether the unpacked data is current. */
+static Uint64 fnv1a(const char *p, size_t n)
+{
+    Uint64 h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < n; i++) {
+        h = (h ^ (unsigned char)p[i]) * 0x100000001b3ull;
+    }
+    return h;
+}
+
+/* A bar across a dark screen: `done` of `total`. */
+static void draw_progress(Uint64 done, Uint64 total)
+{
+    enum { W = 640, H = 480, X = 120, Y = 232, BW = 400, BH = 16 };
+    static Uint32 px[W * H];
+    for (int i = 0; i < W * H; i++) {
+        px[i] = 0x00102030;
+    }
+    int fill = total ? (int)((double)done / (double)total * (BW - 4)) : 0;
+    for (int y = Y; y < Y + BH; y++) {
+        for (int x = X; x < X + BW; x++) {
+            bool edge = y < Y + 2 || y >= Y + BH - 2 || x < X + 2 || x >= X + BW - 2;
+            px[y * W + x] = edge ? 0x00a0b4c0 : (x - X - 2 < fill ? 0x002a9fd6 : 0x00182838);
+        }
+    }
+    rc_plat_present(px, W, H, W);
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        if (e.type == SDL_EVENT_QUIT) {
+            exit(0);
+        }
+    }
+}
+
+/* Make every directory on the way to `path` (a file). */
+static void make_parents(char *path)
+{
+    for (char *p = path + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            SDL_CreateDirectory(path);
+            *p = '/';
+        }
+    }
+}
+
+/* Copy every file of the index from the assets into `dest`. */
+static bool unpack(char *list, const char *dest)
+{
+    Uint64 total = 0, done = 0;
+    for (char *l = list; *l;) {
+        total += SDL_strtoull(l, NULL, 10);
+        char *nl = SDL_strchr(l, '\n');
+        if (!nl) {
+            break;
+        }
+        l = nl + 1;
+    }
+    rc_plat_window(640, 480);
+    rc_plat_show(true);
+    draw_progress(0, total);
+    static char buf[1 << 20];
+    Uint64 shown = 0;
+    for (char *l = list; *l;) {
+        char *nl = SDL_strchr(l, '\n');
+        if (nl) {
+            *nl = 0;
+        }
+        char *name = SDL_strchr(l, ' ');
+        if (name) {
+            name++;
+            char src[1024], dst[1200];
+            SDL_snprintf(src, sizeof src, "data/%s", name);
+            SDL_snprintf(dst, sizeof dst, "%s/%s", dest, name);
+            make_parents(dst);
+            size_t len = SDL_strlen(name);
+            if (len > 0 && name[len - 1] == '/') {
+                /* A directory the game expects, maybe empty. */
+                if (nl) {
+                    l = nl + 1;
+                    continue;
+                }
+                break;
+            }
+            SDL_IOStream *in = SDL_IOFromFile(src, "rb");
+            SDL_IOStream *out = in ? SDL_IOFromFile(dst, "wb") : NULL;
+            if (!in || !out) {
+                SDL_Log("unpack %s: %s", name, SDL_GetError());
+                if (in) {
+                    SDL_CloseIO(in);
+                }
+                return false;
+            }
+            size_t n;
+            while ((n = SDL_ReadIO(in, buf, sizeof buf)) > 0) {
+                if (SDL_WriteIO(out, buf, n) != n) {
+                    SDL_CloseIO(in);
+                    SDL_CloseIO(out);
+                    return false;
+                }
+                done += n;
+                if (done - shown >= (8u << 20)) {
+                    shown = done;
+                    draw_progress(done, total);
+                }
+            }
+            SDL_CloseIO(in);
+            if (!SDL_CloseIO(out)) {
+                return false;
+            }
+        }
+        if (!nl) {
+            break;
+        }
+        l = nl + 1;
+    }
+    draw_progress(total, total);
+    return true;
+}
+#endif
+
+bool rc_plat_bundled_data(char *out, size_t n)
+{
+#if defined(SDL_PLATFORM_ANDROID)
+    if (!SDL_WasInit(SDL_INIT_VIDEO) && !rc_plat_init("Tropico")) {
+        return false;
+    }
+    size_t size = 0;
+    char *list = SDL_LoadFile("data/files.txt", &size);
+    const char *base = SDL_GetAndroidInternalStoragePath();
+    if (!list || !base) {
+        SDL_free(list);
+        return false;
+    }
+    char dest[1024], stamp[1100], want[32];
+    SDL_snprintf(dest, sizeof dest, "%s/data", base);
+    SDL_snprintf(stamp, sizeof stamp, "%s/.unpacked", dest);
+    SDL_snprintf(want, sizeof want, "%016llx", (unsigned long long)fnv1a(list, size));
+    size_t have_size = 0;
+    char *have = SDL_LoadFile(stamp, &have_size);
+    bool current = have && have_size == SDL_strlen(want) && SDL_memcmp(have, want, have_size) == 0;
+    SDL_free(have);
+    if (!current) {
+        SDL_RemovePath(stamp);
+        SDL_CreateDirectory(dest);
+        if (!unpack(list, dest) || !SDL_SaveFile(stamp, want, SDL_strlen(want))) {
+            SDL_free(list);
+            return false;
+        }
+    }
+    SDL_free(list);
+    SDL_snprintf(out, n, "%s", dest);
+    return true;
+#else
+    (void)out;
+    (void)n;
+    return false;
+#endif
 }

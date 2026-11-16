@@ -5,6 +5,14 @@
 # tropico1-shell is the same program without lifted code, built always (CI
 # builds it on every system): it runs the native code and game files it
 # finds in data/ beside it, which the converter puts there.
+if(ANDROID)
+    # On Android the shell is libmain.so, which SDL's activity loads and
+    # starts at SDL_main.
+    add_library(main SHARED main.c shell.c)
+    target_compile_definitions(main PRIVATE main=SDL_main)
+    target_link_libraries(main PRIVATE rc_hle rc_runtime)
+    return()
+endif()
 add_executable(tropico1-shell main.c shell.c)
 target_link_libraries(tropico1-shell PRIVATE rc_hle rc_runtime)
 if(MSVC)

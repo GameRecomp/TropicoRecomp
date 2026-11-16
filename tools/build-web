@@ -5,8 +5,9 @@
 #
 #   tools/build-web SITE_DIR [TEMPLATE_DIR]
 #
-# TEMPLATE_DIR holds Tropico-windows.zip, Tropico-linux.zip and
-# Tropico-macos.zip (made by `recomp template`); those present are copied.
+# TEMPLATE_DIR holds Tropico-windows.zip, Tropico-linux.zip,
+# Tropico-macos.zip and Tropico-android.zip (made by `recomp template`);
+# those present are copied.
 # Needs the wasm32-unknown-unknown target and wasm-bindgen 0.2.130.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -20,7 +21,7 @@ wasm-bindgen --target web --no-typescript --out-dir "$site" \
 cp web/index.html web/app.js web/worker.js web/style.css "$site/"
 cp tools/appimage/tropico.svg "$site/tropico.svg"
 if [ -n "$templates" ]; then
-    for s in windows linux macos; do
+    for s in windows linux macos android; do
         [ -f "$templates/Tropico-$s.zip" ] && cp "$templates/Tropico-$s.zip" "$site/templates/"
     done
 fi

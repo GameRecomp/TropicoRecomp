@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tropico Converter</title>
-<meta name="description" content="Turn your own GOG copy of Tropico into a native build for Windows, Linux or macOS, in your browser.">
+<meta name="description" content="Turn your own GOG copy of Tropico into a native build for Windows, Linux, macOS or Android, in your browser.">
 <link rel="icon" href="tropico.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -15,7 +15,7 @@
     <img src="tropico.svg" alt="" width="56" height="56">
     <div>
       <h1>Tropico Converter</h1>
-      <p class="lede">Turns your own GOG copy of <em>Tropico</em> into a build that runs natively on Windows, Linux or macOS.</p>
+      <p class="lede">Turns your own GOG copy of <em>Tropico</em> into a build that runs natively on Windows, Linux, macOS or Android.</p>
     </div>
   </header>
 
@@ -39,12 +39,13 @@
       <label><input type="radio" name="system" value="windows"> Windows <small>64-bit</small></label>
       <label><input type="radio" name="system" value="linux"> Linux <small>x86-64, AppImage</small></label>
       <label><input type="radio" name="system" value="macos"> macOS <small>Apple silicon and Intel</small></label>
+      <label><input type="radio" name="system" value="android"> Android <small>an app (APK), ARM64 and x86-64</small></label>
     </fieldset>
   </section>
 
   <section class="card">
     <h2><span class="step">3</span> Convert</h2>
-    <p>The result is a zip of about 1.3 GiB with the game in it. You choose where it is saved.</p>
+    <p>The result is a zip (for Android an APK) of about 1.3 GiB with the game in it. You choose where it is saved.</p>
     <button id="start" class="primary" type="button" disabled>Convert</button>
   </section>
 

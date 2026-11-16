@@ -16,6 +16,9 @@ rc-x86.workspace = true
 rc-emit-native.workspace = true
 rc-inno.workspace = true
 crc32fast.workspace = true
+sha2.workspace = true
+miniz_oxide = "0.8"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 
 [lints]
 workspace = true

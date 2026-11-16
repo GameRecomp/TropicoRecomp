@@ -137,7 +137,7 @@ int main(int argc, char **argv)
     /* The lifted code: RC_NATIVE, or the data directory's blob when this
      * program has none compiled in (the shell). */
     static char data[RC_PATH_MAX], data_game[RC_PATH_MAX + 8];
-    bool have_data = find_data(data, sizeof data);
+    bool have_data = rc_plat_bundled_data(data, sizeof data) || find_data(data, sizeof data);
     const char *native = getenv("RC_NATIVE");
     if (native && *native) {
         load_native(native);

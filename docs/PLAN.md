@@ -49,7 +49,7 @@ first game carries over to the second.
 | M6 Picture and input | Done: window, DirectDraw software rendering, GDI text, mouse and keyboard on SDL3; the intro movies play, the main menu and the game menu render with their movie backgrounds and respond. Scripted scenarios (`boot`, `menu`, `submenu`, `newgame`) replay exactly on the virtual clock, screenshots included |
 | M7 In game | Started: a scripted run (`newgame`) goes from the main menu through the random map and game settings into a running game on a new island at 1024x768; the simulation runs (letters, the annual report) without traps. Open: ten game years, saving and loading |
 | M8 Sound and video | Mostly done: Miles on `SDL3_mixer` (samples, streams, music); Bink by lifting the game's own `binkw32.dll` with the executable (its threads run as cooperative fibers, its sound goes through our Miles). Open: the audio capture test, a check of sync over a whole movie |
-| M12 Converter | Working end to end on Linux: the page (or `recomp convert`) turns the GOG installer into a zip in about two minutes in Firefox; the Linux AppImage from it reaches the main menu identically to the C build. CI builds the Windows and macOS shells and publishes the site (not yet run). Open: the Windows and macOS shells on real machines; several workers for compiling; Tropico 2 |
+| M12 Converter | Working end to end on Linux: the page (or `recomp convert`) turns the GOG installer into a zip in about two minutes in Firefox; the Linux AppImage from it reaches the main menu identically to the C build. CI builds the Windows and macOS shells and publishes the site (not yet run). The Android APK is made and signed (its signature verifies, checked from scratch); its shell is built by CI only. Open: the Windows, macOS and Android shells on real machines; several workers for compiling; Tropico 2 |
 
 Known issue: `recomp discover` on Tropico 2 (no relocations) does not finish
 in reasonable time; the gap pass has nothing to reject bad decodes with.
@@ -222,10 +222,12 @@ serves only our tools.
 - **Shells**: the runtime, HLE and SDL3 built by CI for each system, with
   no game code; at start they load the blob and the game files that sit
   beside them.
-- **Packaging** per system: Windows, a zip with the shell `.exe` and a
-  folder with the blob and the game files; Linux, an AppImage with the
-  payload after its squashfs; macOS, an unsigned `.app` (arm64 and x86-64)
-  with the payload in its resources.
+- **Packaging** per system: a zip for Windows (the shell `.exe` and a
+  `data` folder with the blob and the game files), Linux (an AppImage and
+  `data`) and macOS (an unsigned `.app`, arm64 and x86-64, with `data` in
+  its resources); for Android an APK (arm64-v8a and x86_64) with the data
+  in its assets, signed with APK Signature Scheme v2 by the converter,
+  which the app unpacks into its storage on the first start.
 - **The page**: `rc-web` (the installer reader, discovery, lifting and the
   native back end in WebAssembly) in Web Workers, with a progress bar per
   step (extracting by bytes, compiling by functions, packaging by bytes),

@@ -19,10 +19,32 @@ const SYSTEMS = {
     after: 'Unzip it and open Tropico.app. It is not signed: the first time, right-click it and choose Open, '
       + 'or allow it under System Settings → Privacy & Security.',
   },
+  android: {
+    label: 'Android',
+    file: 'Tropico.apk',
+    type: { description: 'Android app', accept: { 'application/vnd.android.package-archive': ['.apk'] } },
+    after: 'Copy Tropico.apk to your phone or tablet and open it there to install it (allow installing from '
+      + 'that app when asked). On its first start the game unpacks its files once, which takes a minute.',
+  },
 };
+
+/* The key Android packages are signed with: made once and kept in this
+ * browser, so that a later conversion installs as an update. */
+function apkKey() {
+  const name = 'tropico-apk-signing-key';
+  let hex = null;
+  try { hex = localStorage.getItem(name); } catch (_) { /* storage unavailable */ }
+  if (!hex || hex.length !== 64) {
+    const k = crypto.getRandomValues(new Uint8Array(32));
+    hex = [...k].map((b) => b.toString(16).padStart(2, '0')).join('');
+    try { localStorage.setItem(name, hex); } catch (_) { /* a key for this time only */ }
+  }
+  return new Uint8Array(hex.match(/../g).map((h) => parseInt(h, 16)));
+}
 
 function guessSystem() {
   const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent;
+  if (/android/i.test(p) || /android/i.test(navigator.userAgent)) return 'android';
   if (/win/i.test(p)) return 'windows';
   if (/mac|iphone|ipad/i.test(p)) return 'macos';
   return 'linux';
@@ -64,11 +86,11 @@ function buildStageList() {
 
 /* Where the zip goes: a file the user picked (streamed to disk), or parts
  * kept until the end and offered as a download. */
-async function openOutput(name) {
+async function openOutput(name, type) {
   if (window.showSaveFilePicker) {
     const handle = await window.showSaveFilePicker({
       suggestedName: name,
-      types: [{ description: 'Zip archive', accept: { 'application/zip': ['.zip'] } }],
+      types: [type || { description: 'Zip archive', accept: { 'application/zip': ['.zip'] } }],
     });
     const stream = await handle.createWritable();
     let chain = Promise.resolve();
@@ -81,7 +103,7 @@ async function openOutput(name) {
   const parts = [];
   return {
     write: (chunk) => { parts.push(new Blob([chunk])); return Promise.resolve(); },
-    close: async () => URL.createObjectURL(new Blob(parts, { type: 'application/zip' })),
+    close: async () => URL.createObjectURL(new Blob(parts, { type: type ? Object.keys(type.accept)[0] : 'application/zip' })),
     abort: async () => { parts.length = 0; },
   };
 }
@@ -94,13 +116,14 @@ function showError(text) {
 async function start() {
   if (!file || running) return;
   const system = document.querySelector('input[name=system]:checked').value;
-  const outName = `Tropico-${SYSTEMS[system].label.replace(/\s/g, '')}.zip`;
+  const sys = SYSTEMS[system];
+  const outName = sys.file || `Tropico-${sys.label.replace(/\s/g, '')}.zip`;
   $('error').hidden = true;
   $('result').hidden = true;
 
   let out;
   try {
-    out = await openOutput(outName);
+    out = await openOutput(outName, sys.type);
   } catch (err) {
     if (err && err.name === 'AbortError') return;
     showError(`Cannot write the file: ${err}`);
@@ -191,7 +214,8 @@ async function start() {
     await out.abort();
     finish(false, e.message || 'the converter stopped');
   };
-  worker.postMessage({ file, template }, [template]);
+  const key = system === 'android' ? apkKey() : new Uint8Array(0);
+  worker.postMessage({ file, template, key }, [template]);
 
   function finish(ok, text, url, name) {
     clearInterval(timer);

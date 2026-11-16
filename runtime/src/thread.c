@@ -5,9 +5,10 @@
  *
  * - Windows: fibers.
  * - Linux and other POSIX systems: ucontext.
- * - macOS (or with RC_THREADS_PTHREAD): one POSIX thread per guest thread,
- *   handing a baton (a mutex and a condition variable) to the one that is
- *   to run. macOS has deprecated ucontext.
+ * - macOS and Android (or with RC_THREADS_PTHREAD): one POSIX thread per
+ *   guest thread, handing a baton (a mutex and a condition variable) to the
+ *   one that is to run. macOS has deprecated ucontext; Android's C library
+ *   has none.
  *
  * Under Emscripten there is none yet, and no thread can be started.
  */
@@ -21,7 +22,7 @@
 #define BACKEND_PTHREAD 0
 #define BACKEND_UCONTEXT 0
 #define BACKEND_NONE 1
-#elif defined(__APPLE__) || defined(RC_THREADS_PTHREAD)
+#elif defined(__APPLE__) || defined(__ANDROID__) || defined(RC_THREADS_PTHREAD)
 #define BACKEND_FIBERS 0
 #define BACKEND_PTHREAD 1
 #define BACKEND_UCONTEXT 0

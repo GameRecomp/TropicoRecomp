@@ -54,6 +54,7 @@ hle/                    C: one directory per reimplemented DLL
   msvcrt6/              native versions of statically linked CRT functions
 platform/               C: the SDL3 side (window, input, audio, video, files)
 web/                    the converter page (GitHub Pages): HTML, CSS, the worker
+android/                the Android shell's manifest, activity and icon (tools/build-android)
 games/
   tropico1/             game.toml, overrides, main.c, native/ replacements, tests/
   tropico2/

@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Build the Android shell: an unsigned APK with SDL3, SDL3_ttf, SDL3_mixer
+# and the game program without lifted code (libmain.so) for arm64-v8a and
+# x86_64, SDL's Java activity with ours (android/), the manifest and the
+# icon. The converter adds the game's code and files and signs it.
+#
+#   tools/build-android OUT.apk
+#
+# Needs the Android SDK (ANDROID_HOME: a platform and build-tools) and NDK
+# (ANDROID_NDK_LATEST_HOME or ANDROID_NDK_HOME), a JDK, cmake and zip; CI
+# has them on its Linux runners. Work happens in build/android.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+out=${1:?output apk}
+sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?set ANDROID_HOME to the Android SDK}}
+ndk=${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME to the Android NDK}}
+# shellcheck source=tools/sdl-versions
+. tools/sdl-versions
+api=24
+abis=(arm64-v8a x86_64)
+platform=$(ls -d "$sdk"/platforms/android-* | sort -V | tail -1)
+tools=$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)
+strip=$(ls "$ndk"/toolchains/llvm/prebuilt/*/bin/llvm-strip | head -1)
+work=$PWD/build/android
+mkdir -p "$work/src"
+
+# The library sources, once (SUBMODULES: their bundled dependencies).
+fetch() {
+    local name=$1 repo=$2 tag=$3
+    [ -f "$work/src/$name/.tag-$tag" ] && return 0
+    rm -rf "$work/src/$name"
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$tag" \
+        "https://github.com/libsdl-org/$repo.git" "$work/src/$name"
+    for m in ${SUBMODULES:-}; do
+        git -C "$work/src/$name" submodule --quiet update --init --depth 1 "$m"
+    done
+    touch "$work/src/$name/.tag-$tag"
+}
+fetch sdl SDL "$SDL_TAG"
+SUBMODULES=external/freetype fetch ttf SDL_ttf "$TTF_TAG"
+fetch mixer SDL_mixer "$MIXER_TAG"
+
+rm -rf "$work/apk"
+for abi in "${abis[@]}"; do
+    prefix=$work/prefix-$abi
+    common=("-DCMAKE_TOOLCHAIN_FILE=$ndk/build/cmake/android.toolchain.cmake" "-DANDROID_ABI=$abi"
+            "-DANDROID_PLATFORM=android-$api" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_INSTALL_PREFIX=$prefix"
+            "-DCMAKE_PREFIX_PATH=$prefix" "-DCMAKE_FIND_ROOT_PATH=$prefix")
+    build() {
+        local name=$1
+        shift
+        [ -f "$prefix/.$name" ] && return 0
+        cmake -S "$work/src/$name" -B "$work/$name-$abi" "${common[@]}" "$@" > "$work/$name-$abi.log"
+        cmake --build "$work/$name-$abi" --parallel >> "$work/$name-$abi.log"
+        cmake --install "$work/$name-$abi" >> "$work/$name-$abi.log"
+        touch "$prefix/.$name"
+    }
+    build sdl -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TESTS=OFF -DSDL_TEST_LIBRARY=OFF -DSDL_EXAMPLES=OFF \
+        -DSDL_ANDROID_JAR=OFF
+    build ttf -DBUILD_SHARED_LIBS=ON -DSDLTTF_VENDORED=ON -DSDLTTF_HARFBUZZ=OFF -DSDLTTF_PLUTOSVG=OFF \
+        -DSDLTTF_SAMPLES=OFF
+    build mixer -DBUILD_SHARED_LIBS=ON -DSDLMIXER_VENDORED=ON -DSDLMIXER_EXAMPLES=OFF -DSDLMIXER_TESTS=OFF \
+        -DSDLMIXER_MP3_MPG123=OFF -DSDLMIXER_FLAC=OFF -DSDLMIXER_MOD=OFF -DSDLMIXER_MIDI=OFF \
+        -DSDLMIXER_OPUS=OFF -DSDLMIXER_VORBIS_STB=OFF -DSDLMIXER_VORBIS_VORBISFILE=OFF \
+        -DSDLMIXER_WAVPACK=OFF -DSDLMIXER_GME=OFF
+    cmake -S . -B "$work/rc-$abi" "${common[@]}" -DRC_BUILD_TESTS=OFF \
+        -DTROPICO1_GENERATED="$work/none" > "$work/rc-$abi.log"
+    grep -q "platform: SDL3_mixer" "$work/rc-$abi.log" \
+        || { echo "build-android: SDL3 was not found for $abi" >&2; exit 1; }
+    cmake --build "$work/rc-$abi" --target main --parallel
+    mkdir -p "$work/apk/lib/$abi"
+    for l in "$prefix"/lib/libSDL3.so "$prefix"/lib/libSDL3_ttf.so "$prefix"/lib/libSDL3_mixer.so \
+             "$work/rc-$abi/games/tropico1/libmain.so"; do
+        "$strip" -o "$work/apk/lib/$abi/$(basename "$l")" "$l"
+    done
+done
+
+# SDL's Java activity and ours, to dex.
+rm -rf "$work/classes" "$work/dex"
+mkdir -p "$work/classes" "$work/dex"
+javac --release 11 -nowarn -encoding UTF-8 -classpath "$platform/android.jar" -d "$work/classes" \
+    $(find "$work/src/sdl/android-project/app/src/main/java" android/java -name '*.java')
+"$tools/d8" --release --min-api "$api" --lib "$platform/android.jar" --output "$work/dex" \
+    $(find "$work/classes" -name '*.class')
+
+# Manifest and resources, then the code and libraries, stored.
+"$tools/aapt2" compile --dir android/res -o "$work/res.zip"
+"$tools/aapt2" link -o "$work/base.apk" -I "$platform/android.jar" --manifest android/AndroidManifest.xml \
+    --min-sdk-version "$api" --target-sdk-version 34 "$work/res.zip"
+(cd "$work/dex" && zip -q -0 "$work/base.apk" classes.dex)
+(cd "$work/apk" && zip -q -0 -r "$work/base.apk" lib)
+mkdir -p "$(dirname "$out")"
+cp "$work/base.apk" "$out"
+echo "build-android: $out ($(du -h "$out" | cut -f1))"

@@ -12,9 +12,8 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 out=${1:?output file}
 
-SDL_TAG=release-3.4.20
-TTF_TAG=release-3.2.2
-MIXER_TAG=release-3.2.4
+# shellcheck source=tools/sdl-versions
+. tools/sdl-versions
 
 work=build/shell
 prefix=$PWD/$work/prefix

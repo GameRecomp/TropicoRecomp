@@ -30,27 +30,28 @@ static const char *const dirs[] = {
     "/Library/Fonts",
     "/System/Library/Fonts/Supplemental",
     "C:/Windows/Fonts",
+    "/system/fonts",
 };
 
 typedef struct family {
     const char *face;            /* lower case */
-    const char *files[3][4];     /* regular, bold, italic: candidates */
+    const char *files[3][6];     /* regular, bold, italic: candidates */
 } family;
 
 static const family families[] = {
     {"times new roman",
-     {{"times.ttf", "Times New Roman.ttf", "LiberationSerif-Regular.ttf", "DejaVuSerif.ttf"},
-      {"timesbd.ttf", "Times New Roman Bold.ttf", "LiberationSerif-Bold.ttf", "DejaVuSerif-Bold.ttf"},
-      {"timesi.ttf", "Times New Roman Italic.ttf", "LiberationSerif-Italic.ttf", "DejaVuSerif-Italic.ttf"}}},
+     {{"times.ttf", "Times New Roman.ttf", "LiberationSerif-Regular.ttf", "DejaVuSerif.ttf", "NotoSerif-Regular.ttf"},
+      {"timesbd.ttf", "Times New Roman Bold.ttf", "LiberationSerif-Bold.ttf", "DejaVuSerif-Bold.ttf", "NotoSerif-Bold.ttf", "NotoSerif-Regular.ttf"},
+      {"timesi.ttf", "Times New Roman Italic.ttf", "LiberationSerif-Italic.ttf", "DejaVuSerif-Italic.ttf", "NotoSerif-Italic.ttf", "NotoSerif-Regular.ttf"}}},
     {"courier new",
-     {{"cour.ttf", "Courier New.ttf", "LiberationMono-Regular.ttf", "DejaVuSansMono.ttf"},
-      {"courbd.ttf", "Courier New Bold.ttf", "LiberationMono-Bold.ttf", "DejaVuSansMono-Bold.ttf"},
-      {"couri.ttf", "Courier New Italic.ttf", "LiberationMono-Italic.ttf", "DejaVuSansMono-Oblique.ttf"}}},
+     {{"cour.ttf", "Courier New.ttf", "LiberationMono-Regular.ttf", "DejaVuSansMono.ttf", "DroidSansMono.ttf"},
+      {"courbd.ttf", "Courier New Bold.ttf", "LiberationMono-Bold.ttf", "DejaVuSansMono-Bold.ttf", "DroidSansMono.ttf"},
+      {"couri.ttf", "Courier New Italic.ttf", "LiberationMono-Italic.ttf", "DejaVuSansMono-Oblique.ttf", "DroidSansMono.ttf"}}},
     /* Everything else: a sans serif like Arial. */
     {"arial",
-     {{"arial.ttf", "Arial.ttf", "LiberationSans-Regular.ttf", "DejaVuSans.ttf"},
-      {"arialbd.ttf", "Arial Bold.ttf", "LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf"},
-      {"ariali.ttf", "Arial Italic.ttf", "LiberationSans-Italic.ttf", "DejaVuSans-Oblique.ttf"}}},
+     {{"arial.ttf", "Arial.ttf", "LiberationSans-Regular.ttf", "DejaVuSans.ttf", "Roboto-Regular.ttf"},
+      {"arialbd.ttf", "Arial Bold.ttf", "LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf", "Roboto-Bold.ttf", "Roboto-Regular.ttf"},
+      {"ariali.ttf", "Arial Italic.ttf", "LiberationSans-Italic.ttf", "DejaVuSans-Oblique.ttf", "Roboto-Italic.ttf", "Roboto-Regular.ttf"}}},
 };
 
 static const family *family_of(const char *face)
@@ -77,7 +78,7 @@ static TTF_Font *open_file(const family *fam, int style, float size)
         if (!dir || !*dir) {
             continue;
         }
-        for (int k = 0; k < 4; k++) {
+        for (int k = 0; k < 6 && fam->files[style][k]; k++) {
             char path[512];
             snprintf(path, sizeof path, "%s/%s", dir, fam->files[style][k]);
             TTF_Font *f = TTF_OpenFont(path, size);

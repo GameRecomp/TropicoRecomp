@@ -77,10 +77,16 @@ enum Cmd {
         /// The shell template zip for the system.
         #[arg(long)]
         template: PathBuf,
-        /// The zip to write.
+        /// The zip (or, for Android, the APK) to write.
         #[arg(short, long)]
         out: PathBuf,
+        /// For Android: the APK signing key (32 bytes), made if missing.
+        /// Use the same key again so that a new APK installs as an update.
+        #[arg(long)]
+        apk_key: Option<PathBuf>,
     },
+    /// Check an APK's v2 signature, as Android does on installing it.
+    VerifyApk { apk: PathBuf },
     /// Make a shell template zip for a system (windows, linux, macos) from
     /// a built shell (for Linux, an AppImage).
     Template {
@@ -138,7 +144,12 @@ fn main() -> ExitCode {
             installer,
             template,
             out,
-        } => convert(&installer, &template, &out),
+            apk_key,
+        } => convert(&installer, &template, &out, apk_key.as_deref()),
+        Cmd::VerifyApk { apk } => fs::File::open(&apk)
+            .map_err(|e| format!("{}: {e}", apk.display()))
+            .and_then(|mut f| rc_convert::apk::verify(&mut f))
+            .map(|()| eprintln!("{}: the v2 signature verifies", apk.display())),
         Cmd::Template { system, shell, out } => {
             let shell = read(&shell);
             shell.and_then(|b| {
@@ -164,11 +175,27 @@ fn main() -> ExitCode {
 
 type Result<T> = std::result::Result<T, String>;
 
-fn convert(installer: &Path, template: &Path, out: &Path) -> Result<()> {
+/// The APK signing key in `path`, made from random bytes if missing.
+fn apk_key(path: &Path) -> Result<rc_convert::apk::ApkKey> {
+    if !path.exists() {
+        let mut k = [0u8; 32];
+        getrandom::fill(&mut k).map_err(|e| format!("no random numbers: {e}"))?;
+        fs::write(path, k).map_err(|e| format!("{}: {e}", path.display()))?;
+        eprintln!("made a new APK signing key in {}", path.display());
+    }
+    rc_convert::apk::ApkKey::from_bytes(&read(path)?)
+}
+
+fn convert(installer: &Path, template: &Path, out: &Path, key: Option<&Path>) -> Result<()> {
     use std::io::Write as _;
     let t0 = std::time::Instant::now();
     let tbytes = read(template)?;
     let tpl = rc_convert::template(&tbytes)?;
+    let key = match (tpl.apk, key) {
+        (true, Some(k)) => Some(apk_key(k)?),
+        (true, None) => return Err("an Android template needs --apk-key FILE".into()),
+        (false, _) => None,
+    };
     let mut input =
         fs::File::open(installer).map_err(|e| format!("{}: {e}", installer.display()))?;
     let inst = rc_inno::Installer::from_reader(&mut input)
@@ -209,6 +236,7 @@ fn convert(installer: &Path, template: &Path, out: &Path) -> Result<()> {
         &inst,
         &mut input,
         &id,
+        key.as_ref(),
         &mut |n| {
             done += n;
             let pct = (done * 100 / total) as u32;
