@@ -61,6 +61,7 @@ points = [
     0x0049179e, # resolution, vtext: the options book's tab labels are drawn
     0x00491127, # fullscreen: the options page has read the windowed flag
     0x0047c375, # fullscreen: the start-up reads the windowed flag
+    0x00503a11, # textedit: a text field's loop has read an event
 ]
 operands = [
     # resolution: the code that finds a mode's slot compares against slot 4

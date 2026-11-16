@@ -31,6 +31,10 @@ void tropico1_patch_vtext(int w, int h);
  * patch wraps too. */
 void tropico1_patch_fullscreen(void);
 
+/* patch_textedit.c: a click ends the editing of a text field (a saved
+ * game's name) and reaches the dialog, instead of being ignored. */
+void tropico1_patch_textedit(void);
+
 /* patch_art.c: the interface art for a resolution the game has none for
  * (0 x 0: remove what was made for one before). */
 void tropico1_patch_art(int w, int h);
