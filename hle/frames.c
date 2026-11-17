@@ -8,6 +8,8 @@
  *   RC_INPUT=path              scripted input, keyed to frames:
  *       FRAME move X Y         the mouse moves to (X, Y)
  *       FRAME down|up BUTTON   a mouse button (1 left, 2 right, 3 middle)
+ *       FRAME wheel N          the wheel turns N notches (positive away
+ *                              from the user) where the pointer is
  *       FRAME key|keyup VK     a key, by Windows virtual-key code
  *       FRAME area W H         the window becomes W x H (rc_plat_area_set)
  *       FRAME touch|pen|mouse  what the pointer events from here on come
@@ -78,6 +80,15 @@ static void run_script(unsigned frame)
             e.type = RC_EV_MOUSE_BUTTON;
             e.button = (int)a;
             e.down = what[0] == 'd';
+            e.x = x;
+            e.y = y;
+        } else if (!strcmp(what, "wheel")) {
+            int x = px, y = py;
+            if (!moved) {
+                rc_input_mouse(&x, &y);
+            }
+            e.type = RC_EV_WHEEL;
+            e.delta = (int)a * 120;
             e.x = x;
             e.y = y;
         } else if (!strcmp(what, "key") || !strcmp(what, "keyup")) {

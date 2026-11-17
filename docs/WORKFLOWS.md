@@ -88,7 +88,10 @@ it in slot 4, with art made for it), or `window` to follow the window's
 size (the default; scripted runs use `off`). The environment variables
 `RC_SCALE`, `RC_PIXELS`, `RC_FULLSCREEN` and `RC_RESOLUTION` override it; in
 a scripted run `FRAME area W H` sets the window's size. The browser player
-has the same choices in its bar.
+has the same choices in its bar. On Android the game always fills the
+screen, in landscape either way round. Pinching zooms (it turns the wheel,
+which both games zoom with), and the wheel counts whole notches, so a
+smooth wheel's fractions (Wayland) add up to them.
 
 ### Systems that are on and off
 

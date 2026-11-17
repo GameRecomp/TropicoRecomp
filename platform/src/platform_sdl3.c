@@ -4,6 +4,15 @@
  * texture scaled as the display settings say (as large as fits, or by a
  * whole number; sharp or smooth), and events converted to the frame's
  * coordinates and to Windows virtual keys. Alt+Enter toggles full screen.
+ * On Android the window is always the whole screen, in landscape either
+ * way round.
+ *
+ * The wheel is given in whole notches (a smooth wheel, as on Wayland, in
+ * fractions that add up to them). A finger's press is held back until it
+ * moves, stays down for a moment or lifts, so that a second finger can
+ * still make the two a pinch: the press is then dropped, and the pinch
+ * turns the wheel (both games zoom with it) at the point between the
+ * fingers.
  *
  * In a browser the window is the page's canvas at the frame's own size,
  * and the page scales it (web/play.js).
@@ -45,6 +54,12 @@ bool rc_plat_init(const char *title)
     /* SIGINT and SIGTERM end the program as usual: SDL would turn them into
      * a quit message, which a program busy elsewhere never reads. */
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+#if defined(SDL_PLATFORM_ANDROID)
+    /* Landscape either way round: SDL would allow portrait too for a
+     * resizable window. */
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+    display.fullscreen = true;
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         SDL_Log("SDL_Init: %s", SDL_GetError());
         return false;
@@ -129,6 +144,9 @@ void rc_plat_display(const rc_display *d)
 #endif
     bool resize = d->scale != display.scale || d->fullscreen != display.fullscreen;
     display = *d;
+#if defined(SDL_PLATFORM_ANDROID)
+    display.fullscreen = true; /* the system bars hidden, always */
+#endif
     if (display.scale < 0 || display.scale > 8) {
         display.scale = 0;
     }
@@ -207,6 +225,9 @@ bool rc_plat_window(int width, int height)
 #else
         int scale = fitting_scale(display.scale, width, height);
         SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
+#endif
+#if defined(SDL_PLATFORM_ANDROID)
+        flags |= SDL_WINDOW_FULLSCREEN;
 #endif
         if (!SDL_CreateWindowAndRenderer(full_title(), width * scale, height * scale, flags, &window, &renderer)) {
             SDL_Log("SDL_CreateWindowAndRenderer: %s", SDL_GetError());
@@ -499,7 +520,147 @@ static rc_event_source source_of(SDL_MouseID which)
     return which == SDL_TOUCH_MOUSEID ? RC_SRC_TOUCH : which == SDL_PEN_MOUSEID ? RC_SRC_PEN : RC_SRC_MOUSE;
 }
 
-bool rc_plat_poll(rc_event *e)
+/* ---- touch: a press held back, and pinching ---- */
+
+/* A finger's press waits this long, or this far (frame pixels), for a
+ * second finger; a pinch turns the wheel a notch per this much scale. */
+#define TOUCH_WAIT_MS 150
+#define TOUCH_SLOP 12
+#define PINCH_STEP 1.25f
+#define FINGERS 10
+
+static struct {
+    SDL_FingerID id;
+    float x, y;
+} finger[FINGERS];
+static int fingers;            /* down now */
+static bool held;              /* a finger's press, not yet given */
+static rc_event held_press;
+static Uint64 held_at;
+static bool pressed;           /* a finger's press given, not yet its release */
+static bool pinching;          /* until the last finger is up */
+static float pinch_scale = 1;  /* since the last notch */
+static float last_x, last_y;   /* the pointer, as last seen */
+
+/* Events to give before the next ones from SDL. */
+static rc_event queued[8];
+static unsigned qhead, qtail;
+
+static void queue(const rc_event *e)
+{
+    if (qtail - qhead < SDL_arraysize(queued)) {
+        queued[qtail++ % SDL_arraysize(queued)] = *e;
+    }
+}
+
+static void give_held(void)
+{
+    if (held) {
+        held = false;
+        pressed = true;
+        queue(&held_press);
+    }
+}
+
+static void finger_set(SDL_FingerID id, float x, float y, bool down)
+{
+    int i = 0;
+    while (i < fingers && finger[i].id != id) {
+        i++;
+    }
+    if (!down) {
+        if (i < fingers) {
+            finger[i] = finger[--fingers];
+        }
+        return;
+    }
+    if (i == fingers) {
+        if (fingers == FINGERS) {
+            return;
+        }
+        fingers++;
+    }
+    finger[i].id = id;
+    finger[i].x = x;
+    finger[i].y = y;
+}
+
+/* A second finger: the first one's press, if still held, is no click. */
+static void start_pinch(void)
+{
+    held = false;
+    pinching = true;
+    pinch_scale = 1;
+}
+
+/* The wheel's notches for a pinch's scale, at the point between the
+ * fingers (or the pointer, on a touchpad). */
+static void pinch_by(float scale)
+{
+    if (!(scale > 0.0f)) {
+        return;
+    }
+    pinch_scale *= scale;
+    float x = last_x, y = last_y;
+    if (fingers >= 2) {
+        x = (finger[0].x + finger[1].x) / 2;
+        y = (finger[0].y + finger[1].y) / 2;
+    }
+    for (int n = 0; n < 4 && (pinch_scale >= PINCH_STEP || pinch_scale <= 1 / PINCH_STEP); n++) {
+        rc_event w = {0};
+        w.type = RC_EV_WHEEL;
+        w.source = RC_SRC_TOUCH;
+        w.x = (int)x;
+        w.y = (int)y;
+        w.delta = pinch_scale > 1 ? 120 : -120;
+        pinch_scale = pinch_scale > 1 ? pinch_scale / PINCH_STEP : pinch_scale * PINCH_STEP;
+        queue(&w);
+    }
+    if (pinch_scale >= PINCH_STEP || pinch_scale <= 1 / PINCH_STEP) {
+        pinch_scale = 1; /* more than a few notches at once: the rest is dropped */
+    }
+}
+
+/* What becomes of a pointer event made from a finger: false if dropped
+ * (or kept for later). */
+static bool touch_pointer(const rc_event *e)
+{
+    if (e->type == RC_EV_MOUSE_BUTTON && e->button == 1) {
+        if (e->down) {
+            if (pinching || fingers >= 2) {
+                return false;
+            }
+            held = true;
+            held_press = *e;
+            held_at = SDL_GetTicks();
+            return false;
+        }
+        give_held(); /* a tap: the press, then this release */
+        if (!pressed) {
+            return false;
+        }
+        pressed = false;
+        queue(e);
+        return false;
+    }
+    if (e->type == RC_EV_MOUSE_MOVE) {
+        if (pinching) {
+            return false;
+        }
+        if (held) {
+            int dx = e->x - held_press.x, dy = e->y - held_press.y;
+            if (dx * dx + dy * dy <= TOUCH_SLOP * TOUCH_SLOP) {
+                return false; /* the pointer stays at the press */
+            }
+            give_held();
+            queue(e);
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool poll_sdl(rc_event *e)
 {
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
@@ -508,6 +669,40 @@ bool rc_plat_poll(rc_event *e)
         }
         SDL_zerop(e);
         switch (ev.type) {
+        case SDL_EVENT_FINGER_DOWN:
+        case SDL_EVENT_FINGER_MOTION:
+            if (ev.tfinger.touchID == SDL_MOUSE_TOUCHID) {
+                continue; /* SDL's touches from the mouse */
+            }
+            finger_set(ev.tfinger.fingerID, ev.tfinger.x, ev.tfinger.y, true);
+            if (ev.type == SDL_EVENT_FINGER_DOWN && fingers >= 2 && !pinching) {
+                start_pinch();
+            }
+            continue;
+        case SDL_EVENT_FINGER_UP:
+        case SDL_EVENT_FINGER_CANCELED:
+            if (ev.tfinger.touchID == SDL_MOUSE_TOUCHID) {
+                continue;
+            }
+            finger_set(ev.tfinger.fingerID, 0, 0, false);
+            if (fingers == 0) {
+                pinching = false;
+            }
+            continue;
+        case SDL_EVENT_PINCH_BEGIN:
+            start_pinch();
+            continue;
+        case SDL_EVENT_PINCH_UPDATE:
+            pinch_by(ev.pinch.scale);
+            if (qhead != qtail) {
+                return false; /* the notches are queued */
+            }
+            continue;
+        case SDL_EVENT_PINCH_END:
+            if (fingers == 0) {
+                pinching = false;
+            }
+            continue;
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             e->type = RC_EV_QUIT;
@@ -517,6 +712,14 @@ bool rc_plat_poll(rc_event *e)
             e->source = source_of(ev.motion.which);
             e->x = (int)ev.motion.x;
             e->y = (int)ev.motion.y;
+            last_x = ev.motion.x;
+            last_y = ev.motion.y;
+            if (e->source == RC_SRC_TOUCH && !touch_pointer(e)) {
+                if (qhead != qtail) {
+                    return false;
+                }
+                continue;
+            }
             return true;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -526,13 +729,24 @@ bool rc_plat_poll(rc_event *e)
             e->y = (int)ev.button.y;
             e->button = ev.button.button == SDL_BUTTON_LEFT ? 1 : ev.button.button == SDL_BUTTON_RIGHT ? 2 : 3;
             e->down = ev.button.down;
+            if (e->source == RC_SRC_TOUCH && !touch_pointer(e)) {
+                if (qhead != qtail) {
+                    return false;
+                }
+                continue;
+            }
             return true;
         case SDL_EVENT_MOUSE_WHEEL:
             e->type = RC_EV_WHEEL;
             e->source = source_of(ev.wheel.which);
             e->x = (int)ev.wheel.mouse_x;
             e->y = (int)ev.wheel.mouse_y;
-            e->delta = (int)(ev.wheel.y * 120.0f);
+            /* Whole notches: a smooth wheel (Wayland) sends fractions,
+             * which SDL adds up; the games count notches. */
+            if (ev.wheel.integer_y == 0) {
+                continue;
+            }
+            e->delta = ev.wheel.integer_y * 120;
             return true;
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP:
@@ -564,6 +778,24 @@ bool rc_plat_poll(rc_event *e)
         default:
             break;
         }
+    }
+    return false;
+}
+
+bool rc_plat_poll(rc_event *e)
+{
+    /* A press held long enough without a second finger is the game's. */
+    if (held && SDL_GetTicks() - held_at >= TOUCH_WAIT_MS) {
+        give_held();
+    }
+    if (qhead == qtail) {
+        if (poll_sdl(e)) {
+            return true;
+        }
+    }
+    if (qhead != qtail) {
+        *e = queued[qhead++ % SDL_arraysize(queued)];
+        return true;
     }
     return false;
 }
