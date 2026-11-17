@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
-# The converter site: the game shells for Windows, Linux, macOS and Android
-# and the web shell for playing in the browser (no game code in any of them),
+# The converter site: the game shells of Tropico and Tropico 2 for Windows,
+# Linux, macOS and Android and their web shells for playing in the browser
+# (no game code in any of them),
 # for the systems platforms.json has on, the converter compiled to
 # WebAssembly, and the pages,
 # published to GitHub Pages. Pages must be enabled with "GitHub Actions" as
@@ -58,12 +59,16 @@ jobs:
         with:
           name: icons
           path: build/icons
-      - run: tools/build-shell build/out/tropico1-shell
-      - run: tools/make-appimage build/out/tropico1-shell build/out/Tropico.AppImage build/icons
+      - run: tools/build-shell build/out/tropico1-shell tropico1
+      - run: tools/make-appimage build/out/tropico1-shell build/out/Tropico.AppImage build/icons tropico1
+      - run: tools/build-shell build/out/tropico2-shell tropico2
+      - run: tools/make-appimage build/out/tropico2-shell build/out/Tropico2.AppImage build/icons tropico2
       - uses: actions/upload-artifact@v4
         with:
           name: shell-linux
-          path: build/out/Tropico.AppImage
+          path: |
+            build/out/Tropico.AppImage
+            build/out/Tropico2.AppImage
 
   shell-macos:
     needs: platforms
@@ -71,11 +76,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: tools/build-shell build/out/Tropico
+      - run: tools/build-shell build/out/Tropico tropico1
+      - run: tools/build-shell build/out/Tropico2 tropico2
       - uses: actions/upload-artifact@v4
         with:
           name: shell-macos
-          path: build/out/Tropico
+          path: |
+            build/out/Tropico
+            build/out/Tropico2
 
   shell-windows:
     needs: [platforms, icons]
@@ -91,11 +99,14 @@ jobs:
         with:
           name: icons
           path: build/icons
-      - run: tools/build-shell build/out/Tropico.exe
+      - run: tools/build-shell build/out/Tropico.exe tropico1
+      - run: tools/build-shell build/out/Tropico2.exe tropico2
       - uses: actions/upload-artifact@v4
         with:
           name: shell-windows
-          path: build/out/Tropico.exe
+          path: |
+            build/out/Tropico.exe
+            build/out/Tropico2.exe
 
   shell-android:
     needs: platforms
@@ -109,11 +120,14 @@ jobs:
           java-version: '17'
       # The runner has the Android SDK (ANDROID_HOME) and NDK
       # (ANDROID_NDK_LATEST_HOME).
-      - run: tools/build-android build/out/Tropico-shell.apk
+      - run: tools/build-android build/out/Tropico-shell.apk tropico1
+      - run: tools/build-android build/out/Tropico2-shell.apk tropico2
       - uses: actions/upload-artifact@v4
         with:
           name: shell-android
-          path: build/out/Tropico-shell.apk
+          path: |
+            build/out/Tropico-shell.apk
+            build/out/Tropico2-shell.apk
 
   shell-web:
     needs: platforms
@@ -131,7 +145,8 @@ jobs:
           "$RUNNER_TEMP/emsdk/emsdk" activate 7.0.0
       - run: |
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
-          tools/build-web-shell build/out/web
+          tools/build-web-shell build/out/web tropico1
+          tools/build-web-shell build/out/web tropico2
       - uses: actions/upload-artifact@v4
         with:
           name: shell-web
@@ -156,20 +171,25 @@ jobs:
           cargo build --release --manifest-path recomp/Cargo.toml -p rc-cli
           mkdir -p build/templates
           on() { jq -e ".$1" platforms.json > /dev/null; }
-          t() { recomp/target/release/recomp template --system "$@"; }
-          if on linux; then
-            t linux --shell build/shells/shell-linux/Tropico.AppImage -o build/templates/Tropico-linux.zip
-          fi
-          if on macos; then
-            t macos --shell build/shells/shell-macos/Tropico -o build/templates/Tropico-macos.zip \
-              --version "$(tools/version)" --icon build/shells/icons/tropico.icns
-          fi
-          if on windows; then
-            t windows --shell build/shells/shell-windows/Tropico.exe -o build/templates/Tropico-windows.zip
-          fi
-          if on android; then
-            t android --shell build/shells/shell-android/Tropico-shell.apk -o build/templates/Tropico-android.zip
-          fi
+          # Each game's template per system: Tropico-<system>.zip,
+          # Tropico2-<system>.zip.
+          for g in tropico1 tropico2; do
+            . tools/game-info "$g"
+            t() { recomp/target/release/recomp template --game "$g" --system "$@"; }
+            if on linux; then
+              t linux --shell "build/shells/shell-linux/$GAME_STEM.AppImage" -o "build/templates/$GAME_STEM-linux.zip"
+            fi
+            if on macos; then
+              t macos --shell "build/shells/shell-macos/$GAME_STEM" -o "build/templates/$GAME_STEM-macos.zip" \
+                --version "$(tools/version)" --icon build/shells/icons/tropico.icns
+            fi
+            if on windows; then
+              t windows --shell "build/shells/shell-windows/$GAME_STEM.exe" -o "build/templates/$GAME_STEM-windows.zip"
+            fi
+            if on android; then
+              t android --shell "build/shells/shell-android/$GAME_STEM-shell.apk" -o "build/templates/$GAME_STEM-android.zip"
+            fi
+          done
       - run: tools/build-web build/site build/templates build/shells/shell-web
       - uses: actions/upload-pages-artifact@v3
         with:

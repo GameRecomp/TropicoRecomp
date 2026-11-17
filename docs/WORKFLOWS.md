@@ -303,9 +303,11 @@ release archive, changelog.
 
 ## 11a. The converter
 
-The converter page turns a GOG installer into a zip for Windows, Linux or
-macOS, or an APK for Android (M12). CI builds and publishes it (`.github/workflows/converter.yml`
-to GitHub Pages); locally:
+The converter page turns a GOG installer of Tropico or of Tropico 2 (a tab
+for each) into a zip for Windows, Linux or macOS, or an APK for Android
+(M12). CI builds and publishes it (`.github/workflows/converter.yml` to
+GitHub Pages); locally (the game argument of the scripts is `tropico1`, the
+default, or `tropico2`; their names come from `tools/game-info`):
 
 ```sh
 tools/build-shell build/shell/out/tropico1-shell        # the shell, SDL linked in
@@ -315,10 +317,24 @@ recomp template --system linux --shell build/shell/out/Tropico.AppImage \
 recomp convert orig/setup_tropico_2.1.0.14.exe \
     --template build/templates/Tropico-linux.zip -o build/Tropico-linux.zip
 tools/build-web build/site build/templates               # the page, for a local server
+
+# Tropico 2: the same with its shell and names
+tools/build-shell build/shell/out/tropico2-shell tropico2
+tools/make-appimage build/shell/out/tropico2-shell build/shell/out/Tropico2.AppImage build/icons tropico2
+recomp template --game tropico2 --system linux --shell build/shell/out/Tropico2.AppImage \
+    -o build/templates/Tropico2-linux.zip
 ```
 
-Android: `tools/build-android build/android/Tropico-shell.apk` builds the
-shell APK (it needs the Android SDK and NDK and a JDK; CI has them), and
+Each game has its own templates (`Tropico-<system>.zip`,
+`Tropico2-<system>.zip`) and web shell (`player/tropico.js`,
+`player/tropico2.js`, from `tools/build-web-shell OUT GAME`). In the browser
+each game is stored under its id (`tropico1/`, `tropico2/`) and keeps its
+saved games apart (IndexedDB under `/user` and `/user-tropico2`); the page
+and the player take the game from `?game=`.
+
+Android: `tools/build-android build/android/Tropico-shell.apk [GAME]` builds
+the shell APK (each game its own package: `io.github.gamerecomp.tropico1recomp`,
+`...tropico2recomp`) (it needs the Android SDK and NDK and a JDK; CI has them), and
 `recomp template --system android` makes its template. `recomp convert`
 then writes an APK signed with the converter's built-in key (the same for
 everyone, so that any converted APK installs over an earlier one;
@@ -330,7 +346,8 @@ signature as Android does.
 - The shell is the game program without lifted code. It runs the native
   code and game files in `data/` beside it (on Android: in the APK's
   `assets/data`, unpacked into the app's storage on the first start);
-  `RC_NATIVE=blob` and `TROPICO1_DATA=dir` point it elsewhere for testing.
+  `RC_NATIVE=blob` and `TROPICO1_DATA=dir` (`TROPICO2_DATA`) point it
+  elsewhere for testing.
 - The site serves only our tools and the shells, which contain no game
   code. A converted build is made in the user's browser and saved on their
   machine; it is never uploaded or offered for download.

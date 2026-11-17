@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Build the game shell (tropico1-shell: the game program without lifted
-# code) as one self-contained program, with SDL3, SDL3_ttf and SDL3_mixer
+# Build a game's shell (tropico1-shell, tropico2-shell: the game program
+# without lifted code) as one self-contained program, with SDL3, SDL3_ttf and SDL3_mixer
 # built from their releases and linked statically. CI runs this on Linux,
 # macOS (arm64 and x86-64 in one binary) and Windows.
 #
-#   tools/build-shell OUT_FILE
+#   tools/build-shell OUT_FILE [GAME]
+#
+# GAME is tropico1 (the default) or tropico2.
 #
 # Work happens in build/shell; the libraries are built once and reused.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 out=${1:?output file}
+game=${2:-tropico1}
+. tools/game-info "$game"
 
 # shellcheck source=tools/sdl-versions
 . tools/sdl-versions
@@ -54,12 +58,13 @@ lib mixer SDL_mixer "$MIXER_TAG" -DSDLMIXER_VENDORED=ON -DSDLMIXER_EXAMPLES=OFF 
     -DSDLMIXER_WAVPACK=OFF -DSDLMIXER_GME=OFF
 
 cmake -S . -B "$work/rc" "${common[@]}" -DRC_BUILD_TESTS=OFF -DTROPICO1_GENERATED="$PWD/$work/none" \
+    -DTROPICO2_GENERATED="$PWD/$work/none" \
     | tee "$work/rc.log" | grep -E "^-- platform" || true
 grep -q "platform: SDL3" "$work/rc.log" || { echo "build-shell: SDL3 was not found" >&2; exit 1; }
 grep -q "platform: SDL3_mixer" "$work/rc.log" || { echo "build-shell: SDL3_mixer was not found" >&2; exit 1; }
-cmake --build "$work/rc" --config Release --target tropico1-shell --parallel
-for f in "$work/rc/games/tropico1/tropico1-shell" "$work/rc/games/tropico1/Release/tropico1-shell.exe" \
-         "$work/rc/games/tropico1/tropico1-shell.exe"; do
+cmake --build "$work/rc" --config Release --target "$game-shell" --parallel
+for f in "$work/rc/games/$game/$game-shell" "$work/rc/games/$game/Release/$game-shell.exe" \
+         "$work/rc/games/$game/$game-shell.exe"; do
     if [ -f "$f" ]; then
         mkdir -p "$(dirname "$out")"
         cp "$f" "$out"

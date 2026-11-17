@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# What the build scripts need to know about a game, sourced:
+#
+#   . tools/game-info GAME
+#
+# sets GAME_NAME (shown), GAME_STEM (file and folder names), GAME_APP_ID
+# (desktop and macOS), GAME_ANDROID_ID (the Android package), GAME_WEB (the
+# web shell's file name), GAME_SUMMARY, GAME_DESCRIPTION and GAME_KEYWORDS.
+case "${1:-tropico1}" in
+    tropico1)
+        GAME_NAME="Tropico"
+        GAME_STEM=Tropico
+        GAME_APP_ID=io.github.gamerecomp.Tropico1Recomp
+        GAME_ANDROID_ID=io.github.gamerecomp.tropico1recomp
+        GAME_WEB=tropico
+        GAME_SUMMARY="Tropico, recompiled to run natively"
+        GAME_DESCRIPTION="The 2001 strategy game Tropico"
+        GAME_KEYWORDS="Tropico;PopTop;strategy;"
+        ;;
+    tropico2)
+        GAME_NAME="Tropico 2"
+        GAME_STEM=Tropico2
+        GAME_APP_ID=io.github.gamerecomp.Tropico2Recomp
+        GAME_ANDROID_ID=io.github.gamerecomp.tropico2recomp
+        GAME_WEB=tropico2
+        GAME_SUMMARY="Tropico 2: Pirate Cove, recompiled to run natively"
+        GAME_DESCRIPTION="The 2003 strategy game Tropico 2: Pirate Cove"
+        GAME_KEYWORDS="Tropico;Pirate Cove;Frog City;strategy;"
+        ;;
+    *)
+        echo "game-info: unknown game ${1}" >&2
+        return 1 2>/dev/null || exit 1
+        ;;
+esac
+GAME_ID=${1:-tropico1}

@@ -1,28 +1,38 @@
 // SPDX-License-Identifier: MIT
 // The player: runs the game the converter stored in this browser (see
-// worker.js) on the web shell (player/tropico.js, the runtime built with
+// worker.js) on its web shell (player/tropico.js, the runtime built with
 // Emscripten, without game code).
 //
 // - The game's files are read from the origin's private file system in
 //   blocks, as the game reads them (runtime/web/library_rc.js).
 // - Its code is the WebAssembly module the converter compiled, linked into
 //   the shell before main starts.
-// - What the game writes (saved games, its settings) goes to /user, kept in
+// - What the game writes (saved games, its settings) goes to /user (for
+//   Tropico 2 /user-tropico2), kept in
 //   IndexedDB and saved a moment after every change.
 // - The player's own settings (scale, sharp pixels) are kept in localStorage.
 //   The canvas holds the game's frame at its own size; the page scales it:
 //   as large as fits, or by a whole number of device pixels.
 
-// The web shell is loaded when the game starts (player/tropico.js): a
-// site built without it says so instead of failing to load the page.
+// The game is the page's ?game= (tropico1, tropico2); each has its own web
+// shell (player/tropico.js, player/tropico2.js), loaded when the game
+// starts: a site built without it says so instead of failing to load the
+// page.
+import { gameOf } from './games.js';
+
+const GAME = gameOf(window.location);
 let createTropico = null;
 
 const $ = (id) => document.getElementById(id);
 
+/* Where the game's own writes are kept (an IndexedDB database by this
+ * name): Tropico's in /user as before there were two games. */
+const USER = GAME.id === 'tropico1' ? '/user' : `/user-${GAME.id}`;
+
 const FONTS = ['Sans', 'Serif', 'Mono'].flatMap((f) =>
   ['Regular', 'Bold', 'Italic'].map((s) => `Liberation${f}-${s}.ttf`));
 
-const PREFS = 'tropico1.player';
+const PREFS = `${GAME.id}.player`;
 
 function loadPrefs() {
   try {
@@ -61,7 +71,7 @@ function canPlay() {
  * { size, file }) and its code. */
 async function findGame() {
   const root = await navigator.storage.getDirectory();
-  const top = await root.getDirectoryHandle('tropico1');
+  const top = await root.getDirectoryHandle(GAME.id);
   const info = JSON.parse(await (await (await top.getFileHandle('info.json')).getFile()).text());
   const dirs = new Map([['', top]]);
   const dirOf = async (path) => {
@@ -131,13 +141,13 @@ async function start() {
   try {
     if (!createTropico) {
       try {
-        createTropico = (await import('./player/tropico.js')).default;
+        createTropico = (await import(`./player/${GAME.web}.js`)).default;
       } catch (e) {
         const on = await fetch('platforms.json', { cache: 'no-cache' })
           .then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
         throw new Error(on.web === false
           ? 'Playing in the browser is disabled on this site for now.'
-          : 'This site has no player for the browser yet (player/tropico.js is missing). '
+          : `This site has no player for ${GAME.name} in the browser yet (player/${GAME.web}.js is missing). `
             + 'It comes with the next build of the site.');
       }
     }
@@ -171,8 +181,8 @@ async function start() {
         FS.mkdir('/data');
         FS.mkdir('/data/game');
         FS.mount(m.rcGameFS, {}, '/data/game');
-        FS.mkdir('/user');
-        FS.mount(m.IDBFS, {}, '/user');
+        FS.mkdir(USER);
+        FS.mount(m.IDBFS, {}, USER);
         m.addRunDependency('user');
         FS.syncfs(true, (err) => {
           if (err) console.warn('loading saved files:', err);
@@ -180,8 +190,9 @@ async function start() {
         });
         FS.mkdir('/fonts');
         for (const [name, data] of fonts) FS.writeFile(`/fonts/${name}`, data);
-        m.ENV.TROPICO1_DATA = '/data';
-        m.ENV.TROPICO1_USER = '/user';
+        const env = GAME.id.toUpperCase(); /* TROPICO1_DATA, TROPICO2_DATA (main.c) */
+        m.ENV[`${env}_DATA`] = '/data';
+        m.ENV[`${env}_USER`] = USER;
         m.ENV.RC_FONT_DIR = '/fonts';
         // ?trace=imports,files (as RC_TRACE) logs to the console.
         if (prefs.resolution) m.ENV.RC_RESOLUTION = prefs.resolution;
@@ -235,11 +246,15 @@ function updateCode() {
       }
     };
     worker.onerror = (e) => { worker.terminate(); reject(new Error(e.message || 'the update stopped')); };
-    worker.postMessage({ mode: 'update' });
+    worker.postMessage({ mode: 'update', game: GAME.id });
   });
 }
 
 const prefs = loadPrefs();
+document.title = `${GAME.name} Player`;
+$('title').textContent = GAME.full || GAME.name;
+$('convert').href = `./?game=${GAME.id}`;
+$('back').href = `./?game=${GAME.id}`;
 
 async function main() {
   $('sharp').checked = !!prefs.sharp;

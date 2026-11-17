@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: MIT
+// The Windows program's icon and version information (configured by
+// games/tropico2/CMakeLists.txt).
+#include <winver.h>
+
+@TROPICO2_ICON_LINE@
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @RC_VERSION_COMMAS@,0
+PRODUCTVERSION @RC_VERSION_COMMAS@,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "TropicoRecomp"
+            VALUE "FileDescription", "Tropico 2: Pirate Cove, recompiled (@RC_REVISION@)"
+            VALUE "FileVersion", "@RC_VERSION@+@RC_REVISION@"
+            VALUE "InternalName", "tropico2"
+            VALUE "LegalCopyright", "The program: MIT licence, TropicoRecomp. The game: its rights holders."
+            VALUE "OriginalFilename", "Tropico2.exe"
+            VALUE "ProductName", "Tropico 2 (TropicoRecomp)"
+            VALUE "ProductVersion", "@RC_VERSION@+@RC_REVISION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

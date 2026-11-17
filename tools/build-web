@@ -5,10 +5,11 @@
 #
 #   tools/build-web SITE_DIR [TEMPLATE_DIR [WEB_SHELL_DIR]]
 #
-# TEMPLATE_DIR holds Tropico-windows.zip, Tropico-linux.zip,
-# Tropico-macos.zip and Tropico-android.zip (made by `recomp template`);
-# those present are copied. WEB_SHELL_DIR is the web shell
-# (tools/build-web-shell) for playing in the browser; it goes to player/.
+# TEMPLATE_DIR holds each game's templates, Tropico-<system>.zip and
+# Tropico2-<system>.zip for windows, linux, macos and android (made by
+# `recomp template`); those present are copied. WEB_SHELL_DIR holds the web
+# shells (tools/build-web-shell: tropico.js, tropico2.js) for playing in
+# the browser; it goes to player/.
 # Systems that platforms.json has off get neither; the file goes to the
 # site too, and the page offers them as off.
 # Needs the wasm32-unknown-unknown target and wasm-bindgen 0.2.130.
@@ -22,15 +23,17 @@ rm -rf "$site"
 mkdir -p "$site/templates"
 wasm-bindgen --target web --no-typescript --out-dir "$site" \
     recomp/target/wasm32-unknown-unknown/release/rc_web.wasm
-cp web/index.html web/app.js web/worker.js web/style.css web/play.html web/play.js "$site/"
+cp web/index.html web/app.js web/games.js web/worker.js web/style.css web/play.html web/play.js "$site/"
 cp tools/appimage/tropico.svg "$site/tropico.svg"
 cp platforms.json "$site/platforms.json"
 on() { python3 -c 'import json, sys; sys.exit(0 if json.load(open("platforms.json")).get(sys.argv[1], True) else 1)' "$1"; }
 if [ -n "$templates" ]; then
-    for s in windows linux macos android; do
-        if on "$s" && [ -f "$templates/Tropico-$s.zip" ]; then
-            cp "$templates/Tropico-$s.zip" "$site/templates/"
-        fi
+    for stem in Tropico Tropico2; do
+        for s in windows linux macos android; do
+            if on "$s" && [ -f "$templates/$stem-$s.zip" ]; then
+                cp "$templates/$stem-$s.zip" "$site/templates/"
+            fi
+        done
     done
 fi
 if [ -n "$web_shell" ] && on web && [ -d "$web_shell" ]; then

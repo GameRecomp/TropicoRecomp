@@ -4,7 +4,12 @@
 // browser, the worker stores the game in this origin's private storage
 // instead, and play.html runs it.
 
+import { GAMES, gameOf } from './games.js';
+
 const $ = (id) => document.getElementById(id);
+
+/* The game chosen by the tabs (and kept in the address: ?game=tropico2). */
+let game = gameOf(window.location);
 
 const STAGES = [
   { id: 'identify', label: 'Reading the installer', weight: 2 },
@@ -14,28 +19,33 @@ const STAGES = [
 ];
 let webMode = false;
 
-const SYSTEMS = {
-  windows: { label: 'Windows', after: 'Unzip it and start Tropico.exe in the Tropico folder.' },
-  linux: { label: 'Linux', after: 'Unzip it and start Tropico.AppImage in the Tropico folder.' },
-  macos: {
-    label: 'macOS',
-    after: 'Unzip it and open Tropico.app. It is not signed: the first time, right-click it and choose Open, '
-      + 'or allow it under System Settings → Privacy & Security.',
-  },
-  web: {
-    label: 'Browser',
-    web: true,
-    after: 'The game is stored in this browser, for this site only. Play it now, or come back to this page '
-      + 'any time. Saved games and settings are kept in the browser too.',
-  },
-  android: {
-    label: 'Android',
-    file: 'Tropico.apk',
-    type: { description: 'Android app', accept: { 'application/vnd.android.package-archive': ['.apk'] } },
-    after: 'Copy Tropico.apk to your phone or tablet and open it there to install it (allow installing from '
-      + 'that app when asked). On its first start the game unpacks its files once, which takes a minute.',
-  },
-};
+/* The systems, with what to do with the result, for the chosen game. */
+function systems() {
+  const g = game;
+  const app = g.stem;
+  return {
+    windows: { label: 'Windows', after: `Unzip it and start ${app}.exe in the ${app} folder.` },
+    linux: { label: 'Linux', after: `Unzip it and start ${app}.AppImage in the ${app} folder.` },
+    macos: {
+      label: 'macOS',
+      after: `Unzip it and open ${app}.app. It is not signed: the first time, right-click it and choose Open, `
+        + 'or allow it under System Settings → Privacy & Security.',
+    },
+    web: {
+      label: 'Browser',
+      web: true,
+      after: 'The game is stored in this browser, for this site only. Play it now, or come back to this page '
+        + 'any time. Saved games and settings are kept in the browser too.',
+    },
+    android: {
+      label: 'Android',
+      file: `${app}.apk`,
+      type: { description: 'Android app', accept: { 'application/vnd.android.package-archive': ['.apk'] } },
+      after: `Copy ${app}.apk to your phone or tablet and open it there to install it (allow installing from `
+        + 'that app when asked). On its first start the game unpacks its files once, which takes a minute.',
+    },
+  };
+}
 
 function guessSystem() {
   const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent;
@@ -56,7 +66,7 @@ function browserCanPlay() {
 async function storedGame() {
   try {
     const root = await navigator.storage.getDirectory();
-    const top = await root.getDirectoryHandle('tropico1');
+    const top = await root.getDirectoryHandle(game.id);
     const f = await (await top.getFileHandle('info.json')).getFile();
     return JSON.parse(await f.text());
   } catch (_) {
@@ -93,7 +103,7 @@ async function removeStored() {
   if (!window.confirm('Remove the game from this browser? Saved games and settings are kept.')) return;
   try {
     const root = await navigator.storage.getDirectory();
-    await root.removeEntry('tropico1', { recursive: true });
+    await root.removeEntry(game.id, { recursive: true });
   } catch (err) {
     showError(`Cannot remove it: ${err}`);
   }
@@ -104,8 +114,8 @@ async function removeStored() {
 function updateNote() {
   const web = document.querySelector('input[name=system]:checked')?.value === 'web';
   $('convert-note').textContent = web
-    ? 'The game (about 1.3 GiB) is stored in this browser; nothing is downloaded. Converting takes a few minutes.'
-    : 'The result is a zip (for Android an APK) of about 1.3 GiB with the game in it. You choose where it is saved.';
+    ? `The game (${game.size}) is stored in this browser; nothing is downloaded. Converting takes a few minutes.`
+    : `The result is a zip (for Android an APK) of ${game.size} with the game in it. You choose where it is saved.`;
   updateView();
 }
 
@@ -177,8 +187,9 @@ async function start() {
   const chosen = document.querySelector('input[name=system]:checked');
   if (!chosen) return; /* (every system is off on this site) */
   const system = chosen.value;
-  const sys = SYSTEMS[system];
-  const outName = sys.file || `Tropico-${sys.label.replace(/\s/g, '')}.zip`;
+  const sys = systems()[system];
+  const forGame = game;
+  const outName = sys.file || `${forGame.stem}-${sys.label.replace(/\s/g, '')}.zip`;
   $('error').hidden = true;
   $('result').hidden = true;
   webMode = !!sys.web;
@@ -211,8 +222,8 @@ async function start() {
   let template;
   if (!webMode) {
     try {
-      const r = await fetch(`templates/Tropico-${system}.zip`);
-      if (!r.ok) throw new Error(`the ${SYSTEMS[system].label} build is not available on this site (${r.status})`);
+      const r = await fetch(`templates/${forGame.stem}-${system}.zip`);
+      if (!r.ok) throw new Error(`the ${sys.label} build of ${forGame.name} is not available on this site (${r.status})`);
       template = await r.arrayBuffer();
     } catch (err) {
       await out.abort();
@@ -286,8 +297,8 @@ async function start() {
     await out.abort();
     finish(false, e.message || 'the converter stopped');
   };
-  if (webMode) worker.postMessage({ file, mode: 'web' });
-  else worker.postMessage({ file, template }, [template]);
+  if (webMode) worker.postMessage({ file, mode: 'web', game: forGame.id });
+  else worker.postMessage({ file, template, game: forGame.id }, [template]);
 
   function finish(ok, text, url, name) {
     clearInterval(timer);
@@ -299,7 +310,7 @@ async function start() {
       return;
     }
     $('result-summary').textContent = text;
-    $('result-after').textContent = SYSTEMS[system].after;
+    $('result-after').textContent = sys.after;
     $('play').hidden = !webMode;
     $('result-warn').hidden = webMode;
     if (webMode) {
@@ -334,18 +345,87 @@ drop.addEventListener('drop', (e) => {
   drop.classList.remove('over');
   if (!running && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
 });
-/* A system that cannot be chosen: greyed out, with the reason. */
-function disableChoice(system, why) {
-  const input = document.querySelector(`input[name=system][value=${system}]`);
-  input.disabled = true;
-  input.closest('label').classList.add('off');
-  input.closest('label').querySelector('small').textContent = why;
-  if (input.checked) {
-    input.checked = false;
+/* The systems' notes as the page has them, to put back when a system is
+ * offered again. */
+const NOTES = new Map([...document.querySelectorAll('input[name=system]')].map(
+  (i) => [i.value, i.closest('label').querySelector('small').textContent],
+));
+
+/* Why each system cannot be chosen, for every game (the browser, the site)
+ * and for the chosen one (a site without its web shell). */
+const offAlways = new Map();
+const offForGame = new Map(Object.keys(GAMES).map((id) => [id, new Map()]));
+
+/* Grey out what cannot be chosen, with the reason, and keep a choice. */
+function applyChoices() {
+  for (const input of document.querySelectorAll('input[name=system]')) {
+    const why = offAlways.get(input.value) || offForGame.get(game.id).get(input.value);
+    input.disabled = !!why;
+    input.closest('label').classList.toggle('off', !!why);
+    input.closest('label').querySelector('small').textContent = why || NOTES.get(input.value);
+    if (why && input.checked) input.checked = false;
+  }
+  if (!document.querySelector('input[name=system]:checked')) {
     const first = document.querySelector('input[name=system]:not(:disabled)');
     if (first) first.checked = true;
   }
   updateNote();
+}
+
+/* Whether this site has the web shell for a game (built per game). */
+const playerChecked = new Map();
+function checkPlayer(g) {
+  if (!playerChecked.has(g.id)) {
+    playerChecked.set(g.id, fetch(`player/${g.web}.js`, { method: 'HEAD' })
+      .then((r) => { if (!r.ok) offForGame.get(g.id).set('web', 'not available on this site yet'); })
+      .catch(() => {}));
+  }
+  return playerChecked.get(g.id);
+}
+
+/* The page for the chosen game: its texts, tab, address and stored copy. */
+function showGame() {
+  document.title = `${game.name} Converter`;
+  $('game-name').textContent = game.full || game.name;
+  $('installer').textContent = game.installer;
+  $('installer-size').textContent = game.installerSize;
+  for (const t of document.querySelectorAll('.tabs button')) {
+    const on = t.dataset.game === game.id;
+    t.classList.toggle('on', on);
+    t.setAttribute('aria-selected', String(on));
+  }
+  for (const a of document.querySelectorAll('a.play')) a.href = `play.html?game=${game.id}`;
+  const url = new URL(window.location.href);
+  url.hash = '';
+  url.searchParams.set('game', game.id);
+  window.history.replaceState(null, '', url);
+  applyChoices();
+  storedInfo = null;
+  reconvert = false;
+  updateView();
+  const g = game;
+  Promise.all([storedGame(), checkPlayer(g)]).then(([info]) => {
+    if (g !== game) return;
+    applyChoices();
+    storedInfo = info;
+    const web = document.querySelector('input[name=system][value=web]');
+    if (info && !web.disabled) {
+      web.checked = true;
+      updateNote();
+    }
+    updateView();
+  });
+}
+
+for (const t of document.querySelectorAll('.tabs button')) {
+  t.addEventListener('click', () => {
+    if (running || GAMES[t.dataset.game] === game) return;
+    game = GAMES[t.dataset.game];
+    setFile(null);
+    $('result').hidden = true;
+    $('error').hidden = true;
+    showGame();
+  });
 }
 const guessed = document.querySelector(`input[name=system][value=${guessSystem()}]`);
 guessed.checked = true;
@@ -353,35 +433,18 @@ for (const r of document.querySelectorAll('input[name=system]')) r.addEventListe
 $('remove').addEventListener('click', removeStored);
 $('reconvert').addEventListener('click', () => { reconvert = true; updateView(); });
 if (!browserCanPlay()) {
-  disableChoice('web', 'needs a browser with WebAssembly stack switching (JSPI), such as a current Chrome, Edge or Firefox');
+  offAlways.set('web', 'needs a browser with WebAssembly stack switching (JSPI), such as a current Chrome, Edge or Firefox');
 }
 // The systems this site is built for (platforms.json, the same file CI
 // reads); a site without it offers all of them.
-const platforms = fetch('platforms.json', { cache: 'no-cache' })
+fetch('platforms.json', { cache: 'no-cache' })
   .then((r) => (r.ok ? r.json() : {}))
   .catch(() => ({}))
   .then((on) => {
     for (const system of ['windows', 'linux', 'macos', 'android', 'web']) {
-      if (on[system] === false) disableChoice(system, 'disabled on this site for now');
+      if (on[system] === false) offAlways.set(system, 'disabled on this site for now');
     }
-    const web = document.querySelector('input[name=system][value=web]');
-    if (!web.disabled) {
-      // A site built without the web shell cannot play: do not offer it.
-      return fetch('player/tropico.js', { method: 'HEAD' }).then((r) => {
-        if (!r.ok) disableChoice('web', 'not available on this site yet');
-      }).catch(() => {});
-    }
-    return null;
+    showGame();
   });
-updateNote();
-// A stored game: the player is what the visitor most likely wants.
-Promise.all([storedGame(), platforms]).then(([info]) => {
-  storedInfo = info;
-  const web = document.querySelector('input[name=system][value=web]');
-  if (info && browserCanPlay() && !web.disabled) {
-    web.checked = true;
-    updateNote();
-  }
-  updateView();
-});
 setFile(null);
+showGame();

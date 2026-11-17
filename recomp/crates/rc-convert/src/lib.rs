@@ -45,7 +45,7 @@ pub const GAMES: &[(&str, &str, bool)] = &[
     (
         "tropico2",
         include_str!("../../../../games/tropico2/game.toml"),
-        false,
+        true,
     ),
 ];
 
@@ -587,7 +587,32 @@ pub fn plan_paths(plan: &Plan) -> Vec<PathBuf> {
     plan.targets.values().flatten().cloned().collect()
 }
 
-const README: &str = "Tropico, recompiled\r
+/// How a game's build is named: its title, the stem of its files and
+/// folders, and its macOS bundle identifier.
+#[derive(Debug, Clone, Copy)]
+pub struct Names {
+    pub title: &'static str,
+    pub stem: &'static str,
+    pub bundle_id: &'static str,
+}
+
+/// The names of a game's build by its id (tropico1 for an unknown one).
+pub fn names(game: &str) -> Names {
+    match game {
+        "tropico2" => Names {
+            title: "Tropico 2",
+            stem: "Tropico2",
+            bundle_id: "io.github.gamerecomp.Tropico2Recomp",
+        },
+        _ => Names {
+            title: "Tropico",
+            stem: "Tropico",
+            bundle_id: "io.github.gamerecomp.Tropico1Recomp",
+        },
+    }
+}
+
+const README: &str = "{title}, recompiled\r
 \r
 This folder was made by the TropicoRecomp converter from your own copy of\r
 the game. It contains that copy: keep it for yourself and do not share it.\r
@@ -598,24 +623,24 @@ Saved games and settings are kept in your user profile, not here.\r
 const README_MACOS: &str = "\r
 macOS: the app is not signed. The first time, open it from Finder with a\r
 right click and Open, or allow it under System Settings, Privacy &\r
-Security; or run: xattr -dr com.apple.quarantine Tropico.app\r
+Security; or run: xattr -dr com.apple.quarantine {stem}.app\r
 ";
 
-/// The macOS bundle's Info.plist; `{version}` and `{revision}` are filled
-/// in by [`make_template`].
+/// The macOS bundle's Info.plist; `{version}`, `{revision}` and the names
+/// are filled in by [`make_template`].
 const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key><string>Tropico</string>
-    <key>CFBundleIdentifier</key><string>io.github.gamerecomp.Tropico1Recomp</string>
-    <key>CFBundleName</key><string>Tropico</string>
-    <key>CFBundleDisplayName</key><string>Tropico</string>
-    <key>CFBundleIconFile</key><string>Tropico</string>
+    <key>CFBundleExecutable</key><string>{stem}</string>
+    <key>CFBundleIdentifier</key><string>{bundle_id}</string>
+    <key>CFBundleName</key><string>{title}</string>
+    <key>CFBundleDisplayName</key><string>{title}</string>
+    <key>CFBundleIconFile</key><string>{stem}</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>{version}</string>
     <key>CFBundleVersion</key><string>{revision}</string>
-    <key>CFBundleGetInfoString</key><string>Tropico, recompiled ({revision})</string>
+    <key>CFBundleGetInfoString</key><string>{title}, recompiled ({revision})</string>
     <key>NSHumanReadableCopyright</key><string>The program: MIT licence, TropicoRecomp. The game: its rights holders.</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.strategy-games</string>
     <key>LSMinimumSystemVersion</key><string>11.0</string>
@@ -630,6 +655,9 @@ const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 pub struct TemplateInfo<'a> {
     pub version: &'a str,
     pub icns: Option<&'a [u8]>,
+    /// The game (its id): names the program and its folder; empty for
+    /// Tropico.
+    pub game: &'a str,
 }
 
 /// A shell template for `system` (windows, linux, macos, android) around
@@ -657,19 +685,26 @@ pub fn make_template(
             .map_err(io)?;
         return z.finish().map_err(io);
     }
+    let n = names(info.game);
+    let stem = n.stem;
     let (exe, data, readme) = match system {
-        "windows" => ("Tropico/Tropico.exe", "Tropico/data/", "Tropico/README.txt"),
+        "windows" => (
+            format!("{stem}/{stem}.exe"),
+            format!("{stem}/data/"),
+            format!("{stem}/README.txt"),
+        ),
         "linux" => (
-            "Tropico/Tropico.AppImage",
-            "Tropico/data/",
-            "Tropico/README.txt",
+            format!("{stem}/{stem}.AppImage"),
+            format!("{stem}/data/"),
+            format!("{stem}/README.txt"),
         ),
         _ => (
-            "Tropico.app/Contents/MacOS/Tropico",
-            "Tropico.app/Contents/Resources/data/",
-            "README.txt",
+            format!("{stem}.app/Contents/MacOS/{stem}"),
+            format!("{stem}.app/Contents/Resources/data/"),
+            "README.txt".to_string(),
         ),
     };
+    let (exe, data, readme) = (exe.as_str(), data.as_str(), readme.as_str());
     if system == "macos" {
         let version = if info.version.is_empty() {
             "0.1.0+unknown"
@@ -679,18 +714,29 @@ pub fn make_template(
         let (short, revision) = version.split_once('+').unwrap_or((version, "unknown"));
         let plist = INFO_PLIST
             .replace("{version}", short)
-            .replace("{revision}", revision);
-        z.file("Tropico.app/Contents/Info.plist", 0o644, plist.as_bytes())
-            .map_err(io)?;
+            .replace("{revision}", revision)
+            .replace("{stem}", stem)
+            .replace("{title}", n.title)
+            .replace("{bundle_id}", n.bundle_id);
+        z.file(
+            &format!("{stem}.app/Contents/Info.plist"),
+            0o644,
+            plist.as_bytes(),
+        )
+        .map_err(io)?;
         if let Some(icns) = info.icns {
-            z.file("Tropico.app/Contents/Resources/Tropico.icns", 0o644, icns)
-                .map_err(io)?;
+            z.file(
+                &format!("{stem}.app/Contents/Resources/{stem}.icns"),
+                0o644,
+                icns,
+            )
+            .map_err(io)?;
         }
     }
     z.file(exe, 0o755, shell).map_err(io)?;
-    let mut text = README.to_string();
+    let mut text = README.replace("{title}", n.title);
     if system == "macos" {
-        text.push_str(README_MACOS);
+        text.push_str(&README_MACOS.replace("{stem}", stem));
     }
     z.file(readme, 0o644, text.as_bytes()).map_err(io)?;
     z.dir(data).map_err(io)?;

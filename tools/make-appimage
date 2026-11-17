@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Wrap a built Linux shell into an AppImage (CI's Linux template).
 #
-#   tools/make-appimage SHELL OUT.AppImage [ICON_DIR]
+#   tools/make-appimage SHELL OUT.AppImage [ICON_DIR [GAME]]
 #
 # The shell is self-contained (SDL linked statically, X11, Wayland and
 # sound loaded at run time), so the AppImage holds just it, a desktop
@@ -15,8 +15,11 @@ cd "$(git rev-parse --show-toplevel)"
 shell=${1:?shell}
 out=${2:?output}
 icons=${3:-build/icons}
+game=${4:-tropico1}
+. tools/game-info "$game"
 arch=x86_64
-id=io.github.gamerecomp.Tropico1Recomp
+id=$GAME_APP_ID
+exe=$(printf '%s' "$GAME_STEM" | tr '[:upper:]' '[:lower:]')
 version=$(tools/version)
 date=$(git log -1 --format=%cs 2>/dev/null || date +%F)
 tool=build/appimage/appimagetool-$arch.AppImage
@@ -26,10 +29,10 @@ if [ ! -x "$tool" ]; then
         "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
     chmod +x "$tool"
 fi
-dir=build/appimage/Tropico.AppDir
+dir=build/appimage/$GAME_STEM.AppDir
 rm -rf "$dir"
 mkdir -p "$dir/usr/bin"
-cp "$shell" "$dir/usr/bin/tropico"
+cp "$shell" "$dir/usr/bin/$exe"
 share=$dir/usr/share
 mkdir -p "$share/icons/hicolor/scalable/apps" "$share/applications" "$share/metainfo"
 cp tools/appimage/tropico.svg "$share/icons/hicolor/scalable/apps/$id.svg"
@@ -44,16 +47,16 @@ fi
 cat > "$share/applications/$id.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Tropico
+Name=$GAME_NAME
 GenericName=Island dictatorship simulation
-Comment=Tropico, recompiled to run natively
-Exec=tropico
+Comment=$GAME_SUMMARY
+Exec=$exe
 Icon=$id
 Categories=Game;StrategyGame;Simulation;
-Keywords=Tropico;PopTop;strategy;
+Keywords=$GAME_KEYWORDS
 Terminal=false
-StartupWMClass=tropico
-X-AppImage-Name=Tropico
+StartupWMClass=$exe
+X-AppImage-Name=$GAME_NAME
 X-AppImage-Version=$version
 DESKTOP
 cp "$share/applications/$id.desktop" "$dir/$id.desktop"
@@ -64,11 +67,11 @@ cat > "$share/metainfo/$id.appdata.xml" <<METAINFO
   <id>$id</id>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
-  <name>Tropico</name>
-  <summary>Tropico, recompiled to run natively</summary>
+  <name>$GAME_NAME</name>
+  <summary>$GAME_SUMMARY</summary>
   <description>
     <p>
-      The 2001 strategy game Tropico, recompiled from your own GOG copy into a
+      $GAME_DESCRIPTION, recompiled from your own GOG copy into a
       native program by TropicoRecomp. This package holds the user's copy of
       the game: it was made by the converter on the user's machine and is not
       to be shared.
@@ -90,9 +93,9 @@ cat > "$share/metainfo/$id.appdata.xml" <<METAINFO
   </releases>
 </component>
 METAINFO
-cat > "$dir/AppRun" <<'APPRUN'
+cat > "$dir/AppRun" <<APPRUN
 #!/bin/sh
-exec "$(dirname "$(readlink -f "$0")")/usr/bin/tropico" "$@"
+exec "\$(dirname "\$(readlink -f "\$0")")/usr/bin/$exe" "\$@"
 APPRUN
 chmod +x "$dir/AppRun"
 mkdir -p "$(dirname "$out")"

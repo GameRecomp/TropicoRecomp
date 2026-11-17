@@ -103,6 +103,10 @@ enum Cmd {
         /// The macOS bundle's icon (.icns, tools/make-icons).
         #[arg(long)]
         icon: Option<PathBuf>,
+        /// The game whose program the shell is (its names): tropico1 or
+        /// tropico2.
+        #[arg(long, default_value = "tropico1")]
+        game: String,
     },
     /// Extract a GOG installer (setup_*.exe, Inno Setup) into a directory:
     /// the game lands in <out>/app.
@@ -163,6 +167,7 @@ fn main() -> ExitCode {
             out,
             version,
             icon,
+            game,
         } => {
             let icns = match icon {
                 Some(p) => read(&p).map(Some),
@@ -173,6 +178,7 @@ fn main() -> ExitCode {
                 let info = rc_convert::TemplateInfo {
                     version: &version,
                     icns: icns.as_deref(),
+                    game: &game,
                 };
                 let z = rc_convert::make_template(&system, &b, &info)?;
                 fs::write(&out, z).map_err(|e| format!("{}: {e}", out.display()))

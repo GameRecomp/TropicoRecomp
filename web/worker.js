@@ -5,15 +5,17 @@
 //
 // For the browser ("web"), the game's files and its code (a WebAssembly
 // module for the web shell) go into the origin's private file system
-// (OPFS) under tropico1/, through synchronous access handles, which also
+// (OPFS) under the game's id (tropico1/, tropico2/), through synchronous
+// access handles, which also
 // only workers have; info.json, written last, marks a complete game.
 //
 // "update" compiles the stored game's code again from its stored files
 // when this converter makes different code (code_version), so that a game
 // is converted from the installer only once.
 import init, { code_version, convert, convert_web, plan_web, recompile_web, version } from './rc_web.js';
+import { GAMES } from './games.js';
 
-const NO_ROOM = 'the browser has no room left for the game (about 1.3 GiB is needed)';
+let NO_ROOM = 'the browser has no room left for the game';
 
 /* Replace the file `name` in `dir` with `bytes`. */
 async function writeFile(dir, name, bytes) {
@@ -28,9 +30,9 @@ async function writeFile(dir, name, bytes) {
 }
 
 /* The stored game's directory and info, or null. */
-async function stored() {
+async function stored(game) {
   try {
-    const top = await (await navigator.storage.getDirectory()).getDirectoryHandle('tropico1');
+    const top = await (await navigator.storage.getDirectory()).getDirectoryHandle(game);
     const info = JSON.parse(await (await (await top.getFileHandle('info.json')).getFile()).text());
     return { top, info };
   } catch (_) {
@@ -38,8 +40,8 @@ async function stored() {
   }
 }
 
-async function updateCode(progress) {
-  const s = await stored();
+async function updateCode(game, progress) {
+  const s = await stored(game);
   if (!s) throw new Error('the game is not stored in this browser');
   const { top, info } = s;
   if (info.codeVersion === code_version()) return { updated: false };
@@ -71,13 +73,22 @@ async function dirFor(cache, top, path) {
   return d;
 }
 
-async function convertForBrowser(file, read, progress) {
+/* The installer's game (plan_web reads it), which must be the one chosen. */
+function checkGame(plan, game) {
+  if (game && plan.id !== game) {
+    const chosen = GAMES[game] ? GAMES[game].name : game;
+    throw new Error(`this is the installer of ${plan.title}, not of ${chosen}: choose its tab above`);
+  }
+}
+
+async function convertForBrowser(file, read, progress, game) {
+  const plan = JSON.parse(plan_web(file.size, read));
+  checkGame(plan, game);
   const root = await navigator.storage.getDirectory();
   try {
-    await root.removeEntry('tropico1', { recursive: true });
+    await root.removeEntry(plan.id, { recursive: true });
   } catch (_) { /* nothing stored yet */ }
-  const top = await root.getDirectoryHandle('tropico1', { create: true });
-  const plan = JSON.parse(plan_web(file.size, read));
+  const top = await root.getDirectoryHandle(plan.id, { create: true });
 
   // Every file is created and opened first: the converter writes
   // synchronously, and opening is not.
@@ -161,7 +172,8 @@ async function convertForBrowser(file, read, progress) {
 }
 
 self.onmessage = async (event) => {
-  const { file, template, mode } = event.data;
+  const { file, template, mode, game } = event.data;
+  if (GAMES[game]) NO_ROOM = `the browser has no room left for the game (${GAMES[game].size} is needed)`;
   try {
     await init();
     const reader = new FileReaderSync();
@@ -170,13 +182,14 @@ self.onmessage = async (event) => {
     const progress = (stage, done, total) => self.postMessage({ type: 'progress', stage, done, total });
     let summary;
     if (mode === 'update') {
-      const r = await updateCode(progress);
+      const r = await updateCode(game || 'tropico1', progress);
       self.postMessage({ type: 'done', ...r });
       return;
     }
     if (mode === 'web') {
-      summary = await convertForBrowser(file, read, progress);
+      summary = await convertForBrowser(file, read, progress, game);
     } else {
+      checkGame(JSON.parse(plan_web(file.size, read)), game);
       const output = (chunk) => self.postMessage({ type: 'data', chunk }, [chunk.buffer]);
       summary = convert(file.size, read, new Uint8Array(template), progress, output);
     }

@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tropico Converter</title>
-<meta name="description" content="Turn your own GOG copy of Tropico into a native build for Windows, Linux, macOS or Android, or play it right in your browser.">
+<meta name="description" content="Turn your own GOG copy of Tropico or Tropico 2 into a native build for Windows, Linux, macOS or Android, or play it right in your browser.">
 <link rel="icon" href="tropico.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -15,16 +15,21 @@
     <img src="tropico.svg" alt="" width="56" height="56">
     <div>
       <h1>Tropico Converter</h1>
-      <p class="lede">Turns your own GOG copy of <em>Tropico</em> into a build that runs natively on Windows, Linux, macOS or Android, or that you play right here in your browser.</p>
+      <p class="lede">Turns your own GOG copy of <em id="game-name">Tropico</em> into a build that runs natively on Windows, Linux, macOS or Android, or that you play right here in your browser.</p>
     </div>
   </header>
+
+  <nav class="tabs" role="tablist" aria-label="Game">
+    <button type="button" role="tab" data-game="tropico1">Tropico</button>
+    <button type="button" role="tab" data-game="tropico2">Tropico 2: Pirate Cove</button>
+  </nav>
 
   <p class="local">Everything happens in this browser tab. Your installer is not uploaded anywhere; this site only serves the converter itself.</p>
 
   <section class="card" id="step-file">
     <h2><span class="step">1</span> Your installer</h2>
     <div id="drop" class="drop">
-      <p>The GOG installer, <code>setup_tropico_2.1.0.14.exe</code> (about 820 MiB).</p>
+      <p>The GOG installer, <code id="installer">setup_tropico_2.1.0.14.exe</code> (<span id="installer-size">about 820 MiB</span>).</p>
       <button id="choose" type="button">Choose file…</button>
       <span id="file-name" class="file-name">No file chosen</span>
       <input id="file" type="file" accept=".exe" hidden>
@@ -48,7 +53,7 @@
     <h2><img src="tropico.svg" alt="" width="28" height="28"><span><span id="stored-title">Tropico</span> is in this browser</span></h2>
     <p id="stored-info"></p>
     <div class="actions">
-      <a class="primary button" href="play.html">Play</a>
+      <a class="primary button play" href="play.html">Play</a>
       <button id="reconvert" type="button">Convert again</button>
       <button id="remove" type="button">Remove it from this browser</button>
     </div>
@@ -78,12 +83,12 @@
     <p id="result-summary"></p>
     <p id="result-after"></p>
     <a id="download" class="primary button" hidden>Save the zip</a>
-    <a id="play" class="primary button" href="play.html" hidden>Play</a>
+    <a id="play" class="primary button play" href="play.html" hidden>Play</a>
     <p id="result-warn" class="warn">The zip contains your copy of the game. Keep it for yourself; do not share it.</p>
   </section>
 
   <footer>
-    <p>An unofficial fan project, not affiliated with or endorsed by the rights holders. Supported: the GOG release of Tropico. Tropico 2 follows later.</p>
+    <p>An unofficial fan project, not affiliated with or endorsed by the rights holders. Supported: the GOG releases of Tropico and of Tropico 2: Pirate Cove.</p>
   </footer>
 </main>
 <script type="module" src="app.js"></script>

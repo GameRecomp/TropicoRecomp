@@ -5,15 +5,20 @@
 # SDL3_mixer built from their releases. The converter page's "Browser"
 # system plays the game with it (web/play.html).
 #
-#   tools/build-web-shell OUT_DIR
+#   tools/build-web-shell OUT_DIR [GAME]
 #
-# Writes OUT_DIR/tropico.js, OUT_DIR/tropico.wasm and OUT_DIR/fonts/ (the
+# GAME is tropico1 (the default; tropico.js) or tropico2 (tropico2.js).
+#
+# Writes OUT_DIR/tropico.js and OUT_DIR/tropico.wasm (tropico2.js and
+# tropico2.wasm for Tropico 2) and OUT_DIR/fonts/ (the
 # Liberation fonts, from FONT_DIR or the system's fonts-liberation).
 # Needs emsdk's environment (emcc, emcmake). Work happens in
 # build/web-shell; the libraries are built once and reused.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 out=${1:?output directory}
+game=${2:-tropico1}
+. tools/game-info "$game"
 
 # shellcheck source=tools/sdl-versions
 . tools/sdl-versions
@@ -51,12 +56,13 @@ lib mixer SDL_mixer "$MIXER_TAG" -DSDLMIXER_VENDORED=ON -DSDLMIXER_EXAMPLES=OFF 
     -DSDLMIXER_WAVPACK=OFF -DSDLMIXER_GME=OFF
 
 emcmake cmake -S . -B "$work/rc" -G Ninja "${common[@]}" -DRC_BUILD_TESTS=OFF \
-    -DTROPICO1_GENERATED="$PWD/$work/none" | tee "$work/rc.log" | grep -E "^-- platform" || true
+    -DTROPICO1_GENERATED="$PWD/$work/none" -DTROPICO2_GENERATED="$PWD/$work/none" \
+    | tee "$work/rc.log" | grep -E "^-- platform" || true
 grep -q "platform: SDL3_mixer" "$work/rc.log" || { echo "build-web-shell: SDL3 or its libraries were not found" >&2; exit 1; }
-cmake --build "$work/rc" --target tropico1-shell --parallel
+cmake --build "$work/rc" --target "$game-shell" --parallel
 
 mkdir -p "$out/fonts"
-cp "$work/rc/games/tropico1/tropico.js" "$work/rc/games/tropico1/tropico.wasm" "$out/"
+cp "$work/rc/games/$game/$GAME_WEB.js" "$work/rc/games/$game/$GAME_WEB.wasm" "$out/"
 fonts=${FONT_DIR:-}
 for d in "$fonts" /usr/share/fonts/truetype/liberation /usr/share/fonts/truetype/liberation2 /usr/share/fonts/liberation; do
     if [ -n "$d" ] && [ -f "$d/LiberationSans-Regular.ttf" ]; then
