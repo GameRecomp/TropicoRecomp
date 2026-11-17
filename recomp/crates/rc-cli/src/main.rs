@@ -629,7 +629,7 @@ fn lift(
         &modules,
         rc_emit_c::Options {
             comments,
-            flags_at_return: false,
+            flags_at_return: true,
         },
     );
     let out = match out {

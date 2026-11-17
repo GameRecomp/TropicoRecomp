@@ -69,10 +69,19 @@ pub mod trap {
     pub const TABLE: u32 = 3;
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct Options {
-    /// Store the flags into `c` at every return too (differential tests).
+    /// The flags cross function boundaries: stored into `c` at every return
+    /// and read back after every call. On by default.
     pub flags_at_return: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            flags_at_return: true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1272,7 +1281,7 @@ impl<'a> Emitter<'a> {
                         self.push_ret(*ret);
                         self.spill(false);
                         self.i().local_get(L_C).call(fi);
-                        self.load_state(false);
+                        self.load_state(self.cx.opts.flags_at_return);
                     } else {
                         self.trap(ins.addr, trap::CALL, *target);
                     }
@@ -1286,7 +1295,7 @@ impl<'a> Emitter<'a> {
                     self.spill(false);
                     self.i().local_get(L_C).local_get(t).call(F_DISPATCH);
                     self.release(t, W::B32);
-                    self.load_state(false);
+                    self.load_state(self.cx.opts.flags_at_return);
                     self.fall(next, next_emitted, ins.addr)?;
                 }
                 Term::Ret(n) => {

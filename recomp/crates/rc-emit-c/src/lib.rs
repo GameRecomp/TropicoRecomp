@@ -54,13 +54,24 @@ impl Program for Entries {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct Options {
     /// Put each guest instruction as a comment above its C.
     pub comments: bool,
-    /// Store the flags into `c` at every `ret` too (differential tests read
-    /// them; compiled code does not need them).
+    /// The flags cross function boundaries: stored into `c` at every `ret`
+    /// and read back after every call. Hand-written library code returns
+    /// results in them (the CRT's math helpers); compilers' code does not
+    /// need it. On by default.
     pub flags_at_return: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            comments: false,
+            flags_at_return: true,
+        }
+    }
 }
 
 fn ctype(w: W) -> &'static str {
@@ -466,6 +477,16 @@ struct Emitter<'a> {
 }
 
 impl Emitter<'_> {
+    /// Registers back from `c` after a call, and the flags with
+    /// `flags_at_return` (the C compiler drops the loads nothing reads).
+    fn reload_after_call(&self) -> String {
+        if self.opts.flags_at_return {
+            reload_all()
+        } else {
+            reload_regs()
+        }
+    }
+
     fn line(&mut self, s: &str) {
         for _ in 0..self.depth {
             self.out.push_str("    ");
@@ -597,7 +618,7 @@ impl Emitter<'_> {
                         "esp -= 4; rc_st32m(m, esp, {ret:#x}u); {}{}(c); {}",
                         spill_regs(),
                         self.p.name(*target),
-                        reload_regs()
+                        self.reload_after_call()
                     );
                     if self.p.is_entry(*target) {
                         self.line(&l);
@@ -616,7 +637,7 @@ impl Emitter<'_> {
                         "{{ uint32_t t_ = {}; esp -= 4; rc_st32m(m, esp, {ret:#x}u); {}rc_dispatch(c, t_); {}}}",
                         expr(target),
                         spill_regs(),
-                        reload_regs()
+                        self.reload_after_call()
                     );
                     self.line(&l);
                     fall(self);

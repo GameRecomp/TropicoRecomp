@@ -5,8 +5,9 @@
 //! guest function becomes a host function `void f(rc_cpu *c)` in the
 //! platform's C calling convention; the registers and the six arithmetic
 //! flags live in host registers inside it and go back to `c` around every
-//! call (flags only at transfers to other functions, or at every return
-//! with [`Options::flags_at_return`]).
+//! call (flags at transfers to other functions, and with
+//! [`Options::flags_at_return`], the default, at every return and back
+//! after every call).
 //!
 //! Native code cannot link against the runtime, so it reaches it through
 //! two fields at the end of `rc_cpu`: `mem`, the base of guest memory, and
@@ -156,12 +157,23 @@ impl Target {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct Options {
-    /// Store the flags into `c` at every return too (differential tests).
+    /// The flags cross function boundaries: stored into `c` at every return
+    /// and read back after every call (hand-written library code returns
+    /// results in them). On by default.
     pub flags_at_return: bool,
     /// Run Cranelift's IR verifier on every function (slower; for tests).
     pub verify: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            flags_at_return: true,
+            verify: false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -930,7 +942,7 @@ impl<'a, 'b> Emitter<'a, 'b> {
                         let fr = self.func_ref(*target);
                         let c = self.c;
                         self.b.ins().call(fr, &[c]);
-                        self.load_state(false);
+                        self.load_state(self.opts.flags_at_return);
                     } else {
                         self.trap(ins.addr, trap::CALL, *target);
                     }
@@ -941,7 +953,7 @@ impl<'a, 'b> Emitter<'a, 'b> {
                     self.push_ret(*ret);
                     self.spill(false);
                     self.helper(helper::DISPATCH, &[t], false);
-                    self.load_state(false);
+                    self.load_state(self.opts.flags_at_return);
                     self.fall(next, next_emitted, ins.addr);
                 }
                 Term::Ret(n) => {
