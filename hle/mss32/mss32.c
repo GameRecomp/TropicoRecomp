@@ -155,6 +155,13 @@ static void k_quick_load_mem(rc_cpu *c)
     uint32_t mem = RC_ARG(c, 0), size = RC_ARG(c, 1);
     rc_sound *s = audio_ok && mem && size ? rc_sound_load(rc_ptr(mem), size) : NULL;
     voice *v = s ? new_voice(s) : NULL;
+    if (rc_trace("sound")) {
+        int n = 0;
+        for (int i = 0; i < VOICES; i++) {
+            n += voices[i].used;
+        }
+        rc_log("[sound] quick load (%u bytes): %s, %d loaded", size, v ? "ok" : s ? "no handle left" : "not read", n);
+    }
     if (!v) {
         rc_sound_free(s);
         RC_RETURN(c, 0, 2);
@@ -423,6 +430,19 @@ static bool sound_playing(sample *s)
     return rc_ticks_peek_ms() - s->vstart < s->vleft;
 }
 
+/* A whole sound has played out: done, and its end-of-sample callback,
+ * once. Whoever sees it first says so (the pump, or the game asking for
+ * the status): Miles calls the callback as the sound ends, so a game that
+ * sees it done has had the callback, and may count on that. */
+static void sound_ended(rc_cpu *c, sample *s)
+{
+    s->status = 2;
+    if (s->eos) {
+        uint32_t a[1] = {s->guest};
+        rc_call_guest(c, s->eos, 1, a);
+    }
+}
+
 /* Leave whole-sound mode. */
 static void drop_sound(sample *s)
 {
@@ -644,7 +664,7 @@ static void k_sample_status(rc_cpu *c)
 {
     sample *s = sample_of(RC_ARG(c, 0));
     if (s && s->sound && s->status == 4 && !sound_playing(s)) {
-        s->status = 2;
+        sound_ended(c, s);
     }
     if (s && s->status == 4 && queued_of(s) == 0 && s->last_len) {
         /* Everything loaded has been played. */
@@ -948,13 +968,9 @@ static void sample_pump(rc_cpu *c)
             continue;
         }
         if (s->sound) {
-            /* A whole sound that has played out: its end, once. */
+            /* A whole sound that has played out. */
             if (!sound_playing(s)) {
-                s->status = 2;
-                if (s->eos) {
-                    uint32_t a[1] = {s->guest};
-                    rc_call_guest(c, s->eos, 1, a);
-                }
+                sound_ended(c, s);
             }
             continue;
         }
