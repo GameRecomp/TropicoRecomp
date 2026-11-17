@@ -16,6 +16,8 @@ typedef struct rc_dc {
     uint32_t palette[256];
     int has_palette;
     uint32_t bitmap, font;   /* selected objects */
+    uint32_t pen;            /* 0: the default pen, black and one pixel wide */
+    int32_t cur_x, cur_y;    /* the current position (MoveToEx, LineTo) */
     uint32_t text_color;     /* COLORREF: 0x00BBGGRR */
     uint32_t bk_color;
     uint32_t bk_mode;        /* 1 TRANSPARENT, 2 OPAQUE */

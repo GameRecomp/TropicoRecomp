@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * gdi32: bitmaps, fonts and text, drawn into guest memory.
+ * gdi32: bitmaps, fonts, text and lines, drawn into guest memory.
  *
  * A memory DC draws into the bitmap selected into it, a surface DC into a
  * DirectDraw surface. Text is rasterised by the platform's fonts (see
@@ -22,7 +22,7 @@
 
 /* ---- objects ---- */
 
-enum okind { OB_FREE, OB_BITMAP, OB_FONT };
+enum okind { OB_FREE, OB_BITMAP, OB_FONT, OB_PEN };
 
 typedef struct gobj {
     enum okind kind;
@@ -32,6 +32,8 @@ typedef struct gobj {
     char face[64];
     int32_t height;
     uint32_t weight, italic;
+    /* pen */
+    uint32_t style, width, color;
 } gobj;
 
 #define OBJS 1024
@@ -160,6 +162,10 @@ static void k_DeleteObject(rc_cpu *c)
     if (f) {
         f->kind = OB_FREE;
     }
+    gobj *p = obj_get(h, OB_PEN);
+    if (p) {
+        p->kind = OB_FREE;
+    }
     RC_RETURN(c, 1, 1);
 }
 
@@ -199,6 +205,11 @@ static void k_SelectObject(rc_cpu *c)
         uint32_t old = d->font;
         d->font = h;
         RC_RETURN(c, old ? old : 0x03fffff4u, 2);
+    }
+    if (obj_get(h, OB_PEN) || h == 0x03fffffcu) {
+        uint32_t old = d->pen;
+        d->pen = h == 0x03fffffcu ? 0 : h;
+        RC_RETURN(c, old ? old : 0x03fffffcu, 2); /* a stand-in for the default pen */
     }
     RC_RETURN(c, 0x03fffff8u, 2);
 }
@@ -296,6 +307,78 @@ void rc_gdi_fill(uint32_t hdc, int32_t l, int32_t t, int32_t r, int32_t b, uint3
         }
     }
 }
+
+/* ---- lines ---- */
+
+/* PS_SOLID 0, PS_DASH 1, PS_DOT 2, PS_DASHDOT 3, PS_DASHDOTDOT 4, PS_NULL 5,
+ * PS_INSIDEFRAME 6; the style is drawn solid. */
+static void k_CreatePen(rc_cpu *c)
+{
+    uint32_t h = obj_new(OB_PEN);
+    gobj *p = obj_get(h, OB_PEN);
+    p->style = RC_ARG(c, 0) & 0xf;
+    p->width = RC_ARG(c, 1) ? RC_ARG(c, 1) : 1;
+    p->color = RC_ARG(c, 2);
+    RC_RETURN(c, h, 3);
+}
+
+static void k_MoveToEx(rc_cpu *c)
+{
+    rc_dc *d = rc_dc_get(RC_ARG(c, 0));
+    if (!d) {
+        RC_RETURN(c, 0, 4);
+    }
+    uint32_t old = RC_ARG(c, 3);
+    if (old) {
+        rc_st32(old, (uint32_t)d->cur_x);
+        rc_st32(old + 4, (uint32_t)d->cur_y);
+    }
+    d->cur_x = (int32_t)RC_ARG(c, 1);
+    d->cur_y = (int32_t)RC_ARG(c, 2);
+    RC_RETURN(c, 1, 4);
+}
+
+/* A line from the current position to (x, y), without its last pixel, as
+ * GDI draws it; a wider pen draws a square of its width at each point. */
+static void k_LineTo(rc_cpu *c)
+{
+    rc_dc *d = rc_dc_get(RC_ARG(c, 0));
+    int32_t x1 = (int32_t)RC_ARG(c, 1), y1 = (int32_t)RC_ARG(c, 2);
+    if (!d) {
+        RC_RETURN(c, 0, 3);
+    }
+    gobj *p = d->pen ? obj_get(d->pen, OB_PEN) : NULL;
+    uint32_t style = p ? p->style : 0, width = p ? p->width : 1, color = p ? p->color : 0;
+    if (style != 5 && d->target.pixels) {
+        uint32_t v = pixel_value(d, color);
+        int32_t x = d->cur_x, y = d->cur_y;
+        int32_t dx = x1 > x ? x1 - x : x - x1, dy = y1 > y ? y - y1 : y1 - y;
+        int32_t sx = x < x1 ? 1 : -1, sy = y < y1 ? 1 : -1, err = dx + dy;
+        int32_t lo = -(int32_t)(width - 1) / 2, hi = lo + (int32_t)width;
+        while (x != x1 || y != y1) {
+            for (int32_t j = lo; j < hi; j++) {
+                for (int32_t i = lo; i < hi; i++) {
+                    plot_value(&d->target, x + i, y + j, v);
+                }
+            }
+            int32_t e2 = 2 * err;
+            if (e2 >= dy) {
+                err += dy;
+                x += sx;
+            }
+            if (e2 <= dx) {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+    d->cur_x = x1;
+    d->cur_y = y1;
+    RC_RETURN(c, 1, 3);
+}
+
+/* Fonts are the platform's: none was added, so none is removed. */
+static void k_RemoveFontResourceA(rc_cpu *c) { RC_RETURN(c, 0, 1); }
 
 /* ---- text ---- */
 
@@ -489,5 +572,9 @@ const rc_import_def rc_gdi32_text[] = {
     {G32, "GetCharABCWidthsA", k_GetCharABCWidthsA},
     {G32, "GetTextFaceA", k_GetTextFaceA},
     {G32, "EnumFontFamiliesExA", k_EnumFontFamiliesExA},
+    {G32, "CreatePen", k_CreatePen},
+    {G32, "MoveToEx", k_MoveToEx},
+    {G32, "LineTo", k_LineTo},
+    {G32, "RemoveFontResourceA", k_RemoveFontResourceA},
 };
 const uint32_t rc_gdi32_text_count = sizeof rc_gdi32_text / sizeof rc_gdi32_text[0];
