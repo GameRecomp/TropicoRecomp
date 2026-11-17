@@ -22,3 +22,13 @@ required = [
 seeds = []
 data = []
 noreturn = []
+
+# DLLs the game ships whose code is lifted with it: the Bink video codec of
+# this release (its own copy, as for the executable; a newer one than
+# Tropico's).
+[[modules]]
+id = "binkw32"
+file = "binkw32.dll"
+sha256 = "892a51c4056efcb22297a3b44a3491e3f5888f28b08ed1b17030f24acffedb44"
+size = 358963
+image_base = 0x30000000
