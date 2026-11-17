@@ -46,6 +46,9 @@ image_base = 0x30000000
 [patch]
 hooks = [
     0x00867480, # resolution: the width of a screen-size setting
+    0x00644a20, # resolution: the HUD's bar draws itself
+    0x008dffb0, # resolution: an image window draws itself
+    0x008ea170, # resolution: an image draws its picture
 ]
 points = [
     0x006a7fda, # resolution: the game screen's layout sizes the HUD's part

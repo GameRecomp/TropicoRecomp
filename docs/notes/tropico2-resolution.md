@@ -57,6 +57,50 @@ the stack). Patch points at the two calls (`0x006a7fda` for the HUD's part,
 world's part the whole height. The world is then drawn beside and behind the
 HUD, which is drawn over it, and the mouse reaches the world there.
 
+## The HUD across the whole width
+
+Windows hold their place in their parent at `+0x30` (x, y) and their
+rectangle on the screen at `+0x38`, worked out from the parent's by
+`0x008deb40`, which does the same for the children: a list whose head node
+is at `+0x4c` (nodes `{ next, prev, window }`). A window's name is four
+letters at `+0x04`; the low byte at `+0x50` says whether it is shown. The
+layouts are written in screen coordinates of the stock size; the game turns
+them into places when it makes a window.
+
+The HUD's bar is a panel (`'mini'`, class vtable `0x00937324`, its draw at
+`0x00644a20`) in the HUD's part, and every piece of it is a window of its
+own: on the left the island map, the build buttons and the tabs; in the
+middle the rail (`'bal0'` its left end, `'bac0'` its middle, `'bar0'` its
+right end), the balustrade behind the panels (`'bak0'`) and the panels that
+open there (`'_deb'`); on the right the wheel with the scales and the date;
+across the bottom the planks (`'bott'`, `'bot0'`) with the status line in
+them. Image windows (vtable `0x00943794`) draw in `0x008dffb0`; their
+picture is drawn by its image in `0x008ea170` (thiscall: the surface, x, y,
+width and height, 0 for the picture's, and the source's x and y).
+
+When the bar is drawn at its stock width on a wider screen, the patch
+arranges it once (again after the game lays it out anew):
+
+- what stands from the rail's right end on moves to the right edge;
+- the rail's middle, the balustrade and the planks are made as wide as the
+  gap needs, and drawn as often as that takes: the picture once, then only
+  its middle (6 pixels less at each end, whose edges would show as seams),
+  each copy where the last one's middle ended, by moving x and the source in
+  the picture's draw. The rail's middle rises at its right end towards the
+  wheel at some sizes (1600x1200): of it only the left half is repeated,
+  and its right end is drawn last at the window's right end;
+- the panels move to the middle of the balustrade;
+- the status line is as wide as the planks, so it stays centred.
+
+The game sets some of those widths back when a panel opens, and hides the
+balustrade behind a panel, which on a wider bar no longer covers it: the
+widths are set again and the balustrade shown at every draw of the bar.
+What the game opens later inside a moved piece, such as the scales' detailed
+display, it places from the stock layout relative to where the piece is now,
+so by the distance the piece moved too far left (no stock layout puts a
+child there); when the piece's window is drawn, such children move back by
+that distance (before they are drawn, as outside they would be skipped).
+
 ## The setting
 
 `resolution` in `settings.ini` (shared with Tropico, where it is a size):
@@ -69,6 +113,6 @@ height (and with it the size of the interface).
 
 ## Not done yet
 
-- Dialogs and panels that open over the world are placed by the stock
-  layout too, so they sit within the stock width on the left, not centred.
+- Dialogs that open over the world are placed by the stock layout, so they
+  sit within the stock width on the left, not centred.
 - The window's shape is read only when the program starts.
