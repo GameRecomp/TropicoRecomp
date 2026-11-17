@@ -12,6 +12,14 @@
 //! 4. relocated immediate operands that point into code (`push offset f`);
 //! 5. direct `call` targets found by recursive descent.
 //!
+//! An image without relocations (Tropico 2) has no 3 and 4. There, frame
+//! set-ups after padding or a return, words in data sections and immediate
+//! operands that land on a plausible function start are tried as functions
+//! speculatively, kept only if they decode cleanly, and the gap pass tries
+//! each plausible start in a gap instead of giving the gap up at its first
+//! failure. A switch's bound kept in a frame local (`cmp [ebp-d], n`, as
+//! unoptimised code does) bounds its table.
+//!
 //! A direct `jmp` to an entry is a tail call; any other `jmp` target is part
 //! of the current function. Jump tables are bounded by the compare that
 //! guards them and checked against the relocation list.

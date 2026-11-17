@@ -104,6 +104,19 @@ struct PathState {
     /// An index table just read into a register: (register, address,
     /// length, jump-table entries it implies).
     index: Option<(usize, u32, u32, u32)>,
+    /// Unoptimised code keeps a switch's value in a local: the last
+    /// `cmp [ebp+d], imm` (d, imm), until the flags change, and the bound
+    /// it gave the local (d, bound), until the local is written.
+    cmp_local: Option<(i32, u32)>,
+    local: Option<(i32, u32)>,
+}
+
+/// `[ebp+d]`: a local of the frame, by its displacement.
+fn frame_local(ins: &Instruction, op: u32) -> Option<i32> {
+    (ins.op_kind(op) == OpKind::Memory
+        && ins.memory_base() == Register::EBP
+        && ins.memory_index() == Register::None)
+        .then(|| ins.memory_displacement32() as i32)
 }
 
 impl PathState {
@@ -120,6 +133,26 @@ impl PathState {
             | RflagsBits::PF;
         if ins.rflags_modified() & integer != 0 {
             self.cmp = None;
+            self.cmp_local = None;
+        }
+        if ins.op_count() > 0
+            && let Some(d) = frame_local(ins, 0)
+        {
+            let imm1 = ins.op_count() > 1
+                && matches!(
+                    ins.op1_kind(),
+                    OpKind::Immediate8 | OpKind::Immediate8to32 | OpKind::Immediate32
+                );
+            match ins.mnemonic() {
+                Mnemonic::Cmp if imm1 => self.cmp_local = Some((d, ins.immediate(1) as u32)),
+                Mnemonic::Cmp | Mnemonic::Test => {}
+                // Anything else may write the local.
+                _ => {
+                    if self.local.is_some_and(|l| l.0 == d) {
+                        self.local = None;
+                    }
+                }
+            }
         }
         let dst = (ins.op_count() > 0 && ins.op0_kind() == OpKind::Register)
             .then(|| gpr(ins.op0_register()))
@@ -138,6 +171,11 @@ impl PathState {
             match ins.mnemonic() {
                 Mnemonic::Cmp if imm => self.cmp = Some((d, (ins.immediate(1) as u32))),
                 Mnemonic::And if imm => after = Some((Some(ins.immediate(1) as u32), None)),
+                Mnemonic::Mov if ins.op_count() > 1 && frame_local(ins, 1).is_some() => {
+                    let d = frame_local(ins, 1);
+                    let b = self.local.filter(|l| Some(l.0) == d).map(|l| l.1);
+                    after = Some((b, None));
+                }
                 Mnemonic::Mov | Mnemonic::Movzx | Mnemonic::Movsx if src.is_some() => {
                     let s = src.unwrap_or(0);
                     after = Some((self.bounds[s], Some((s, 0))));
@@ -204,7 +242,17 @@ impl PathState {
                 _ => {}
             }
         }
+        if let Some((d, imm)) = self.cmp_local.take() {
+            match cond {
+                Mnemonic::Ja => self.local = Some((d, imm)),
+                Mnemonic::Jbe => taken.local = Some((d, imm)),
+                Mnemonic::Jb if imm > 0 => taken.local = Some((d, imm - 1)),
+                Mnemonic::Jae if imm > 0 => self.local = Some((d, imm - 1)),
+                _ => {}
+            }
+        }
         taken.cmp = None;
+        taken.cmp_local = None;
         (taken, self)
     }
 
@@ -282,6 +330,10 @@ struct Explorer<'a> {
     /// Why, the first time.
     why: Option<Problem>,
     info: InstructionInfoFactory,
+    /// In an image without relocations: addresses that look like function
+    /// starts (a prologue, a pointer to one in data, an immediate operand),
+    /// tried speculatively after the first exploration.
+    candidates: Vec<u32>,
 }
 
 pub(crate) fn explore(
@@ -333,6 +385,7 @@ pub(crate) fn explore(
         failed: false,
         why: None,
         info: InstructionInfoFactory::new(),
+        candidates: Vec::new(),
     };
 
     if pe.entry_rva != 0 {
@@ -350,6 +403,11 @@ pub(crate) fn explore(
         x.add_entry(j, EntrySource::CrossJump);
     }
     x.run();
+    if !x.has_relocs {
+        x.prologues();
+        x.data_pointers(pe);
+        x.try_candidates();
+    }
     x.gaps();
     x.ex
 }
@@ -384,6 +442,11 @@ impl Explorer<'_> {
     }
 
     fn add_data(&mut self, start: u32, end: u32, kind: DataKind) {
+        // An empty range (a table with no entries) is no data, and would
+        // stop the gap scan, which steps to the next known start.
+        if end <= start {
+            return;
+        }
         if self.ex.data.insert(start, (end, kind)).is_none()
             && let Some(u) = &mut self.undo
         {
@@ -446,6 +509,92 @@ impl Explorer<'_> {
         }
     }
 
+    /// Whether `va` looks like the start of a function: a frame set-up
+    /// (`push ebp; mov ebp, esp`), or the first byte after padding or a
+    /// return on a 16-byte boundary. For images without relocations, where
+    /// nothing else names functions reached only through pointers.
+    fn plausible_start(&self, va: u32) -> bool {
+        if !self.ex.in_code(va) {
+            return false;
+        }
+        let b = |a: u32| self.image.u8(a);
+        let prologue = b(va) == Some(0x55)
+            && ((b(va + 1) == Some(0x8b) && b(va + 2) == Some(0xec))
+                || (b(va + 1) == Some(0x89) && b(va + 2) == Some(0xe5)));
+        if prologue {
+            return true;
+        }
+        if !va.is_multiple_of(16) || matches!(b(va), Some(0xcc | 0x90 | 0x00) | None) {
+            return false;
+        }
+        let before = b(va.wrapping_sub(1));
+        matches!(before, Some(0xcc | 0x90 | 0xc3))
+            || (b(va.wrapping_sub(3)) == Some(0xc2) && b(va.wrapping_sub(1)) == Some(0x00))
+    }
+
+    /// Frame set-ups right after padding or a return: function starts.
+    fn prologues(&mut self) {
+        for (start, end) in self.ex.code.clone() {
+            let mut va = start + 1;
+            while va + 3 <= end {
+                if self.image.u8(va) == Some(0x55)
+                    && self.plausible_start(va)
+                    && matches!(self.image.u8(va - 1), Some(0xcc | 0x90 | 0xc3 | 0x00))
+                {
+                    self.candidates.push(va);
+                }
+                va += 1;
+            }
+        }
+    }
+
+    /// Aligned words in data sections that point at a plausible function
+    /// start: vtables, callback tables, handlers.
+    fn data_pointers(&mut self, pe: &PeFile) {
+        let base = pe.image_base;
+        for sec in pe.sections.iter().filter(|s| !s.flags.is_executable()) {
+            let start = base + sec.rva;
+            let end = start + sec.mapped_size();
+            let mut at = start;
+            while at + 4 <= end {
+                if let Some(t) = self.image.u32(at)
+                    && self.ex.in_code(t)
+                    && (self.ex.entries.contains_key(&t) || self.plausible_start(t))
+                {
+                    self.candidates.push(t);
+                }
+                at += 4;
+            }
+        }
+    }
+
+    /// Each candidate not yet known, as a speculative function.
+    fn try_candidates(&mut self) {
+        let mut c = std::mem::take(&mut self.candidates);
+        c.sort_unstable();
+        c.dedup();
+        for va in c {
+            if self.ex.insns.contains_key(&va)
+                || self.ex.inside_insn(va).is_some()
+                || self.ex.data_at(va).is_some()
+            {
+                continue;
+            }
+            self.speculate(va);
+        }
+        if !self.candidates.is_empty() {
+            // Operands of what was just decoded named more.
+            self.try_candidates();
+        }
+    }
+
+    /// The next plausible function start in `(va, stop)`, or `stop`.
+    fn next_start(&self, va: u32, stop: u32) -> u32 {
+        (va + 1..stop)
+            .find(|&a| self.plausible_start(a))
+            .unwrap_or(stop)
+    }
+
     /// Code nothing visibly refers to: try each remaining gap as a function
     /// and keep the attempt only if it decodes cleanly.
     fn gaps(&mut self) {
@@ -472,7 +621,7 @@ impl Explorer<'_> {
                     if filler > 0 {
                         // Stop at the next known instruction even inside
                         // the filler, so the skip never jumps over code.
-                        va = (va + filler).min(self.next_known(va, end));
+                        va = (va + filler).min(self.next_known(va, end)).max(va + 1);
                         continue;
                     }
                     let stop = self.next_known(va, end);
@@ -493,7 +642,11 @@ impl Explorer<'_> {
                         progress = true;
                         continue;
                     }
-                    va = stop.max(va + 1);
+                    va = if self.has_relocs {
+                        stop.max(va + 1)
+                    } else {
+                        self.next_start(va, stop)
+                    };
                 }
             }
             if !progress {
@@ -749,6 +902,18 @@ impl Explorer<'_> {
     /// (`push offset callback`, `mov [x], offset handler`).
     fn operand_refs(&mut self, dec: &Decoder<'_>, ins: &Instruction, va: u32) {
         if !self.has_relocs {
+            // Without relocations an immediate that lands on a plausible
+            // function start is only a candidate.
+            let co = dec.get_constant_offsets(ins);
+            if co.has_immediate() && co.immediate_size() == 4 && self.undo.is_none() {
+                let v = self
+                    .image
+                    .u32(va + co.immediate_offset() as u32)
+                    .unwrap_or(0);
+                if self.ex.in_code(v) && self.plausible_start(v) {
+                    self.candidates.push(v);
+                }
+            }
             return;
         }
         let co = dec.get_constant_offsets(ins);
