@@ -24,6 +24,12 @@
 
 #define INVALID_HANDLE 0xffffffffu
 
+/* A guest path relative to the guest installation directory (false if it
+ * lies outside), and where the file is on the host: the user directory's
+ * copy, else the game's (false if neither exists). */
+bool rc_k32_guest_rel(const char *in, char *rel, size_t cap);
+bool rc_k32_find_existing(const char *rel, char *host, bool *is_dir, uint64_t *size);
+
 /* The first `n` bytes of a guest file, by guest path, or (path NULL) by
  * an open file handle; -1 if it cannot be read. */
 long rc_vfs_read_head(const char *guest_path, uint32_t h, uint8_t *buf, uint32_t n);
@@ -36,5 +42,13 @@ extern const rc_import_def rc_k32_locale[];
 extern const uint32_t rc_k32_locale_count;
 extern const rc_import_def rc_k32_file[];
 extern const uint32_t rc_k32_file_count;
+extern const rc_import_def rc_ole32_defs[];
+extern const uint32_t rc_ole32_count;
+extern const rc_import_def rc_version_defs[];
+extern const uint32_t rc_version_count;
+extern const rc_import_def rc_k32_sync[];
+extern const uint32_t rc_k32_sync_count;
+extern const rc_import_def rc_k32_profile[];
+extern const uint32_t rc_k32_profile_count;
 
 #endif

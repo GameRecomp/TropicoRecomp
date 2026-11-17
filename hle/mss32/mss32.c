@@ -381,6 +381,13 @@ typedef struct sample {
     /* On the virtual clock: bytes not yet played, and when that was. */
     uint32_t vqueued;
     uint64_t vtime;
+    /* A whole sound given at once (AIL_set_named_sample_file,
+     * AIL_set_sample_address): played on a track, not streamed. */
+    rc_sound *sound;
+    rc_track *track;
+    int loops;           /* 0 forever */
+    uint32_t eos;        /* end-of-sample callback, or 0 */
+    float pan;
 } sample;
 
 #define SAMPLES 32
@@ -396,6 +403,16 @@ static sample *sample_of(uint32_t h)
     return NULL;
 }
 
+/* Leave whole-sound mode. */
+static void drop_sound(sample *s)
+{
+    if (s->track) {
+        rc_track_stop(s->track);
+    }
+    rc_sound_free(s->sound);
+    s->sound = NULL;
+}
+
 static void k_allocate_sample_handle(rc_cpu *c)
 {
     for (int i = 0; i < SAMPLES; i++) {
@@ -408,6 +425,8 @@ static void k_allocate_sample_handle(rc_cpu *c)
             s->rate = 22050;
             s->volume = 1.0f;
             s->status = 2;
+            s->loops = 1;
+            s->pan = 0.5f;
             RC_RETURN(c, s->guest, 1);
         }
     }
@@ -419,6 +438,9 @@ static void k_release_sample_handle(rc_cpu *c)
     sample *s = sample_of(RC_ARG(c, 0));
     if (s) {
         rc_pcm_free(s->pcm);
+        drop_sound(s);
+        rc_track_free(s->track);
+        s->track = NULL;
         rc_heap_free(s->guest);
         s->used = 0;
     }
@@ -442,6 +464,10 @@ static void k_init_sample(rc_cpu *c)
         s->newest = -1;
         s->buf_len[0] = s->buf_len[1] = 0;
         s->vqueued = 0;
+        drop_sound(s);
+        s->loops = 1;
+        s->eos = 0;
+        s->pan = 0.5f;
     }
     RC_RETURN(c, 0, 1);
 }
@@ -518,6 +544,9 @@ static void k_set_sample_volume(rc_cpu *c)
     if (s) {
         s->volume = (float)RC_ARG(c, 1) / 127.0f;
         rc_pcm_gain(s->pcm, s->volume);
+        if (s->track) {
+            rc_track_gain(s->track, s->volume);
+        }
     }
     RC_RETURN(c, 0, 2);
 }
@@ -527,7 +556,11 @@ static void k_set_sample_pan(rc_cpu *c) { RC_RETURN(c, 0, 2); }
 static void k_start_sample(rc_cpu *c)
 {
     sample *s = sample_of(RC_ARG(c, 0));
-    if (s) {
+    if (s && s->sound) {
+        s->status = 4;
+        rc_track_gain(s->track, s->volume);
+        rc_track_play(s->track, s->sound, s->loops);
+    } else if (s) {
         queued_of(s);
         s->status = 4;
         rc_pcm_pause(pcm_of(s), false);
@@ -538,7 +571,10 @@ static void k_start_sample(rc_cpu *c)
 static void k_stop_sample(rc_cpu *c)
 {
     sample *s = sample_of(RC_ARG(c, 0));
-    if (s) {
+    if (s && s->sound) {
+        s->status = 8;
+        rc_track_pause(s->track, true);
+    } else if (s) {
         queued_of(s);
         s->status = 8;
         rc_pcm_pause(s->pcm, true);
@@ -549,7 +585,10 @@ static void k_stop_sample(rc_cpu *c)
 static void k_resume_sample(rc_cpu *c)
 {
     sample *s = sample_of(RC_ARG(c, 0));
-    if (s) {
+    if (s && s->sound) {
+        s->status = 4;
+        rc_track_pause(s->track, false);
+    } else if (s) {
         queued_of(s);
         s->status = 4;
         rc_pcm_pause(pcm_of(s), false);
@@ -560,6 +599,9 @@ static void k_resume_sample(rc_cpu *c)
 static void k_end_sample(rc_cpu *c)
 {
     sample *s = sample_of(RC_ARG(c, 0));
+    if (s && s->sound) {
+        rc_track_stop(s->track);
+    }
     if (s) {
         s->status = 2;
         s->npending = 0;
@@ -572,6 +614,9 @@ static void k_end_sample(rc_cpu *c)
 static void k_sample_status(rc_cpu *c)
 {
     sample *s = sample_of(RC_ARG(c, 0));
+    if (s && s->sound && s->status == 4 && !rc_track_playing(s->track)) {
+        s->status = 2;
+    }
     if (s && s->status == 4 && queued_of(s) == 0 && s->last_len) {
         /* Everything loaded has been played. */
         RC_RETURN(c, 2, 1);
@@ -694,6 +739,159 @@ static void k_sample_user_data(rc_cpu *c)
     RC_RETURN(c, s && RC_ARG(c, 1) < 8 ? s->user[RC_ARG(c, 1)] : 0, 2);
 }
 
+/* A whole sound for the sample, from a file's image in memory (WAV, MP3). */
+static void k_set_named_sample_file(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    uint32_t image = RC_ARG(c, 2), size = RC_ARG(c, 3);
+    if (!s || !image || !size) {
+        RC_RETURN(c, 0, 5);
+    }
+    drop_sound(s);
+    s->sound = audio_ok ? rc_sound_load(rc_ptr(image), size) : NULL;
+    if (!s->track) {
+        s->track = rc_track_new();
+    }
+    if (rc_trace("sound")) {
+        const char *suffix = RC_ARG(c, 1) ? rc_str(RC_ARG(c, 1)) : "";
+        rc_log("[sound] sample file (%s, %u bytes): %s", suffix, size, s->sound ? "ok" : "not read");
+    }
+    s->status = 2;
+    RC_RETURN(c, s->sound || !audio_ok ? 1 : 0, 5);
+}
+
+static void le16(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static void le32(uint8_t *p, uint32_t v)
+{
+    le16(p, v);
+    le16(p + 2, v >> 16);
+}
+
+/* Raw PCM in the sample's format (AIL_set_sample_type, its rate), made a
+ * WAV so that the mixer reads it as a whole sound. */
+static void k_set_sample_address(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    uint32_t start = RC_ARG(c, 1), len = RC_ARG(c, 2);
+    if (!s) {
+        RC_RETURN(c, 0, 3);
+    }
+    drop_sound(s);
+    if (!s->track) {
+        s->track = rc_track_new();
+    }
+    if (audio_ok && start && len) {
+        uint8_t *w = malloc((size_t)len + 44);
+        if (w) {
+            uint32_t ch = (s->format & 2) ? 2 : 1, bits = (s->format & 1) ? 16 : 8;
+            memcpy(w, "RIFF", 4);
+            le32(w + 4, 36 + len);
+            memcpy(w + 8, "WAVEfmt ", 8);
+            le32(w + 16, 16);
+            le16(w + 20, 1);
+            le16(w + 22, ch);
+            le32(w + 24, (uint32_t)s->rate);
+            le32(w + 28, (uint32_t)s->rate * ch * bits / 8);
+            le16(w + 32, ch * bits / 8);
+            le16(w + 34, bits);
+            memcpy(w + 36, "data", 4);
+            le32(w + 40, len);
+            memcpy(w + 44, rc_ptr(start), len);
+            s->sound = rc_sound_load(w, (size_t)len + 44);
+            free(w);
+        }
+    }
+    s->status = 2;
+    RC_RETURN(c, 0, 3);
+}
+
+static void k_set_sample_loop_count(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s) {
+        s->loops = (int)RC_ARG(c, 1);
+    }
+    RC_RETURN(c, 0, 2);
+}
+
+static void k_register_EOS_callback(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    uint32_t old = s ? s->eos : 0;
+    if (s) {
+        s->eos = RC_ARG(c, 1);
+    }
+    RC_RETURN(c, old, 2);
+}
+
+static float f32_of(uint32_t v)
+{
+    float f;
+    memcpy(&f, &v, sizeof f);
+    return f;
+}
+
+static uint32_t u32_of(float f)
+{
+    uint32_t v;
+    memcpy(&v, &f, sizeof v);
+    return v;
+}
+
+/* Volume 0.0 to 1.0, pan 0.0 (left) to 1.0 (right); pan is kept only. */
+static void k_set_sample_volume_pan(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    if (s) {
+        float v = f32_of(RC_ARG(c, 1));
+        s->volume = v < 0.0f ? 0.0f : v;
+        s->pan = f32_of(RC_ARG(c, 2));
+        rc_pcm_gain(s->pcm, s->volume);
+        if (s->track) {
+            rc_track_gain(s->track, s->volume);
+        }
+    }
+    RC_RETURN(c, 0, 3);
+}
+
+static void k_sample_volume_pan(rc_cpu *c)
+{
+    sample *s = sample_of(RC_ARG(c, 0));
+    uint32_t vol = RC_ARG(c, 1), pan = RC_ARG(c, 2);
+    if (vol) {
+        rc_st32(vol, u32_of(s ? s->volume : 1.0f));
+    }
+    if (pan) {
+        rc_st32(pan, u32_of(s ? s->pan : 0.5f));
+    }
+    RC_RETURN(c, 0, 3);
+}
+
+/* The newer way to open the output: (rate, bits, channels, flags). */
+static void k_open_digital_driver(rc_cpu *c)
+{
+    uint32_t rate = RC_ARG(c, 0), channels = RC_ARG(c, 2);
+    if (!audio_ok) {
+        audio_ok = rc_audio_open((int)(rate ? rate : 22050), channels == 1 ? 1 : 2);
+        if (audio_ok && !digital) {
+            digital = rc_heap_alloc(64, true);
+        }
+    }
+    if (rc_trace("sound")) {
+        rc_log("[sound] digital driver at %u Hz: %s", rate, audio_ok ? "ok" : "no device");
+    }
+    RC_RETURN(c, audio_ok ? digital : 0, 4);
+}
+
+/* Giving the device up while in the background, and taking it back. */
+static void k_digital_handle_release(rc_cpu *c) { RC_RETURN(c, 1, 1); }
+static void k_digital_handle_reacquire(rc_cpu *c) { RC_RETURN(c, 1, 1); }
+
 static void k_register_EOB_callback(rc_cpu *c)
 {
     sample *s = sample_of(RC_ARG(c, 0));
@@ -718,6 +916,17 @@ static void sample_pump(rc_cpu *c)
     for (int i = 0; i < SAMPLES; i++) {
         sample *s = &samples[i];
         if (!s->used || s->status != 4) {
+            continue;
+        }
+        if (s->sound) {
+            /* A whole sound that has played out: its end, once. */
+            if (!rc_track_playing(s->track)) {
+                s->status = 2;
+                if (s->eos) {
+                    uint32_t a[1] = {s->guest};
+                    rc_call_guest(c, s->eos, 1, a);
+                }
+            }
             continue;
         }
         uint32_t queued = queued_of(s);
@@ -785,6 +994,15 @@ const rc_import_def rc_mss32_defs[] = {
     {MSS, "_AIL_set_sample_user_data@12", k_set_sample_user_data},
     {MSS, "_AIL_sample_user_data@8", k_sample_user_data},
     {MSS, "_AIL_register_EOB_callback@8", k_register_EOB_callback},
+    {MSS, "_AIL_set_named_sample_file@20", k_set_named_sample_file},
+    {MSS, "_AIL_set_sample_address@12", k_set_sample_address},
+    {MSS, "_AIL_set_sample_loop_count@8", k_set_sample_loop_count},
+    {MSS, "_AIL_register_EOS_callback@8", k_register_EOS_callback},
+    {MSS, "_AIL_set_sample_volume_pan@12", k_set_sample_volume_pan},
+    {MSS, "_AIL_sample_volume_pan@12", k_sample_volume_pan},
+    {MSS, "_AIL_open_digital_driver@16", k_open_digital_driver},
+    {MSS, "_AIL_digital_handle_release@4", k_digital_handle_release},
+    {MSS, "_AIL_digital_handle_reacquire@4", k_digital_handle_reacquire},
     {MSS, "_AIL_get_preference@4", k_get_preference},
     {MSS, "_AIL_digital_latency@4", k_digital_latency},
     {MSS, "_AIL_serve@0", k_serve},

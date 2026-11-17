@@ -249,11 +249,34 @@ void rc_thread_sleep(uint32_t ms)
 
 /* The body of every thread but the main one. Returns only with the
  * pthread and JSPI backends, after handing on the baton. */
+static void finish(uint32_t code);
+
 static void thread_main(void)
 {
     thread *t = &threads[current];
     uint32_t arg = t->param;
-    t->exit_code = rc_call_guest(t->cpu, t->start, 1, &arg);
+    finish(rc_call_guest(t->cpu, t->start, 1, &arg));
+}
+
+void rc_thread_exit(uint32_t code)
+{
+    if (current == 0) {
+        rc_exit(code);
+    }
+    finish(code);
+#if BACKEND_PTHREAD
+    /* The baton has moved on: this host thread ends here. */
+    pthread_exit(NULL);
+#endif
+    rc_fatal("ExitThread: the thread could not end here");
+}
+
+/* End the current thread (not the main one) and run another; with fibers
+ * and contexts the thread's host stack is left behind, never resumed. */
+static void finish(uint32_t code)
+{
+    thread *t = &threads[current];
+    t->exit_code = code;
     t->state = T_DONE;
     if (rc_trace("threads")) {
         rc_log("[thread] %u ended with %#x", current + 1, t->exit_code);

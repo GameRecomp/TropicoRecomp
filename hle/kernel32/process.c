@@ -306,14 +306,6 @@ static void k_InterlockedDecrement(rc_cpu *c)
     RC_RETURN(c, v, 1);
 }
 
-static uint32_t next_event = 0x2000;
-
-static void k_CreateEventA(rc_cpu *c)
-{
-    next_event += 4;
-    RC_RETURN(c, next_event, 4);
-}
-
 /* ---- time ---- */
 /* Reading the clock lets other threads run: code waiting for a thread
  * typically looks at the time while it waits. */
@@ -327,6 +319,94 @@ static void k_Sleep(rc_cpu *c)
 {
     rc_thread_sleep(RC_ARG(c, 0));
     RC_RETURN(c, 0, 1);
+}
+
+/* The date: the host's, or with the virtual clock a fixed one (2003-06-01,
+ * midnight) plus its time, so that runs repeat. In 100 ns since 1601. */
+static uint64_t now_filetime(void)
+{
+    const uint64_t to_1970 = 116444736000000000ull;
+    if (rc_clock_virtual()) {
+        return to_1970 + (1054425600ull * 1000 + rc_ticks_peek_ms()) * 10000ull;
+    }
+    return to_1970 + (uint64_t)time(NULL) * 10000000ull;
+}
+
+/* SYSTEMTIME from a FILETIME value. */
+static void put_systemtime(uint32_t st, uint64_t ft)
+{
+    uint64_t ms_all = ft / 10000ull;
+    uint64_t days = ms_all / 86400000ull;
+    uint32_t ms_day = (uint32_t)(ms_all % 86400000ull);
+    uint32_t dow = (uint32_t)((days + 1) % 7); /* 1601-01-01 was a Monday */
+    /* Days since 1601-01-01 to a civil date. */
+    int64_t z = (int64_t)days - 134774 + 719468; /* to days since 0000-03-01 */
+    int64_t era = z / 146097;
+    int64_t doe = z - era * 146097;
+    int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t y = yoe + era * 400;
+    int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    int64_t mp = (5 * doy + 2) / 153;
+    int64_t d = doy - (153 * mp + 2) / 5 + 1;
+    int64_t m = mp + (mp < 10 ? 3 : -9);
+    y += m <= 2;
+    rc_st16(st, (uint16_t)y);
+    rc_st16(st + 2, (uint16_t)m);
+    rc_st16(st + 4, (uint16_t)dow);
+    rc_st16(st + 6, (uint16_t)d);
+    rc_st16(st + 8, (uint16_t)(ms_day / 3600000u));
+    rc_st16(st + 10, (uint16_t)(ms_day / 60000u % 60u));
+    rc_st16(st + 12, (uint16_t)(ms_day / 1000u % 60u));
+    rc_st16(st + 14, (uint16_t)(ms_day % 1000u));
+}
+
+/* Local time is UTC here (GetTimeZoneInformation says so). */
+static void k_GetSystemTime(rc_cpu *c)
+{
+    put_systemtime(RC_ARG(c, 0), now_filetime());
+    RC_RETURN(c, 0, 1);
+}
+
+static void k_FileTimeToSystemTime(rc_cpu *c)
+{
+    uint32_t ft = RC_ARG(c, 0);
+    put_systemtime(RC_ARG(c, 1), (uint64_t)rc_ld32(ft) | (uint64_t)rc_ld32(ft + 4) << 32);
+    RC_RETURN(c, 1, 2);
+}
+
+static void k_FileTimeToLocalFileTime(rc_cpu *c)
+{
+    uint32_t in = RC_ARG(c, 0), out = RC_ARG(c, 1);
+    uint32_t lo = rc_ld32(in), hi = rc_ld32(in + 4);
+    rc_st32(out, lo);
+    rc_st32(out + 4, hi);
+    RC_RETURN(c, 1, 2);
+}
+
+/* No MMX, SSE or 3DNow!: programs take their plain x86 paths, which is
+ * what the lifter models. */
+static void k_IsProcessorFeaturePresent(rc_cpu *c) { RC_RETURN(c, 0, 1); }
+
+static void k_SetUnhandledExceptionFilter(rc_cpu *c) { RC_RETURN(c, 0, 1); }
+
+/* No message texts here. */
+static void k_FormatMessageA(rc_cpu *c) { RC_RETURN(c, 0, 7); }
+
+static void k_OutputDebugStringA(rc_cpu *c)
+{
+    uint32_t s = RC_ARG(c, 0);
+    if (s && rc_trace("debug")) {
+        rc_log("[debug] %s", rc_str(s));
+    }
+    RC_RETURN(c, 0, 1);
+}
+
+static void k_InterlockedExchange(rc_cpu *c)
+{
+    uint32_t p = RC_ARG(c, 0), v = RC_ARG(c, 1);
+    uint32_t old = rc_ld32(p);
+    rc_st32(p, v);
+    RC_RETURN(c, old, 2);
 }
 
 static void k_GetTimeZoneInformation(rc_cpu *c)
@@ -492,6 +572,15 @@ static void k_RtlUnwind(rc_cpu *c)
 
 const rc_import_def rc_k32_process[] = {
     {K32, "GetVersion", k_GetVersion},
+    {K32, "GetSystemTime", k_GetSystemTime},
+    {K32, "GetLocalTime", k_GetSystemTime},
+    {K32, "FileTimeToSystemTime", k_FileTimeToSystemTime},
+    {K32, "FileTimeToLocalFileTime", k_FileTimeToLocalFileTime},
+    {K32, "SetUnhandledExceptionFilter", k_SetUnhandledExceptionFilter},
+    {K32, "IsProcessorFeaturePresent", k_IsProcessorFeaturePresent},
+    {K32, "FormatMessageA", k_FormatMessageA},
+    {K32, "OutputDebugStringA", k_OutputDebugStringA},
+    {K32, "InterlockedExchange", k_InterlockedExchange},
     {K32, "GetVersionExA", k_GetVersionExA},
     {K32, "GetCommandLineA", k_GetCommandLineA},
     {K32, "GetStartupInfoA", k_GetStartupInfoA},
@@ -525,7 +614,6 @@ const rc_import_def rc_k32_process[] = {
     {K32, "LeaveCriticalSection", k_CriticalSectionNop},
     {K32, "InterlockedIncrement", k_InterlockedIncrement},
     {K32, "InterlockedDecrement", k_InterlockedDecrement},
-    {K32, "CreateEventA", k_CreateEventA},
     {K32, "GetTickCount", k_GetTickCount},
     {K32, "Sleep", k_Sleep},
     {K32, "GetTimeZoneInformation", k_GetTimeZoneInformation},

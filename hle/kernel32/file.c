@@ -25,6 +25,7 @@
 #include "k32.h"
 #include "rc/hostfs.h"
 #include "rc/log.h"
+#include "rc/vm.h"
 #if defined(__EMSCRIPTEN__)
 #include "rc/web.h"
 /* The user directory lives in the browser's storage: save it soon. */
@@ -97,7 +98,7 @@ static int split(const char *path, char comps[][256], int max)
 
 /* The path below the guest installation directory, '/'-separated, or
  * false if the guest path lies elsewhere. */
-static bool guest_rel(const char *in, char *rel, size_t cap)
+bool rc_k32_guest_rel(const char *in, char *rel, size_t cap)
 {
     if (!in) {
         return false;
@@ -134,7 +135,7 @@ static bool guest_rel(const char *in, char *rel, size_t cap)
 }
 
 /* Where an existing file is: the user directory first. */
-static bool find_existing(const char *rel, char *host, bool *is_dir, uint64_t *size)
+bool rc_k32_find_existing(const char *rel, char *host, bool *is_dir, uint64_t *size)
 {
     if (rc_host_resolve(rc_cfg->user_dir, rel, false, host) && rc_host_exists(host, is_dir, size)) {
         return true;
@@ -144,7 +145,7 @@ static bool find_existing(const char *rel, char *host, bool *is_dir, uint64_t *s
 
 /* ---- handles ---- */
 
-enum kind { K_FREE, K_STD, K_FILE, K_FIND };
+enum kind { K_FREE, K_STD, K_FILE, K_FIND, K_MAPPING };
 
 typedef struct entry {
     char name[260];
@@ -158,6 +159,7 @@ typedef struct handle {
     int std;
     entry *list;
     uint32_t count, next;
+    uint32_t file; /* a mapping: the file handle it maps */
 } handle;
 
 #define HANDLES 256u
@@ -235,12 +237,12 @@ static void k_CreateFileA(rc_cpu *c)
     const char *name = rc_str(RC_ARG(c, 0));
     uint32_t access = RC_ARG(c, 1), disp = RC_ARG(c, 4);
     char rel[RC_PATH_MAX], host[RC_PATH_MAX];
-    if (!guest_rel(name, rel, sizeof rel)) {
+    if (!rc_k32_guest_rel(name, rel, sizeof rel)) {
         rc_last_error = ERROR_PATH_NOT_FOUND;
         RC_RETURN(c, INVALID_HANDLE, 7);
     }
     bool is_dir = false;
-    bool exists = find_existing(rel, host, &is_dir, NULL);
+    bool exists = rc_k32_find_existing(rel, host, &is_dir, NULL);
     if (exists && is_dir) {
         rc_last_error = ERROR_ACCESS_DENIED;
         RC_RETURN(c, INVALID_HANDLE, 7);
@@ -376,6 +378,10 @@ static void k_CloseHandle(rc_cpu *c)
         x->kind = K_FREE;
         SAVED();
     }
+    handle *m = get(h, K_MAPPING);
+    if (m) {
+        m->kind = K_FREE;
+    }
     RC_RETURN(c, 1, 1); /* events and other pseudo handles close too */
 }
 
@@ -383,7 +389,7 @@ static void k_GetFileAttributesA(rc_cpu *c)
 {
     char rel[RC_PATH_MAX], host[RC_PATH_MAX];
     bool is_dir = false;
-    if (!guest_rel(rc_str(RC_ARG(c, 0)), rel, sizeof rel) || !find_existing(rel, host, &is_dir, NULL)) {
+    if (!rc_k32_guest_rel(rc_str(RC_ARG(c, 0)), rel, sizeof rel) || !rc_k32_find_existing(rel, host, &is_dir, NULL)) {
         rc_last_error = ERROR_FILE_NOT_FOUND;
         RC_RETURN(c, 0xffffffffu, 1);
     }
@@ -396,7 +402,7 @@ long rc_vfs_read_head(const char *guest_path, uint32_t h, uint8_t *buf, uint32_t
 {
     if (guest_path) {
         char rel[RC_PATH_MAX], host[RC_PATH_MAX];
-        if (!guest_rel(guest_path, rel, sizeof rel) || !find_existing(rel, host, NULL, NULL)) {
+        if (!rc_k32_guest_rel(guest_path, rel, sizeof rel) || !rc_k32_find_existing(rel, host, NULL, NULL)) {
             return -1;
         }
         FILE *f = fopen(host, "rb");
@@ -509,7 +515,7 @@ static void k_FindFirstFileA(rc_cpu *c)
 {
     const char *pattern = rc_str(RC_ARG(c, 0));
     char rel[RC_PATH_MAX];
-    if (!guest_rel(pattern, rel, sizeof rel)) {
+    if (!rc_k32_guest_rel(pattern, rel, sizeof rel)) {
         rc_last_error = ERROR_PATH_NOT_FOUND;
         RC_RETURN(c, INVALID_HANDLE, 2);
     }
@@ -571,12 +577,12 @@ static void k_FindClose(rc_cpu *c)
 static void k_CopyFileA(rc_cpu *c)
 {
     char rs[RC_PATH_MAX], rd[RC_PATH_MAX], hs[RC_PATH_MAX], hd[RC_PATH_MAX];
-    if (!guest_rel(rc_str(RC_ARG(c, 0)), rs, sizeof rs) || !guest_rel(rc_str(RC_ARG(c, 1)), rd, sizeof rd) ||
-        !find_existing(rs, hs, NULL, NULL)) {
+    if (!rc_k32_guest_rel(rc_str(RC_ARG(c, 0)), rs, sizeof rs) || !rc_k32_guest_rel(rc_str(RC_ARG(c, 1)), rd, sizeof rd) ||
+        !rc_k32_find_existing(rs, hs, NULL, NULL)) {
         rc_last_error = ERROR_FILE_NOT_FOUND;
         RC_RETURN(c, 0, 3);
     }
-    if (RC_ARG(c, 2) && find_existing(rd, hd, NULL, NULL)) {
+    if (RC_ARG(c, 2) && rc_k32_find_existing(rd, hd, NULL, NULL)) {
         rc_last_error = ERROR_FILE_EXISTS;
         RC_RETURN(c, 0, 3);
     }
@@ -642,7 +648,149 @@ static void k_GetFullPathNameA(rc_cpu *c)
     RC_RETURN(c, len, 4);
 }
 
+static void k_GetFileSize(rc_cpu *c)
+{
+    handle *x = get(RC_ARG(c, 0), K_FILE);
+    uint32_t high = RC_ARG(c, 1);
+    if (!x) {
+        rc_last_error = ERROR_INVALID_HANDLE;
+        RC_RETURN(c, 0xffffffffu, 2);
+    }
+    long at = ftell(x->f);
+    fseek(x->f, 0, SEEK_END);
+    long n = ftell(x->f);
+    fseek(x->f, at, SEEK_SET);
+    if (high) {
+        rc_st32(high, 0);
+    }
+    RC_RETURN(c, (uint32_t)n, 2);
+}
+
+/* Only what the game wrote can be deleted (the user directory's copy). */
+static void k_DeleteFileA(rc_cpu *c)
+{
+    char rel[RC_PATH_MAX], host[RC_PATH_MAX];
+    bool is_dir = false;
+    if (!rc_k32_guest_rel(rc_str(RC_ARG(c, 0)), rel, sizeof rel) ||
+        !rc_host_resolve(rc_cfg->user_dir, rel, false, host) || !rc_host_exists(host, &is_dir, NULL) || is_dir) {
+        rc_last_error = ERROR_FILE_NOT_FOUND;
+        RC_RETURN(c, 0, 1);
+    }
+    int ok = remove(host) == 0;
+    if (ok) {
+        SAVED();
+    } else {
+        rc_last_error = ERROR_ACCESS_DENIED;
+    }
+    RC_RETURN(c, ok ? 1 : 0, 1);
+}
+
+static void k_CreateDirectoryA(rc_cpu *c)
+{
+    char rel[RC_PATH_MAX], host[RC_PATH_MAX];
+    bool is_dir = false;
+    if (!rc_k32_guest_rel(rc_str(RC_ARG(c, 0)), rel, sizeof rel)) {
+        rc_last_error = ERROR_PATH_NOT_FOUND;
+        RC_RETURN(c, 0, 2);
+    }
+    if (rc_k32_find_existing(rel, host, &is_dir, NULL)) {
+        rc_last_error = 183; /* ERROR_ALREADY_EXISTS */
+        RC_RETURN(c, 0, 2);
+    }
+    if (!rc_host_resolve(rc_cfg->user_dir, rel, true, host) || !rc_host_mkdir(host)) {
+        rc_last_error = ERROR_PATH_NOT_FOUND;
+        RC_RETURN(c, 0, 2);
+    }
+    SAVED();
+    RC_RETURN(c, 1, 2);
+}
+
+/* ---- file mappings: a view is a copy of the file in guest memory, written
+ * back when it is unmapped if it may be written ---- */
+
+#define FILE_MAP_WRITE 2u
+#define VIEWS 64
+static struct view {
+    uint32_t addr, size, offset, file;
+    bool write;
+} views[VIEWS];
+
+static void k_CreateFileMappingA(rc_cpu *c)
+{
+    uint32_t fh = RC_ARG(c, 0);
+    if (!get(fh, K_FILE)) {
+        rc_last_error = ERROR_INVALID_HANDLE;
+        RC_RETURN(c, 0, 6);
+    }
+    uint32_t h = new_handle(K_MAPPING);
+    get(h, K_MAPPING)->file = fh;
+    rc_last_error = ERROR_SUCCESS;
+    RC_RETURN(c, h, 6);
+}
+
+static void k_MapViewOfFile(rc_cpu *c)
+{
+    handle *m = get(RC_ARG(c, 0), K_MAPPING);
+    uint32_t access = RC_ARG(c, 1), offset = RC_ARG(c, 3), n = RC_ARG(c, 4);
+    handle *x = m ? get(m->file, K_FILE) : NULL;
+    if (!x) {
+        rc_last_error = ERROR_INVALID_HANDLE;
+        RC_RETURN(c, 0, 5);
+    }
+    long at = ftell(x->f);
+    fseek(x->f, 0, SEEK_END);
+    long size = ftell(x->f);
+    if (n == 0) {
+        n = size > (long)offset ? (uint32_t)(size - (long)offset) : 0;
+    }
+    int slot = -1;
+    for (int i = 0; i < VIEWS && slot < 0; i++) {
+        if (!views[i].addr) {
+            slot = i;
+        }
+    }
+    uint32_t addr = slot >= 0 && n ? rc_heap_alloc(n, true) : 0;
+    if (!addr) {
+        fseek(x->f, at, SEEK_SET);
+        rc_last_error = ERROR_NOT_ENOUGH_MEMORY;
+        RC_RETURN(c, 0, 5);
+    }
+    fseek(x->f, (long)offset, SEEK_SET);
+    size_t got = fread(rc_ptr(addr), 1, n, x->f);
+    (void)got;
+    fseek(x->f, at, SEEK_SET);
+    views[slot] = (struct view){addr, n, offset, m->file, (access & FILE_MAP_WRITE) != 0};
+    RC_RETURN(c, addr, 5);
+}
+
+static void k_UnmapViewOfFile(rc_cpu *c)
+{
+    uint32_t addr = RC_ARG(c, 0);
+    for (int i = 0; i < VIEWS; i++) {
+        if (views[i].addr == addr && addr) {
+            handle *x = views[i].write ? get(views[i].file, K_FILE) : NULL;
+            if (x) {
+                long at = ftell(x->f);
+                fseek(x->f, (long)views[i].offset, SEEK_SET);
+                fwrite(rc_ptr(addr), 1, views[i].size, x->f);
+                fseek(x->f, at, SEEK_SET);
+                SAVED();
+            }
+            rc_heap_free(addr);
+            views[i].addr = 0;
+            RC_RETURN(c, 1, 1);
+        }
+    }
+    RC_RETURN(c, 0, 1);
+}
+
 const rc_import_def rc_k32_file[] = {
+    {K32, "GetFileSize", k_GetFileSize},
+    {K32, "DeleteFileA", k_DeleteFileA},
+    {K32, "CreateDirectoryA", k_CreateDirectoryA},
+    {K32, "CreateFileMappingA", k_CreateFileMappingA},
+    {K32, "MapViewOfFile", k_MapViewOfFile},
+    {K32, "UnmapViewOfFile", k_UnmapViewOfFile},
     {K32, "GetStdHandle", k_GetStdHandle},
     {K32, "SetStdHandle", k_SetStdHandle},
     {K32, "SetHandleCount", k_SetHandleCount},

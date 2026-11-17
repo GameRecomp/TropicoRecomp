@@ -839,7 +839,130 @@ static void k_ScreenToClient(rc_cpu *c)
     RC_RETURN(c, 1, 2);
 }
 
+static void k_SendMessageA(rc_cpu *c)
+{
+    RC_RETURN(c, send(c, RC_ARG(c, 0), RC_ARG(c, 1), RC_ARG(c, 2), RC_ARG(c, 3)), 4);
+}
+
+static void k_PostQuitMessage(rc_cpu *c)
+{
+    rc_post_message(0, WM_QUIT, RC_ARG(c, 0), 0);
+    RC_RETURN(c, 0, 1);
+}
+
+/* The whole client area while it is marked for painting. */
+static void k_GetUpdateRect(rc_cpu *c)
+{
+    window *w = get(RC_ARG(c, 0));
+    uint32_t r = RC_ARG(c, 1);
+    if (!w || !w->invalid) {
+        if (r) {
+            put_rect(r, 0, 0, 0, 0);
+        }
+        RC_RETURN(c, 0, 3);
+    }
+    if (r) {
+        int32_t cw, ch;
+        client_size(w, &cw, &ch);
+        put_rect(r, 0, 0, cw, ch);
+    }
+    RC_RETURN(c, 1, 3);
+}
+
+static void k_GetAsyncKeyState(rc_cpu *c)
+{
+    rc_pump_events();
+    RC_RETURN(c, (keys[RC_ARG(c, 0) & 0xff] & 0x80) ? 0x8000u : 0, 1);
+}
+
+/* The screen: as large as the window the game may have (rc_plat_area). */
+static void screen_size(int *w, int *h)
+{
+    rc_plat_area(w, h);
+    if (*w <= 0 || *h <= 0) {
+        *w = 1024;
+        *h = 768;
+    }
+}
+
+static void k_GetSystemMetrics(rc_cpu *c)
+{
+    int w, h;
+    screen_size(&w, &h);
+    uint32_t v = 0;
+    switch (RC_ARG(c, 0)) {
+    case 0: /* SM_CXSCREEN */
+    case 16: /* SM_CXFULLSCREEN */
+    case 78: /* SM_CXVIRTUALSCREEN */
+        v = (uint32_t)w;
+        break;
+    case 1: /* SM_CYSCREEN */
+    case 17: /* SM_CYFULLSCREEN */
+    case 79: /* SM_CYVIRTUALSCREEN */
+        v = (uint32_t)h;
+        break;
+    case 4: /* SM_CYCAPTION */
+        v = 19;
+        break;
+    case 5: /* SM_CXBORDER */
+    case 6: /* SM_CYBORDER */
+        v = 1;
+        break;
+    case 7: /* SM_CXDLGFRAME */
+    case 8: /* SM_CYDLGFRAME */
+        v = 3;
+        break;
+    case 32: /* SM_CXFRAME */
+    case 33: /* SM_CYFRAME */
+        v = 4;
+        break;
+    case 15: /* SM_CYMENU */
+        v = 19;
+        break;
+    case 43: /* SM_CMOUSEBUTTONS */
+        v = 3;
+        break;
+    case 19: /* SM_MOUSEPRESENT */
+    case 75: /* SM_MOUSEWHEELPRESENT */
+    case 80: /* SM_CMONITORS */
+        v = 1;
+        break;
+    default:
+        break;
+    }
+    RC_RETURN(c, v, 1);
+}
+
+static void k_SystemParametersInfoA(rc_cpu *c)
+{
+    uint32_t action = RC_ARG(c, 0), pv = RC_ARG(c, 2);
+    switch (action) {
+    case 0x30: { /* SPI_GETWORKAREA */
+        int w, h;
+        screen_size(&w, &h);
+        if (pv) {
+            put_rect(pv, 0, 0, w, h);
+        }
+        break;
+    }
+    case 0x10: /* SPI_GETSCREENSAVEACTIVE: off */
+        if (pv) {
+            rc_st32(pv, 0);
+        }
+        break;
+    default:
+        break;
+    }
+    RC_RETURN(c, 1, 4);
+}
+
 const rc_import_def rc_user32_windows[] = {
+    {U32, "SendMessageA", k_SendMessageA},
+    {U32, "PostQuitMessage", k_PostQuitMessage},
+    {U32, "GetUpdateRect", k_GetUpdateRect},
+    {U32, "GetAsyncKeyState", k_GetAsyncKeyState},
+    {U32, "GetSystemMetrics", k_GetSystemMetrics},
+    {U32, "SystemParametersInfoA", k_SystemParametersInfoA},
     {U32, "CreateWindowExA", k_CreateWindowExA},
     {U32, "ShowWindow", k_ShowWindow},
     {U32, "UpdateWindow", k_UpdateWindow},

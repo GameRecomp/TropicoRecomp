@@ -35,6 +35,10 @@ void rc_thread_yield(void);
 /* Sleep: the current thread waits `ms`, the others run meanwhile. */
 void rc_thread_sleep(uint32_t ms);
 
+/* End the current thread with `code` (ExitThread); on the main thread, the
+ * process. Does not return. */
+void rc_thread_exit(uint32_t code);
+
 uint32_t rc_thread_id(void);
 /* The current thread's TIB. */
 uint32_t rc_thread_tib(void);

@@ -40,11 +40,11 @@ const rc_wclass_info *rc_find_class(const char *name, uint32_t *wndproc, uint32_
     return NULL;
 }
 
-static void k_RegisterClassA(rc_cpu *c)
+/* WNDCLASSA, or WNDCLASSEXA from its second field on (`p` past cbSize). */
+static uint32_t register_class(uint32_t p)
 {
-    uint32_t p = RC_ARG(c, 0);
     if (nclasses == CLASSES) {
-        RC_RETURN(c, 0, 1);
+        return 0;
     }
     wclass *w = &classes[nclasses];
     w->style = rc_ld32(p);
@@ -57,8 +57,12 @@ static void k_RegisterClassA(rc_cpu *c)
         snprintf(w->name, sizeof w->name, "%s", rc_str(name));
     }
     nclasses++;
-    RC_RETURN(c, 0xc000u + nclasses - 1, 1);
+    return 0xc000u + nclasses - 1;
 }
+
+static void k_RegisterClassA(rc_cpu *c) { RC_RETURN(c, register_class(RC_ARG(c, 0)), 1); }
+
+static void k_RegisterClassExA(rc_cpu *c) { RC_RETURN(c, register_class(RC_ARG(c, 0) + 4), 1); }
 
 /* ---- resources: handles only, for now ---- */
 static uint32_t next_resource = 0x00010100u;
@@ -361,6 +365,92 @@ static void k_OffsetRect(rc_cpu *c)
     RC_RETURN(c, 1, 3);
 }
 
+/* RECT { left, top, right, bottom }. */
+static int32_t rl(uint32_t r, int i) { return (int32_t)rc_ld32(r + 4u * (uint32_t)i); }
+static void rs(uint32_t r, int32_t l, int32_t t, int32_t rt, int32_t b)
+{
+    rc_st32(r, (uint32_t)l);
+    rc_st32(r + 4, (uint32_t)t);
+    rc_st32(r + 8, (uint32_t)rt);
+    rc_st32(r + 12, (uint32_t)b);
+}
+static bool empty(uint32_t r) { return rl(r, 2) <= rl(r, 0) || rl(r, 3) <= rl(r, 1); }
+static int32_t mn(int32_t a, int32_t b) { return a < b ? a : b; }
+static int32_t mx(int32_t a, int32_t b) { return a > b ? a : b; }
+
+static void k_SetRectEmpty(rc_cpu *c)
+{
+    rs(RC_ARG(c, 0), 0, 0, 0, 0);
+    RC_RETURN(c, 1, 1);
+}
+
+static void k_CopyRect(rc_cpu *c)
+{
+    uint32_t d = RC_ARG(c, 0), s = RC_ARG(c, 1);
+    if (!d || !s) {
+        RC_RETURN(c, 0, 2);
+    }
+    rs(d, rl(s, 0), rl(s, 1), rl(s, 2), rl(s, 3));
+    RC_RETURN(c, 1, 2);
+}
+
+static void k_IsRectEmpty(rc_cpu *c) { RC_RETURN(c, empty(RC_ARG(c, 0)) ? 1 : 0, 1); }
+
+static void k_EqualRect(rc_cpu *c)
+{
+    uint32_t a = RC_ARG(c, 0), b = RC_ARG(c, 1);
+    int eq = 1;
+    for (int i = 0; i < 4; i++) {
+        eq &= rl(a, i) == rl(b, i);
+    }
+    RC_RETURN(c, (uint32_t)eq, 2);
+}
+
+static void k_InflateRect(rc_cpu *c)
+{
+    uint32_t r = RC_ARG(c, 0);
+    int32_t dx = (int32_t)RC_ARG(c, 1), dy = (int32_t)RC_ARG(c, 2);
+    rs(r, rl(r, 0) - dx, rl(r, 1) - dy, rl(r, 2) + dx, rl(r, 3) + dy);
+    RC_RETURN(c, 1, 3);
+}
+
+static void k_PtInRect(rc_cpu *c)
+{
+    uint32_t r = RC_ARG(c, 0);
+    int32_t x = (int32_t)RC_ARG(c, 1), y = (int32_t)RC_ARG(c, 2); /* POINT by value */
+    RC_RETURN(c, x >= rl(r, 0) && x < rl(r, 2) && y >= rl(r, 1) && y < rl(r, 3) ? 1 : 0, 3);
+}
+
+static void k_IntersectRect(rc_cpu *c)
+{
+    uint32_t d = RC_ARG(c, 0), a = RC_ARG(c, 1), b = RC_ARG(c, 2);
+    int32_t l = mx(rl(a, 0), rl(b, 0)), t = mx(rl(a, 1), rl(b, 1));
+    int32_t r = mn(rl(a, 2), rl(b, 2)), bt = mn(rl(a, 3), rl(b, 3));
+    if (empty(a) || empty(b) || r <= l || bt <= t) {
+        rs(d, 0, 0, 0, 0);
+        RC_RETURN(c, 0, 3);
+    }
+    rs(d, l, t, r, bt);
+    RC_RETURN(c, 1, 3);
+}
+
+static void k_UnionRect(rc_cpu *c)
+{
+    uint32_t d = RC_ARG(c, 0), a = RC_ARG(c, 1), b = RC_ARG(c, 2);
+    if (empty(a) && empty(b)) {
+        rs(d, 0, 0, 0, 0);
+        RC_RETURN(c, 0, 3);
+    }
+    if (empty(a)) {
+        rs(d, rl(b, 0), rl(b, 1), rl(b, 2), rl(b, 3));
+    } else if (empty(b)) {
+        rs(d, rl(a, 0), rl(a, 1), rl(a, 2), rl(a, 3));
+    } else {
+        rs(d, mn(rl(a, 0), rl(b, 0)), mn(rl(a, 1), rl(b, 1)), mx(rl(a, 2), rl(b, 2)), mx(rl(a, 3), rl(b, 3)));
+    }
+    RC_RETURN(c, 1, 3);
+}
+
 /* Window frames: what Windows XP's classic theme adds around a client area. */
 #define WS_CAPTION 0x00c00000u
 #define WS_THICKFRAME 0x00040000u
@@ -391,6 +481,7 @@ static void k_AdjustWindowRectEx(rc_cpu *c)
 
 const rc_import_def rc_user32_setup[] = {
     {U32, "RegisterClassA", k_RegisterClassA},
+    {U32, "RegisterClassExA", k_RegisterClassExA},
     {U32, "LoadCursorA", k_LoadCursorA},
     {U32, "SetCursor", k_SetCursor},
     {U32, "ShowCursor", k_ShowCursor},
@@ -408,5 +499,13 @@ const rc_import_def rc_user32_setup[] = {
     {U32, "OffsetRect", k_OffsetRect},
     {U32, "AdjustWindowRect", k_AdjustWindowRect},
     {U32, "AdjustWindowRectEx", k_AdjustWindowRectEx},
+    {U32, "SetRectEmpty", k_SetRectEmpty},
+    {U32, "CopyRect", k_CopyRect},
+    {U32, "IsRectEmpty", k_IsRectEmpty},
+    {U32, "EqualRect", k_EqualRect},
+    {U32, "InflateRect", k_InflateRect},
+    {U32, "PtInRect", k_PtInRect},
+    {U32, "IntersectRect", k_IntersectRect},
+    {U32, "UnionRect", k_UnionRect},
 };
 const uint32_t rc_user32_setup_count = sizeof rc_user32_setup / sizeof rc_user32_setup[0];

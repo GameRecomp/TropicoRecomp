@@ -5,6 +5,10 @@ add_library(rc_hle STATIC
     kernel32/memory.c
     kernel32/locale.c
     kernel32/file.c
+    kernel32/profile.c
+    kernel32/sync.c
+    kernel32/version.c
+    kernel32/ole32.c
     user32/user32.c
     user32/window.c
     gdi32/gdi32.c

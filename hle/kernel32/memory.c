@@ -119,7 +119,25 @@ static void k_IsBadWritePtr(rc_cpu *c)
     RC_RETURN(c, !rc_vm_committed(p, n), 2);
 }
 
+static void k_IsBadReadPtr(rc_cpu *c)
+{
+    uint32_t p = RC_ARG(c, 0), n = RC_ARG(c, 1);
+    RC_RETURN(c, n && !rc_vm_committed(p, n), 2);
+}
+
+static void k_IsBadCodePtr(rc_cpu *c)
+{
+    uint32_t p = RC_ARG(c, 0);
+    RC_RETURN(c, !rc_vm_committed(p, 1), 1);
+}
+
+/* Nothing here hands out local memory (FormatMessage gives none): no-op. */
+static void k_LocalFree(rc_cpu *c) { RC_RETURN(c, 0, 1); }
+
 const rc_import_def rc_k32_memory[] = {
+    {K32, "IsBadReadPtr", k_IsBadReadPtr},
+    {K32, "IsBadCodePtr", k_IsBadCodePtr},
+    {K32, "LocalFree", k_LocalFree},
     {K32, "HeapCreate", k_HeapCreate},
     {K32, "HeapDestroy", k_HeapDestroy},
     {K32, "HeapAlloc", k_HeapAlloc},
