@@ -104,25 +104,25 @@ read on the rescaled art: it is made white (`0x7fff`).
 ## Rotated labels
 
 The tabs of the options book and of the yearbook, and the building panel's
-labels, are drawn rotated in a box laid out for 4:3. The drawer centres a
-label with half its length scaled by ys/xs of the screen (4h / 3w) where it
-should take half its length (the Tropico resolution patch found this), so
-away from 4:3 the label sits off its box by (1/2 - 2h/3w) of its length: at
-16:9 and 16:10 it hangs out of its tab. Both tab layouts call the drawer at
-`0x004526d0` (through a jump at `0x00402ba3`) with the box and its clip as
-stack arguments, from `0x0040741e` and `0x0049179e`: a patch point on each
-call moves the box and makes it taller, and the clip follow it. The building
-panel's labels reach the drawer with rotation 2: its wrapper moves their box
-and makes it taller.
+labels, are text turned on its side. The drawer (`0x004526d0`, reached
+through a jump at `0x00402ba3`; its 17th argument is the rotation, 1 and 3
+on the side) turns its box into pixels correctly, makes an image for the
+text with width and height swapped, and calls the text renderer
+(`0x00453ef0`, the call at `0x00450f8f`) to lay the text out in it, passing
+the box as (0, 0, height, width) in virtual units. The renderer turns a
+width into pixels with the screen's x scale (`0x005a0ffc`) and a height with
+its y scale (`0x005a1004`), so the label's height, a length along the
+screen's y axis, is scaled as an x length. At 4:3 the scales are equal;
+away from it the text is laid out in a box of the wrong size and placed
+off its tab: at 16:9 it hangs out, at 20:9 (phones) or 21:9 (ultrawide) it
+is cut off.
 
-The Tropico resolution patch measured the numbers at 16:9: the tab's box
-moved by (-14, -99) virtual units and made 84 higher (340), the panel's moved
-by -111 and made 107 higher. The error scales with the art, so they hold at
-every resolution of an aspect; across aspects it scales with
-K = (1/2 - 2h/3w) / (1/8), which is 1 at 16:9. The patch uses K times the
-16:9 numbers (|K| times for the heights), which at 16:10 (K = 2/3) gives the
-numbers that patch predicted there. Nothing is changed at 4:3 or at the
-game's own resolutions.
+`games/tropico1/patch_vtext.c` wraps the drawer to know when the text is on
+its side, and at the call (a patch point) gives those two arguments in the
+units the renderer reads them in (height times ys/xs, width times xs/ys).
+The box then has the image's size in pixels at every aspect. The Tropico
+resolution patch found the error and moved the box by numbers measured at
+16:9; correcting the box's size instead holds at every aspect.
 
 ## Following the window
 
