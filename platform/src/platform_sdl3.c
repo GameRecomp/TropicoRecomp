@@ -585,10 +585,12 @@ void rc_plat_error(const char *title, const char *message)
 }
 
 #if defined(SDL_PLATFORM_ANDROID)
-/* A hash of the index, to tell whether the unpacked data is current. */
+/* A hash of the index, to tell whether the unpacked data is current. Its
+ * start differs from FNV-1a's, so that data unpacked before each copy was
+ * checked against its size (and maybe emptied) is unpacked again. */
 static Uint64 fnv1a(const char *p, size_t n)
 {
-    Uint64 h = 0xcbf29ce484222325ull;
+    Uint64 h = 0xcbf29ce484222325ull ^ 2;
     for (size_t i = 0; i < n; i++) {
         h = (h ^ (unsigned char)p[i]) * 0x100000001b3ull;
     }
@@ -669,6 +671,11 @@ static bool unpack(char *list, const char *dest)
                 }
                 break;
             }
+            /* SDL opens a relative path from the internal storage before
+             * the assets, and `dst` is that file: the earlier copy goes
+             * first, or `in` would be `dst`, which "wb" empties. */
+            SDL_RemovePath(dst);
+            Uint64 want = SDL_strtoull(l, NULL, 10), got = 0;
             SDL_IOStream *in = SDL_IOFromFile(src, "rb");
             SDL_IOStream *out = in ? SDL_IOFromFile(dst, "wb") : NULL;
             if (!in || !out) {
@@ -686,6 +693,7 @@ static bool unpack(char *list, const char *dest)
                     return false;
                 }
                 done += n;
+                got += n;
                 if (done - shown >= (8u << 20)) {
                     shown = done;
                     draw_progress(done, total);
@@ -693,6 +701,11 @@ static bool unpack(char *list, const char *dest)
             }
             SDL_CloseIO(in);
             if (!SDL_CloseIO(out)) {
+                return false;
+            }
+            if (got != want) {
+                SDL_Log("unpack %s: %llu bytes of %llu", name, (unsigned long long)got,
+                        (unsigned long long)want);
                 return false;
             }
         }
