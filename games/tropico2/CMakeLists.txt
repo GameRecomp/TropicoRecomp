@@ -70,9 +70,11 @@ endif()
 set(TROPICO2_GENERATED "${PROJECT_SOURCE_DIR}/generated/tropico2/c" CACHE PATH
     "Directory with the C that recomp lift generated for Tropico 2")
 
-# Configure again as soon as the lifted code appears (or changes).
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${TROPICO2_GENERATED}/dispatch.c")
+# Configure again as soon as the lifted code appears (or goes), so that the
+# tropico2 target below follows `recomp lift` without a manual step. A glob,
+# because CMake re-checks it on every build even while dispatch.c is
+# missing; a missing file in CMAKE_CONFIGURE_DEPENDS is never checked.
+file(GLOB TROPICO2_DISPATCH CONFIGURE_DEPENDS "${TROPICO2_GENERATED}/dispatch.c")
 
 # Without lifted code tropico2 cannot link, so it is left out of the default
 # build (CI builds without game code).

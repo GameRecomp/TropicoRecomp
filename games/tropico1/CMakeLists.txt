@@ -81,10 +81,11 @@ endif()
 set(TROPICO1_GENERATED "${PROJECT_SOURCE_DIR}/generated/tropico1/c" CACHE PATH
     "Directory with the C that recomp lift generated for Tropico")
 
-# Configure again as soon as the lifted code appears (or changes), so that
-# the tropico1 target below follows `recomp lift` without a manual step.
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${TROPICO1_GENERATED}/dispatch.c")
+# Configure again as soon as the lifted code appears (or goes), so that the
+# tropico1 target below follows `recomp lift` without a manual step. A glob,
+# because CMake re-checks it on every build even while dispatch.c is
+# missing; a missing file in CMAKE_CONFIGURE_DEPENDS is never checked.
+file(GLOB TROPICO1_DISPATCH CONFIGURE_DEPENDS "${TROPICO1_GENERATED}/dispatch.c")
 
 # tropico1 always exists, so an IDE can always select it. Without lifted code
 # it is main.c alone, which cannot link until `recomp lift` has been run, so
