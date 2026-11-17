@@ -171,6 +171,16 @@ impl PathState {
             match ins.mnemonic() {
                 Mnemonic::Cmp if imm => self.cmp = Some((d, (ins.immediate(1) as u32))),
                 Mnemonic::And if imm => after = Some((Some(ins.immediate(1) as u32), None)),
+                // A register holding a constant bounds what is masked with it.
+                Mnemonic::Mov if imm => after = Some((Some(ins.immediate(1) as u32), None)),
+                Mnemonic::And if src.is_some() => {
+                    let s = src.unwrap_or(0);
+                    let b = match (self.bounds[d], self.bounds[s]) {
+                        (Some(x), Some(y)) => Some(x.min(y)),
+                        (x, y) => x.or(y),
+                    };
+                    after = Some((b, None));
+                }
                 Mnemonic::Mov if ins.op_count() > 1 && frame_local(ins, 1).is_some() => {
                     let d = frame_local(ins, 1);
                     let b = self.local.filter(|l| Some(l.0) == d).map(|l| l.1);
@@ -263,6 +273,76 @@ impl PathState {
     }
 }
 
+/// Instructions a user-mode Win32 program (compiled or its libraries) does
+/// not contain: port I/O, interrupt control, BCD arithmetic, far control
+/// transfers and segment loads. Found in decoded data, they mark junk.
+fn never_in_user_code(ins: &Instruction) -> bool {
+    use Mnemonic as M;
+    if matches!(
+        ins.mnemonic(),
+        M::In
+            | M::Out
+            | M::Insb
+            | M::Insw
+            | M::Insd
+            | M::Outsb
+            | M::Outsw
+            | M::Outsd
+            | M::Cli
+            | M::Sti
+            | M::Hlt
+            | M::Iret
+            | M::Iretd
+            | M::Arpl
+            | M::Bound
+            | M::Aaa
+            | M::Aas
+            | M::Daa
+            | M::Das
+            | M::Aam
+            | M::Aad
+            | M::Salc
+            | M::Into
+            | M::Les
+            | M::Lds
+            | M::Retf
+            | M::Sldt
+            | M::Sgdt
+            | M::Sidt
+            | M::Lldt
+            | M::Lgdt
+            | M::Lidt
+            | M::Ltr
+            | M::Str
+            | M::Lmsw
+            | M::Smsw
+            | M::Clts
+            | M::Invd
+            | M::Wbinvd
+            | M::Enter
+    ) {
+        return true;
+    }
+    if ins.mnemonic() == M::Int
+        && ins.immediate(0) != 3
+        && ins.immediate(0) != 0x2e
+        && ins.immediate(0) != 0x2c
+    {
+        return true;
+    }
+    // Loading a segment register (mov sreg, pop sreg) or pushing one.
+    if (ins.mnemonic() == M::Mov
+        && ins.op0_kind() == OpKind::Register
+        && ins.op0_register().is_segment_register())
+        || (ins.mnemonic() == M::Pop
+            && ins.op0_kind() == OpKind::Register
+            && ins.op0_register().is_segment_register())
+    {
+        return true;
+    }
+    false
+}
+
 /// `nop`, `lea r, [r+0]`, `mov r, r`, `xchg r, r`.
 fn does_nothing(ins: &Instruction) -> bool {
     match ins.mnemonic() {
@@ -312,6 +392,8 @@ struct Undo {
     entries: Vec<u32>,
     tables: Vec<u32>,
     data: Vec<u32>,
+    /// Unreached ranges taken back as code: (start, end).
+    reclaimed: Vec<(u32, u32)>,
     problems: usize,
 }
 
@@ -424,7 +506,8 @@ pub(crate) fn explore(
     x.gaps();
     if !x.has_relocs {
         // Immediates in code found speculatively name functions too.
-        while x.immediate_candidates() {
+        x.data_pointers(pe);
+        while x.immediate_candidates() || !x.candidates.is_empty() {
             x.try_candidates();
             x.gaps();
         }
@@ -628,6 +711,7 @@ impl Explorer<'_> {
     /// Immediate operands of all decoded code that land on a plausible
     /// function start not yet decoded: candidates. Whether there were any.
     fn immediate_candidates(&mut self) -> bool {
+        let mut split = false;
         let addrs: Vec<(u32, u8)> = self.ex.insns.iter().map(|(&a, i)| (a, i.len)).collect();
         for (va, len) in addrs {
             let Some(bytes) = self.image.slice(va, len as usize) else {
@@ -641,6 +725,20 @@ impl Explorer<'_> {
                     .image
                     .u32(va + co.immediate_offset() as u32)
                     .unwrap_or(0);
+                // Code already decoded as part of another function, after
+                // a call or a jump: named here, it is a function of its own.
+                if self.ex.insns.contains_key(&v)
+                    && !self.ex.entries.contains_key(&v)
+                    && self.plausible_start(v)
+                    && !self.flows_into(v)
+                    && !self.tried.contains(&v)
+                {
+                    self.tried.insert(v);
+                    self.add_entry(v, EntrySource::OperandReference);
+                    self.run();
+                    split = true;
+                    continue;
+                }
                 if self.ex.in_code(v)
                     && !self.ex.insns.contains_key(&v)
                     && self.ex.inside_insn(v).is_none()
@@ -659,7 +757,7 @@ impl Explorer<'_> {
                 }
             }
         }
-        !self.candidates.is_empty()
+        split || !self.candidates.is_empty()
     }
 
     /// The next plausible function start in `(va, stop)`, or `stop`.
@@ -703,6 +801,17 @@ impl Explorer<'_> {
                         self.add_data(va, va + n, DataKind::Filler);
                         progress = true;
                         continue;
+                    }
+                    // Without relocations: a gap that does not begin like a
+                    // function but has a function start further in is
+                    // junk before that start; the start goes first, so the
+                    // junk cannot swallow it.
+                    if !self.has_relocs && !self.plausible_start(va) {
+                        let p = self.next_start(va, stop);
+                        if p < stop && self.speculate(p) {
+                            progress = true;
+                            continue;
+                        }
                     }
                     if self.pointer_table(va, stop) || self.speculate(va) {
                         // Continue in the same gap: what was just decoded is
@@ -830,6 +939,9 @@ impl Explorer<'_> {
         for a in undo.data {
             self.ex.data.remove(&a);
         }
+        for (a, e) in undo.reclaimed {
+            self.ex.data.insert(a, (e, DataKind::Unreached));
+        }
         self.ex.problems.truncate(undo.problems);
         false
     }
@@ -868,9 +980,18 @@ impl Explorer<'_> {
                 self.problem(va, ProblemKind::OutsideCode);
                 return;
             };
-            if self.ex.data_at(va).is_some() {
-                self.problem(va, ProblemKind::IntoData);
-                return;
+            if let Some((start, end, kind)) = self.ex.data_at(va) {
+                // Without relocations, code the gap pass found nothing to
+                // reach is code after all when something does reach it.
+                if !self.has_relocs && kind == DataKind::Unreached {
+                    self.ex.data.remove(&start);
+                    if let Some(u) = &mut self.undo {
+                        u.reclaimed.push((start, end));
+                    }
+                } else {
+                    self.problem(va, ProblemKind::IntoData);
+                    return;
+                }
             }
             if self.ex.inside_insn(va).is_some() {
                 self.problem(va, ProblemKind::Overlap);
@@ -883,6 +1004,12 @@ impl Explorer<'_> {
             let ins = dec.decode();
             if ins.is_invalid() {
                 self.problem(va, ProblemKind::Invalid);
+                return;
+            }
+            // Without relocations: an instruction no user-mode Win32 code
+            // of the time contains makes a speculative decode junk.
+            if !self.has_relocs && self.undo.is_some() && never_in_user_code(&ins) {
+                self.reject(va, ProblemKind::Invalid);
                 return;
             }
             let len = ins.len() as u32;
