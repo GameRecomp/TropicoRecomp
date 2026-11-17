@@ -19,6 +19,12 @@ rc_sound *rc_sound_load(const void *data, size_t size)
 }
 
 void rc_sound_free(rc_sound *s) { (void)s; }
+
+uint32_t rc_sound_ms(const rc_sound *s)
+{
+    (void)s;
+    return 0;
+}
 rc_track *rc_track_new(void) { return 0; }
 void rc_track_free(rc_track *t) { (void)t; }
 

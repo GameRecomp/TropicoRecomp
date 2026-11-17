@@ -3,6 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "rc/dispatch.h"
+#include "rc/process.h"
 
 #include <time.h>
 
@@ -157,6 +158,15 @@ void rc_rdtsc(uint32_t *eax, uint32_t *edx)
 {
     struct timespec ts;
     uint64_t t = 0;
+    if (rc_clock_virtual()) {
+        /* On the virtual clock its time, and a step per reading so that it
+         * always moves on: a run repeats. */
+        static uint64_t reads;
+        t = rc_ticks_peek_ms() * 1000000u + (++reads % 1000000u);
+        *eax = (uint32_t)t;
+        *edx = (uint32_t)(t >> 32);
+        return;
+    }
 #if defined(_WIN32)
     if (timespec_get(&ts, TIME_UTC) == TIME_UTC) {
 #else

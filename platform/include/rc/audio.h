@@ -27,6 +27,8 @@ void rc_audio_close(void);
 /* Decode a sound from memory (copied). NULL if it cannot be read. */
 rc_sound *rc_sound_load(const void *data, size_t size);
 void rc_sound_free(rc_sound *s);
+/* How long a sound plays once, in milliseconds (0 if unknown). */
+uint32_t rc_sound_ms(const rc_sound *s);
 
 rc_track *rc_track_new(void);
 void rc_track_free(rc_track *t);

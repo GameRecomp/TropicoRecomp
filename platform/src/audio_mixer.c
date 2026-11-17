@@ -65,6 +65,19 @@ rc_sound *rc_sound_load(const void *data, size_t size)
     return s;
 }
 
+uint32_t rc_sound_ms(const rc_sound *s)
+{
+    if (!s) {
+        return 0;
+    }
+    Sint64 frames = MIX_GetAudioDuration(s->audio);
+    SDL_AudioSpec spec;
+    if (frames <= 0 || !MIX_GetAudioFormat(s->audio, &spec) || spec.freq <= 0) {
+        return 0;
+    }
+    return (uint32_t)(frames * 1000 / spec.freq);
+}
+
 void rc_sound_free(rc_sound *s)
 {
     if (s) {

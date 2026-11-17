@@ -387,6 +387,10 @@ typedef struct sample {
     rc_track *track;
     int loops;           /* 0 forever */
     uint32_t eos;        /* end-of-sample callback, or 0 */
+    /* On the virtual clock a whole sound ends by that clock: when it
+     * started (or resumed) and how much of it was left. */
+    uint64_t vstart;
+    uint64_t vleft;
     float pan;
 } sample;
 
@@ -401,6 +405,22 @@ static sample *sample_of(uint32_t h)
         }
     }
     return NULL;
+}
+
+/* Whether a whole sound is still playing: by the device, or on the
+ * virtual clock by its length. */
+static bool sound_playing(sample *s)
+{
+    if (!rc_clock_virtual()) {
+        return rc_track_playing(s->track);
+    }
+    if (s->status != 4) {
+        return s->status == 8;
+    }
+    if (s->loops == 0) {
+        return true;
+    }
+    return rc_ticks_peek_ms() - s->vstart < s->vleft;
 }
 
 /* Leave whole-sound mode. */
@@ -558,8 +578,12 @@ static void k_start_sample(rc_cpu *c)
     sample *s = sample_of(RC_ARG(c, 0));
     if (s && s->sound) {
         s->status = 4;
+        s->vstart = rc_ticks_peek_ms();
+        s->vleft = (uint64_t)rc_sound_ms(s->sound) * (uint64_t)(s->loops > 0 ? s->loops : 1);
         rc_track_gain(s->track, s->volume);
-        rc_track_play(s->track, s->sound, s->loops);
+        if (!rc_clock_virtual()) {
+            rc_track_play(s->track, s->sound, s->loops);
+        }
     } else if (s) {
         queued_of(s);
         s->status = 4;
@@ -572,6 +596,10 @@ static void k_stop_sample(rc_cpu *c)
 {
     sample *s = sample_of(RC_ARG(c, 0));
     if (s && s->sound) {
+        if (s->status == 4 && rc_clock_virtual()) {
+            uint64_t ran = rc_ticks_peek_ms() - s->vstart;
+            s->vleft = ran >= s->vleft ? 0 : s->vleft - ran;
+        }
         s->status = 8;
         rc_track_pause(s->track, true);
     } else if (s) {
@@ -587,6 +615,7 @@ static void k_resume_sample(rc_cpu *c)
     sample *s = sample_of(RC_ARG(c, 0));
     if (s && s->sound) {
         s->status = 4;
+        s->vstart = rc_ticks_peek_ms();
         rc_track_pause(s->track, false);
     } else if (s) {
         queued_of(s);
@@ -614,7 +643,7 @@ static void k_end_sample(rc_cpu *c)
 static void k_sample_status(rc_cpu *c)
 {
     sample *s = sample_of(RC_ARG(c, 0));
-    if (s && s->sound && s->status == 4 && !rc_track_playing(s->track)) {
+    if (s && s->sound && s->status == 4 && !sound_playing(s)) {
         s->status = 2;
     }
     if (s && s->status == 4 && queued_of(s) == 0 && s->last_len) {
@@ -920,7 +949,7 @@ static void sample_pump(rc_cpu *c)
         }
         if (s->sound) {
             /* A whole sound that has played out: its end, once. */
-            if (!rc_track_playing(s->track)) {
+            if (!sound_playing(s)) {
                 s->status = 2;
                 if (s->eos) {
                     uint32_t a[1] = {s->guest};
