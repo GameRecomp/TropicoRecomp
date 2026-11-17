@@ -598,6 +598,20 @@ impl Explorer<'_> {
         }
     }
 
+    /// Whether the instruction just before `va` runs on into it: then `va`
+    /// is the middle of a function. (After a call, which may not return, a
+    /// return or a jump, a function may begin.)
+    fn flows_into(&self, va: u32) -> bool {
+        self.ex
+            .insns
+            .range(..va)
+            .next_back()
+            .is_some_and(|(&a, i)| {
+                a + u32::from(i.len) == va
+                    && matches!(i.flow, Flow::Next | Flow::Cond(_) | Flow::CallIndirect)
+            })
+    }
+
     /// The next plausible function start in `(va, stop)`, or `stop`.
     fn next_start(&self, va: u32, stop: u32) -> u32 {
         (va + 1..stop)
@@ -853,11 +867,18 @@ impl Explorer<'_> {
                     // Without relocations a speculative decode is believed
                     // only if what it calls looks like a function: junk
                     // decodes to calls into the middle of real code.
-                    if self.strict_calls
-                        && self.undo.is_some()
+                    if self.undo.is_some()
+                        && !self.has_relocs
                         && !self.ex.entries.contains_key(&t)
-                        && !self.plausible_start(t)
+                        && ((self.strict_calls && !self.plausible_start(t))
+                            || (self.ex.insns.contains_key(&t)
+                                && !self.undo.as_ref().is_some_and(|u| u.added.contains(&t))
+                                && self.flows_into(t)))
                     {
+                        // Without relocations: a call into the middle of
+                        // code already decoded (it would split a real
+                        // function), or in the strict pass to something
+                        // that does not look like a function.
                         self.reject(t, ProblemKind::IntoOtherFunction);
                         return;
                     }
