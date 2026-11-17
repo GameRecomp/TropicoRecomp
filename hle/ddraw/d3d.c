@@ -61,6 +61,21 @@ static device *dev_of(rc_cpu *c)
     rc_fatal("Direct3D: no device for object %u", o);
 }
 
+/* A device released for the last time gives its slot back. */
+static void k_DevRelease(rc_cpu *c)
+{
+    uint32_t o = rc_ld32(RC_ARG(c, 0) + 4);
+    uint32_t *r = rc_dd_refs(o);
+    if (*r > 0 && --*r == 0) {
+        for (uint32_t i = 0; i < ndevices; i++) {
+            if (devices[i].object == o) {
+                devices[i].object = 0;
+            }
+        }
+    }
+    RC_RETURN(c, *r, 1);
+}
+
 static void identity(float *m)
 {
     memset(m, 0, 16 * sizeof *m);
@@ -186,11 +201,19 @@ static void k_EvictManagedTextures(rc_cpu *c) { RC_RETURN(c, D3D_OK, 1); }
 static void k_CreateDevice(rc_cpu *c)
 {
     uint32_t surf = rc_ld32(RC_ARG(c, 2) + 4), out = RC_ARG(c, 3);
-    if (ndevices == DEVICES || !rc_dd_surf(surf)) {
+    device *d = NULL;
+    for (uint32_t i = 0; i < ndevices && !d; i++) {
+        if (!devices[i].object) {
+            d = &devices[i]; /* released */
+        }
+    }
+    if (!d && ndevices < DEVICES) {
+        d = &devices[ndevices++];
+    }
+    if (!d || !rc_dd_surf(surf)) {
         rc_st32(out, 0);
         RC_RETURN(c, DDERR_INVALIDPARAMS, 4);
     }
-    device *d = &devices[ndevices++];
     memset(d, 0, sizeof *d);
     d->object = rc_dd_new(RC_DD_DEVICE);
     d->target = surf;
@@ -1426,7 +1449,7 @@ const rc_import_def rc_d3d_defs[] = {
     M("IDirect3D7", "EvictManagedTextures", k_EvictManagedTextures),
 
     M("IDirect3DDevice7", "AddRef", k_D3DAddRef),
-    M("IDirect3DDevice7", "Release", k_D3DRelease),
+    M("IDirect3DDevice7", "Release", k_DevRelease),
     M("IDirect3DDevice7", "GetCaps", k_DevGetCaps),
     M("IDirect3DDevice7", "EnumTextureFormats", k_EnumTextureFormats),
     M("IDirect3DDevice7", "BeginScene", k_BeginScene),
