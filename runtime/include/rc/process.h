@@ -37,6 +37,16 @@ typedef struct rc_config {
 
 extern const rc_config *rc_cfg;
 
+/* A crash in guest memory is reported on stderr (the guest address, what
+ * kind of place it is, and the last note), then goes on as before.
+ * rc_run installs the report; a note says what the program is doing, for
+ * example which window message it handles (keep the old one with get and
+ * put it back with set when the work nests). */
+void rc_fault_install(void);
+void rc_fault_note(const char *what, uint32_t a, uint32_t b, uint32_t c, uint32_t d);
+const char *rc_fault_note_get(uint32_t v[4]);
+void rc_fault_note_set(const char *what, const uint32_t v[4]);
+
 /* The guest command line, module path and similar process data live here. */
 typedef struct rc_process {
     uint32_t image_base, image_size, entry;

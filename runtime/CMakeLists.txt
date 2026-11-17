@@ -13,6 +13,7 @@ add_library(rc_runtime STATIC
     src/thread.c
     src/native.c
     src/web.c
+    src/fault.c
 )
 target_include_directories(rc_runtime PUBLIC include)
 if(EMSCRIPTEN)

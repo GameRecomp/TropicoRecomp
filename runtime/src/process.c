@@ -288,6 +288,7 @@ int rc_run(const rc_config *cfg)
     if (!rc_mem_reserve(UINT64_C(1) << 32)) {
         rc_fatal("cannot reserve the guest address space");
     }
+    rc_fault_install();
     if (rc_vm_alloc(PROC_DATA, PROC_DATA_SIZE, true) != PROC_DATA) {
         rc_fatal("cannot set up the process data area");
     }

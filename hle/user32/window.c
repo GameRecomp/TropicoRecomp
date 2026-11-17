@@ -97,7 +97,13 @@ static uint32_t send(rc_cpu *c, uint32_t hwnd, uint32_t msg, uint32_t wp, uint32
         return 0;
     }
     uint32_t args[4] = {hwnd, msg, wp, lp};
-    return rc_call_guest(c, w->wndproc, 4, args);
+    /* For the report of a crash: the message (hwnd, msg, wParam, lParam). */
+    uint32_t outer[4];
+    const char *outer_what = rc_fault_note_get(outer);
+    rc_fault_note("window message", hwnd, msg, wp, lp);
+    uint32_t r = rc_call_guest(c, w->wndproc, 4, args);
+    rc_fault_note_set(outer_what, outer);
+    return r;
 }
 
 /* The size of the client area. Top-level windows of these games are
