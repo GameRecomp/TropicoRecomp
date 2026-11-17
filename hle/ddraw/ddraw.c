@@ -884,6 +884,23 @@ void rc_ddraw_extra_mode(uint32_t w, uint32_t h)
     extra_h = h;
 }
 
+static uint32_t added[8][2];
+static unsigned n_added;
+
+void rc_ddraw_add_mode(uint32_t w, uint32_t h)
+{
+    for (unsigned i = 0; i < n_added; i++) {
+        if (added[i][0] == w && added[i][1] == h) {
+            return;
+        }
+    }
+    if (w && h && n_added < sizeof added / sizeof added[0]) {
+        added[n_added][0] = w;
+        added[n_added][1] = h;
+        n_added++;
+    }
+}
+
 static void set_mode(uint32_t w, uint32_t h, uint32_t bpp)
 {
     display.w = w;
@@ -936,8 +953,9 @@ static void enum_modes(rc_cpu *c, uint32_t size)
     static const uint32_t depths[] = {8, 16, 32};
     uint32_t d = rc_heap_alloc(size, true);
     unsigned n = sizeof sizes / sizeof sizes[0];
-    for (unsigned i = 0; i <= n; i++) {
-        uint32_t w = i < n ? sizes[i][0] : extra_w, h = i < n ? sizes[i][1] : extra_h;
+    for (unsigned i = 0; i <= n + n_added; i++) {
+        uint32_t w = i < n ? sizes[i][0] : i == n ? extra_w : added[i - n - 1][0];
+        uint32_t h = i < n ? sizes[i][1] : i == n ? extra_h : added[i - n - 1][1];
         if (!w || !h) {
             continue;
         }

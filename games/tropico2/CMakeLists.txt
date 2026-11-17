@@ -7,17 +7,18 @@
 # builds it on every system): it runs the native code and game files it
 # finds in data/ beside it, which the converter puts there.
 set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "RC_REVISION=\"${RC_REVISION}\"")
+set(TROPICO2_PATCHES patches.c patch_resolution.c)
 
 if(ANDROID)
     # On Android the shell is libmain.so, which SDL's activity loads and
     # starts at SDL_main; the target has a name of its own beside Tropico's.
-    add_library(tropico2_main SHARED main.c shell.c)
+    add_library(tropico2_main SHARED main.c shell.c ${TROPICO2_PATCHES})
     set_target_properties(tropico2_main PROPERTIES OUTPUT_NAME main)
     target_compile_definitions(tropico2_main PRIVATE main=SDL_main)
     target_link_libraries(tropico2_main PRIVATE rc_hle rc_runtime)
     return()
 endif()
-add_executable(tropico2-shell main.c shell.c)
+add_executable(tropico2-shell main.c shell.c ${TROPICO2_PATCHES})
 target_link_libraries(tropico2-shell PRIVATE rc_hle rc_runtime)
 
 # The Windows programs' icon (tools/make-icons; CI makes it) and version
@@ -77,7 +78,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 # build (CI builds without game code).
 if(NOT EXISTS "${TROPICO2_GENERATED}/dispatch.c")
     message(STATUS "tropico2: no generated code in ${TROPICO2_GENERATED}; run recomp lift first (tropico2 will not link)")
-    add_executable(tropico2 EXCLUDE_FROM_ALL main.c)
+    add_executable(tropico2 EXCLUDE_FROM_ALL main.c ${TROPICO2_PATCHES})
     target_link_libraries(tropico2 PRIVATE rc_hle rc_runtime)
     return()
 endif()
@@ -91,7 +92,7 @@ if(NOT MSVC)
     target_compile_options(tropico2_lifted PRIVATE -O1 -w)
 endif()
 
-add_executable(tropico2 main.c $<TARGET_OBJECTS:tropico2_lifted>)
+add_executable(tropico2 main.c ${TROPICO2_PATCHES} $<TARGET_OBJECTS:tropico2_lifted>)
 target_link_libraries(tropico2 PRIVATE rc_hle rc_runtime)
 if(WIN32)
     target_sources(tropico2 PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/tropico2.rc")

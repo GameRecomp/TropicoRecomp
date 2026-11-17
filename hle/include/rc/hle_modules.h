@@ -41,6 +41,9 @@ void rc_ddraw_mode(uint32_t *w, uint32_t *h);
 /* A display mode DirectDraw offers besides its own list (a game project's
  * resolution patch); 0 x 0 for none. */
 void rc_ddraw_extra_mode(uint32_t w, uint32_t h);
+/* Further display modes DirectDraw lists beside its own, kept (up to 8);
+ * for a game that enumerates the modes once and looks its size up there. */
+void rc_ddraw_add_mode(uint32_t w, uint32_t h);
 
 #ifdef __cplusplus
 }

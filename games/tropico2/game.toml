@@ -40,3 +40,14 @@ file = "binkw32.dll"
 sha256 = "892a51c4056efcb22297a3b44a3491e3f5888f28b08ed1b17030f24acffedb44"
 size = 358963
 image_base = 0x30000000
+
+# Changes to what the game does: the code is in patches.c and the files it
+# includes; each entry names the patch it belongs to.
+[patch]
+hooks = [
+    0x00867480, # resolution: the width of a screen-size setting
+]
+points = [
+    0x006a7fda, # resolution: the game screen's layout sizes the HUD's part
+    0x006a80af, # resolution: and the world's
+]

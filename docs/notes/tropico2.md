@@ -2,8 +2,8 @@
 
 Tropico 2 (`Tropico2.exe`, GOG 2.1.0.14) runs from the command line, built
 from the user's own copy as Tropico 1 is (`recomp lift orig/t2/app --game
-tropico2`, then the `tropico2` target). It has no patches yet, and the
-converter does not make it.
+tropico2`, then the `tropico2` target), and the converter makes it. Its one
+patch so far is widescreen ([tropico2-resolution.md](tropico2-resolution.md)).
 
 ## Finding the code without relocations
 
