@@ -60,13 +60,21 @@ static void run_script(unsigned frame)
         long a = 0, b = 0;
         sscanf(next_line, "%*u %15s %li %li", what, &a, &b);
         rc_event e = {0};
+        /* Where the script last put the pointer, as the device has it (the
+         * program may see it elsewhere: rc_set_pointer_map). */
+        static int moved, px, py;
         if (!strcmp(what, "move")) {
             e.type = RC_EV_MOUSE_MOVE;
             e.x = (int)a;
             e.y = (int)b;
+            moved = 1;
+            px = e.x;
+            py = e.y;
         } else if (!strcmp(what, "down") || !strcmp(what, "up")) {
-            int x, y;
-            rc_input_mouse(&x, &y);
+            int x = px, y = py;
+            if (!moved) {
+                rc_input_mouse(&x, &y);
+            }
             e.type = RC_EV_MOUSE_BUTTON;
             e.button = (int)a;
             e.down = what[0] == 'd';

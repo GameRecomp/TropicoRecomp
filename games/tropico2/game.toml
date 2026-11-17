@@ -49,8 +49,10 @@ hooks = [
     0x00644a20, # resolution: the HUD's bar draws itself
     0x008dffb0, # resolution: an image window draws itself
     0x008ea170, # resolution: an image draws its picture
+    0x008de6e0, # resolution: a window and those in it are drawn
 ]
 points = [
     0x006a7fda, # resolution: the game screen's layout sizes the HUD's part
     0x006a80af, # resolution: and the world's
+    0x006d9adc, # resolution: a slider's value text, just looked up
 ]

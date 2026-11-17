@@ -32,6 +32,10 @@ void rc_add_pump_hook(void (*fn)(struct rc_cpu *c));
 struct rc_event;
 void rc_set_input_filter(bool (*fn)(const struct rc_event *e));
 void rc_input_deliver(const struct rc_event *e);
+/* A game project's patch may move where the pointer is for the program
+ * (`fn` changes the point, in the program's coordinates), for example to
+ * where something it draws elsewhere stands in the program's own. */
+void rc_set_pointer_map(void (*fn)(int *x, int *y));
 /* What the last pointer event came from (rc_event_source). */
 int rc_input_source(void);
 

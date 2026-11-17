@@ -117,6 +117,44 @@ so by the distance the piece moved too far left (no stock layout puts a
 child there); when the piece's window is drawn, such children move back by
 that distance (before they are drawn, as outside they would be skipped).
 
+## Dialogs in the middle
+
+The dialogs (the game's menu, the settings book) are windows of the desktop
+(`0x009b5c9c` in the runs seen, the game screen's grandparent's parent),
+beside the game screen, or parts of a layer as large as the screen. The game
+lays them out in its own screen coordinates: a window made later (a page of
+the book) is placed and even sized from the stock coordinates and its
+parent's rectangle as it is then. Moving a dialog once it is there therefore
+breaks what is made in it later (the resolution row of the book's graphics
+page came out 170 pixels narrower). So the game keeps its dialogs where it
+put them, and they are only drawn elsewhere:
+
+- `0x008de6e0` draws a window and those in it (thiscall: the surface and the
+  clip; it clips with the window's rectangle and calls itself for the
+  children). Wrapped, a dialog's place and the rectangles in it are moved
+  right by half of what the screen is wider than the size's own, for that
+  call, and back after.
+- The pointer over a dialog (where it is drawn) is moved back by as much
+  before the program sees it (`rc_set_pointer_map`, applied by user32 to every
+  pointer event; a scripted click stays where the script last moved the
+  pointer, as a device's would).
+
+## The settings' graphics page
+
+Its right page (`'_rpg'`) holds the 3D mode's choice (`'rend'`: hardware or
+software; here Direct3D is always drawn by DirectDraw, so it means nothing)
+between two rules (`'subt'`), and below them the resolution (`'reso'`). The
+choice and the rule below it are put far away (place -10000, as the game
+puts away what it does not show; clearing their shown flags made the page lay
+itself out anew, narrower), and the resolution takes their place.
+
+The resolution's value under its slider is looked up among the options'
+texts (`0x0042ee50`, the slider's stop as the number; the result in `eax` at
+`0x006d9adc`). The game's own texts, `640x480` to `1600x1200` (in
+`Data/text.{}`), become the size the game screen has at that stop, with its
+shape, as on Tropico's options page: `1364x768 (16:9)`. The label sizes
+itself to its text.
+
 ## The setting
 
 `resolution` in `settings.ini` (shared with Tropico, where it is a size):
@@ -129,6 +167,4 @@ height (and with it the size of the interface).
 
 ## Not done yet
 
-- Dialogs that open over the world are placed by the stock layout, so they
-  sit within the stock width on the left, not centred.
 - The window's shape is read only when the program starts.

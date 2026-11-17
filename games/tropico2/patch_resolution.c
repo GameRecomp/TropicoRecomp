@@ -24,6 +24,9 @@
  *   for the whole width, and the world's the whole height (else the world
  *   is not drawn beside and behind the HUD).
  * - The bar is arranged for the whole width when it is drawn (see arrange).
+ * - Dialogs are drawn in the middle (and the pointer over them is where the
+ *   game has them); the settings' graphics page loses the 3D mode's choice,
+ *   and its resolution shows the size with its shape.
  *
  * settings.ini's `resolution` gives the shape: WxH its width to height,
  * `window` the window's at the start (the screen's in full screen, the
@@ -31,6 +34,9 @@
  * unless another is chosen. A shape narrower than 4:3 keeps 4:3. What the
  * game does at each place is in docs/notes/tropico2-resolution.md.
  */
+#include <stdio.h>
+#include <string.h>
+
 #include "patches.h"
 
 #include "rc/dispatch.h"
@@ -39,6 +45,7 @@
 #include "rc/lifted.h"
 #include "rc/log.h"
 #include "rc/platform.h"
+#include "rc/vm.h"
 
 #define WIDTH_OF 0x00867480u
 
@@ -108,6 +115,7 @@ static void hud_size(rc_cpu *c)
 }
 
 /* ---- the HUD across the whole width */
+
 
 /* The HUD's bar (a panel in the HUD's part, its pieces windows of their own)
  * draws itself (thiscall, two arguments); an image window (a piece) too. */
@@ -267,15 +275,20 @@ static void fix_place(uint32_t w)
     if (!the_bar || w == the_bar) {
         return;
     }
+    /* The bar's child this window is in, and how far it moved. */
+    int32_t by = 0;
     uint32_t k = w, p = rc_ld32(w + W_PARENT);
-    for (int depth = 0; p && p != the_bar && depth < 16; depth++) {
+    for (int depth = 0; p && depth < 16; depth++) {
+        if (p == the_bar) {
+            by = rc_ld32(k + W_NAME) == NAME('_', 'd', 'e', 'b') ? moved_middle : moved_right;
+            break;
+        }
         k = p;
         p = rc_ld32(p + W_PARENT);
     }
-    if (p != the_bar || k == w) {
+    if (!by || k == w) {
         return;
     }
-    int32_t by = rc_ld32(k + W_NAME) == NAME('_', 'd', 'e', 'b') ? moved_middle : moved_right;
     int32_t x = (int32_t)rc_ld32(w + W_PLACE);
     if (by > 8 && x < -by / 2 && x + by >= -16) {
         rc_st32(w + W_PLACE, (uint32_t)(x + by));
@@ -296,6 +309,217 @@ static void bar_draw(rc_cpu *c)
         }
     }
     rc_lookup_lifted(BAR_DRAW)(c);
+}
+
+/* ---- dialogs in the middle */
+
+/* The dialogs (the game's menu, the settings book) are windows of the
+ * desktop beside the game screen, or parts of a layer as large as the
+ * screen; the game lays them out for its own width, in its screen
+ * coordinates (a window made later, such as a page of the book, is placed
+ * and sized from them and its parent's place). So the game keeps them where
+ * it put them, and on a wider screen they are only drawn further right, by
+ * half the difference (their places and rectangles are moved while they
+ * are drawn, and back after), and the pointer over them is moved back
+ * by as much for the program (rc_set_pointer_map). */
+static uint32_t desktop_seen; /* the desktop, once the game screen is in it */
+static int32_t dialogs_by;    /* how far right dialogs are drawn */
+
+/* The dialogs of the desktop, shown or not; returns how many (up to max). */
+static unsigned dialogs(uint32_t desktop, uint32_t *out, unsigned max)
+{
+    uint32_t part = rc_ld32(the_bar + W_PARENT), root = rc_ld32(part + W_PARENT);
+    uint32_t screen = rc_ld32(root + W_PARENT);
+    unsigned n = 0, sw = rc_ld32(desktop + W_RECT + 8);
+    if (!screen || rc_ld32(screen + W_PARENT) != desktop) {
+        return 0;
+    }
+    EACH_CHILD(desktop, k)
+    {
+        if (k == screen) {
+            continue;
+        }
+        if (rc_ld32(k + W_RECT + 8) >= sw) {
+            EACH_CHILD(k, j)
+            {
+                if (rc_ld32(j + W_RECT + 8) < sw && n < max) {
+                    out[n++] = j;
+                }
+            }
+        } else if (n < max) {
+            out[n++] = k;
+        }
+    }
+    return n;
+}
+
+/* How far right dialogs go on this desktop: half of what the screen is
+ * wider than the size's own. */
+static int32_t dialog_shift(uint32_t desktop)
+{
+    unsigned sw = rc_ld32(desktop + W_RECT + 8), sh = rc_ld32(desktop + W_RECT + 12);
+    for (unsigned i = 0; i < 5; i++) {
+        if (stock_h[i] == sh && sw > stock_w[i]) {
+            return (int32_t)(sw - stock_w[i]) / 2;
+        }
+    }
+    return 0;
+}
+
+/* A window's rectangle and its children's, moved by dx. */
+static void shift_rects(uint32_t w, int32_t dx)
+{
+    rc_st32(w + W_RECT, rc_ld32(w + W_RECT) + (uint32_t)dx);
+    EACH_CHILD(w, k) { shift_rects(k, dx); }
+}
+
+/* A window and the windows in it are drawn (thiscall: the surface and the
+ * clip; a window clips with its rectangle). A dialog is drawn moved. */
+#define TREE_DRAW 0x008de6e0u
+
+static void tree_draw(rc_cpu *c)
+{
+    uint32_t w = c->r[RC_ECX], list[32];
+    int32_t by = dialogs_by;
+    unsigned n = by && desktop_seen ? dialogs(desktop_seen, list, 32) : 0, i = 0;
+    while (i < n && list[i] != w) {
+        i++;
+    }
+    if (i == n) {
+        rc_lookup_lifted(TREE_DRAW)(c);
+        return;
+    }
+    rc_st32(w + W_PLACE, rc_ld32(w + W_PLACE) + (uint32_t)by);
+    shift_rects(w, by);
+    rc_lookup_lifted(TREE_DRAW)(c);
+    rc_st32(w + W_PLACE, rc_ld32(w + W_PLACE) - (uint32_t)by);
+    shift_rects(w, -by);
+}
+
+/* The pointer over a dialog (where it is drawn) is where the game has it. */
+static void pointer_map(int *x, int *y)
+{
+    uint32_t list[32];
+    if (!desktop_seen || !dialogs_by) {
+        return;
+    }
+    unsigned n = dialogs(desktop_seen, list, 32);
+    for (unsigned i = 0; i < n; i++) {
+        uint32_t d = list[i];
+            int32_t l = (int32_t)rc_ld32(d + W_RECT) + dialogs_by, t = (int32_t)rc_ld32(d + W_RECT + 4);
+        int32_t r = l + (int32_t)rc_ld32(d + W_RECT + 8), b = t + (int32_t)rc_ld32(d + W_RECT + 12);
+        if ((rc_ld8(d + W_SHOWN) & 1) && *x >= l && *x < r && *y >= t && *y < b) {
+            *x -= dialogs_by;
+            return;
+        }
+    }
+}
+
+/* ---- the settings' graphics page */
+
+/* Its right page ('_rpg') holds the 3D mode's choice ('rend': hardware or
+ * software, which here means nothing: Direct3D is drawn by DirectDraw),
+ * between two rules ('subt'), and below it the resolution ('reso'). The
+ * choice and the rule below it go far away, as the game itself puts away
+ * what it does not show (clearing their shown flags makes the page lay
+ * itself out anew, narrower), and the resolution takes their place. */
+#define AWAY (-10000)
+static void graphics_page(uint32_t page)
+{
+    uint32_t mode = 0, res = 0;
+    EACH_CHILD(page, k)
+    {
+        uint32_t name = rc_ld32(k + W_NAME);
+        if (name == NAME('r', 'e', 'n', 'd')) {
+            mode = k;
+        } else if (name == NAME('r', 'e', 's', 'o')) {
+            res = k;
+        }
+    }
+    if (!mode || !res || (int32_t)rc_ld32(mode + W_PLACE) == AWAY) {
+        return;
+    }
+    int32_t at = (int32_t)rc_ld32(mode + W_PLACE + 4), below = (int32_t)rc_ld32(res + W_PLACE + 4);
+    rc_st32(mode + W_PLACE, (uint32_t)AWAY);
+    place(mode);
+    EACH_CHILD(page, k)
+    {
+        int32_t y = (int32_t)rc_ld32(k + W_PLACE + 4);
+        if (rc_ld32(k + W_NAME) == NAME('s', 'u', 'b', 't') && y > at && y < below) {
+            rc_st32(k + W_PLACE, (uint32_t)AWAY);
+            place(k);
+        }
+    }
+    rc_st32(res + W_PLACE + 4, (uint32_t)at);
+    place(res);
+}
+
+/* The resolution's value, under its slider: the game looks it up among the
+ * texts of the options ('opti', the slider's stop as its number; 0x0042ee50
+ * returns it in eax), right before LABEL_TEXT. The game's own texts, "640x480"
+ * to "1600x1200", become the size the game screen has at each stop, with its
+ * shape ("1364x768 (16:9)"). */
+#define LABEL_TEXT 0x006d9adcu
+static const char *const own_labels[5] = {"640x480", "800x600", "1024x768", "1280x1024", "1600x1200"};
+static uint32_t labels[5]; /* the new texts, in guest memory */
+
+static unsigned gcd(unsigned a, unsigned b)
+{
+    while (b) {
+        unsigned t = a % b;
+        a = b;
+        b = t;
+    }
+    return a;
+}
+
+/* "16:9" and the like: the common names for what is near them, else the
+ * reduced ratio (as Tropico's options page). */
+static void aspect_name(unsigned w, unsigned h, char *out, size_t n)
+{
+    static const struct {
+        unsigned x, y;
+    } names[] = {{4, 3}, {5, 4}, {16, 9}, {16, 10}, {21, 9}, {20, 9}, {3, 2}};
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+        double r = (double)w * names[i].y / ((double)h * names[i].x);
+        if (r > 0.985 && r < 1.025) {
+            snprintf(out, n, "%u:%u", names[i].x, names[i].y);
+            return;
+        }
+    }
+    unsigned g = gcd(w, h);
+    snprintf(out, n, "%u:%u", w / g, h / g);
+}
+
+static void label_text(rc_cpu *c)
+{
+    uint32_t text = c->r[RC_EAX];
+    if (!text) {
+        return;
+    }
+    for (unsigned i = 0; i < 5; i++) {
+        const char *own = own_labels[i];
+        size_t n = strlen(own) + 1;
+        unsigned j = 0;
+        while (j < n && rc_ld8(text + j) == (uint8_t)own[j]) {
+            j++;
+        }
+        if (j == n && widened(i) != stock_w[i]) {
+            if (!labels[i]) {
+                char buf[48], shape[16];
+                aspect_name(widened(i), stock_h[i], shape, sizeof shape);
+                int len = snprintf(buf, sizeof buf, "%ux%u (%s)", widened(i), stock_h[i], shape);
+                labels[i] = rc_heap_alloc((uint32_t)len + 1, true);
+                for (int k = 0; labels[i] && k <= len; k++) {
+                    rc_st8(labels[i] + (uint32_t)k, (uint8_t)buf[k]);
+                }
+            }
+            if (labels[i]) {
+                c->r[RC_EAX] = labels[i];
+            }
+            return;
+        }
+    }
 }
 
 /* A picture is drawn by its image (thiscall: the surface, x, y, width and
@@ -336,6 +560,13 @@ static void picture_draw(rc_cpu *c)
 static void image_draw(rc_cpu *c)
 {
     uint32_t w = c->r[RC_ECX];
+    if (the_bar && !rc_ld32(w + W_PARENT)) {
+        desktop_seen = w;
+        dialogs_by = dialog_shift(w);
+    }
+    if (rc_ld32(w + W_NAME) == NAME('_', 'r', 'p', 'g')) {
+        graphics_page(w);
+    }
     EACH_CHILD(w, k) { fix_place(k); }
     unsigned i = 0;
     while (i < n_tiles && tiles[i].window != w) {
@@ -432,6 +663,7 @@ static void world_size(rc_cpu *c)
 
 void tropico2_patch_resolution(void)
 {
+
     rc_display d = rc_plat_display_get();
 #if defined(__ANDROID__)
     /* A phone shows the game on its whole screen: its shape unless chosen. */
@@ -460,6 +692,9 @@ void tropico2_patch_resolution(void)
     rc_hook(BAR_DRAW, bar_draw);
     rc_hook(IMAGE_DRAW, image_draw);
     rc_hook(PICTURE_DRAW, picture_draw);
+    rc_on_point(LABEL_TEXT, label_text);
+    rc_set_pointer_map(pointer_map);
+    rc_hook(TREE_DRAW, tree_draw);
     if (widened(4) != stock_w[4]) {
         rc_log("widescreen: the game screen at %ux%u (and as wide at the other sizes)", widened(4), stock_h[4]);
     }

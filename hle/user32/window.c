@@ -570,6 +570,9 @@ static bool next_event(rc_event *e)
 
 static bool (*input_filter)(const rc_event *e);
 static int last_source;
+static void (*pointer_map)(int *x, int *y);
+
+void rc_set_pointer_map(void (*fn)(int *x, int *y)) { pointer_map = fn; }
 
 void rc_set_input_filter(bool (*fn)(const rc_event *e)) { input_filter = fn; }
 
@@ -581,6 +584,10 @@ void rc_input_deliver(const rc_event *ev)
     uint32_t to = capture_hwnd ? capture_hwnd : main_hwnd;
     if (!to) {
         return;
+    }
+    if (pointer_map &&
+        (e.type == RC_EV_MOUSE_MOVE || e.type == RC_EV_MOUSE_BUTTON || e.type == RC_EV_WHEEL)) {
+        pointer_map(&e.x, &e.y);
     }
     switch (e.type) {
     case RC_EV_QUIT:
