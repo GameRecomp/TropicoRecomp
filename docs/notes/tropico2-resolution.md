@@ -82,13 +82,21 @@ When the bar is drawn at its stock width on a wider screen, the patch
 arranges it once (again after the game lays it out anew):
 
 - what stands from the rail's right end on moves to the right edge;
-- the rail's middle, the balustrade and the planks are made as wide as the
-  gap needs, and drawn as often as that takes: the picture once, then only
-  its middle (6 pixels less at each end, whose edges would show as seams),
-  each copy where the last one's middle ended, by moving x and the source in
-  the picture's draw. The rail's middle rises at its right end towards the
-  wheel at some sizes (1600x1200): of it only the left half is repeated,
-  and its right end is drawn last at the window's right end;
+- the rail's middle piece (`'bac0'`) moves with the right part: it already
+  rises towards the wheel, and repeated it made a sawtooth;
+- the balustrade and the planks are made as wide as the gap needs and drawn
+  as often as that takes: the picture once, then only its middle (6 pixels
+  less at each end, whose edges would show as seams), each copy where the
+  last one's middle ended, by moving x and setting the width and the
+  source's x in the picture's draw (an image window passes its own width);
+- the rail's flat left piece (`'bal0'`) is a moulding whose shading changes
+  along it, so any slice of it repeated shows its joints: it is drawn whole,
+  then one column of its middle stretched over the gap, then its right half
+  at the gap's end, where it meets the rail's middle as in the stock layout.
+  DirectDraw stretches the column (`rc_ddraw_stretch_next`: the next blit
+  from one column is stretched to a width) and picks, among the columns near
+  it, the one whose colours are closest to their average, so that it is
+  neither a shadow nor a highlight;
 - the panels move to the middle of the balustrade;
 - the status line is as wide as the planks, so it stays centred.
 

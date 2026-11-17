@@ -692,6 +692,79 @@ static void blit(surface *d, rect dr, const surface *s, rect sr, int keyed, uint
     }
 }
 
+static uint32_t stretch_w, stretch_range;
+
+void rc_ddraw_stretch_next(uint32_t width, uint32_t range)
+{
+    stretch_w = width;
+    stretch_range = range;
+}
+
+/* A channel of a pixel, by its mask, as 0..255. */
+static int channel(uint32_t v, uint32_t mask)
+{
+    if (!mask) {
+        return 0;
+    }
+    int shift = 0;
+    while (!((mask >> shift) & 1u)) {
+        shift++;
+    }
+    uint32_t max = mask >> shift;
+    return (int)(((v & mask) >> shift) * 255u / max);
+}
+
+/* The column of `s` within `range` of `sr`'s one column whose colours (over
+ * sr's rows, the transparent ones left out) are closest to the average of
+ * those columns. */
+static int32_t typical_column(const surface *s, rect sr, int keyed, uint32_t key, uint32_t range)
+{
+    int32_t from = sr.l - (int32_t)range, to = sr.l + (int32_t)range;
+    from = from < 0 ? 0 : from;
+    to = to > (int32_t)s->w ? (int32_t)s->w : to;
+    int32_t rows = sr.b - sr.t;
+    if (to - from < 2 || rows <= 0 || rows > 256 || sr.t < 0 || sr.b > (int32_t)s->h) {
+        return sr.l;
+    }
+    static int mean[256][3];
+    static int count[256];
+    for (int32_t y = 0; y < rows; y++) {
+        mean[y][0] = mean[y][1] = mean[y][2] = count[y] = 0;
+        for (int32_t x = from; x < to; x++) {
+            uint32_t v = pixel_at(s, (uint32_t)x, (uint32_t)(sr.t + y));
+            if (keyed && v == key) {
+                continue;
+            }
+            mean[y][0] += channel(v, s->rmask);
+            mean[y][1] += channel(v, s->gmask);
+            mean[y][2] += channel(v, s->bmask);
+            count[y]++;
+        }
+        for (int i = 0; i < 3 && count[y]; i++) {
+            mean[y][i] /= count[y];
+        }
+    }
+    int32_t best = sr.l;
+    int64_t best_d = -1;
+    for (int32_t x = from; x < to; x++) {
+        int64_t d = 0;
+        for (int32_t y = 0; y < rows; y++) {
+            uint32_t v = pixel_at(s, (uint32_t)x, (uint32_t)(sr.t + y));
+            if (!count[y] || (keyed && v == key)) {
+                continue;
+            }
+            int dr = channel(v, s->rmask) - mean[y][0], dg = channel(v, s->gmask) - mean[y][1];
+            int db = channel(v, s->bmask) - mean[y][2];
+            d += dr * dr + dg * dg + db * db;
+        }
+        if (best_d < 0 || d < best_d) {
+            best_d = d;
+            best = x;
+        }
+    }
+    return best;
+}
+
 static void fill(surface *d, rect r, uint32_t color)
 {
     for (int32_t y = r.t < 0 ? 0 : r.t; y < r.b && y < (int32_t)d->h; y++) {
@@ -722,7 +795,15 @@ static void k_Blt(rc_cpu *c)
         }
         int keyed = (flags & (DDBLT_KEYSRC | DDBLT_KEYSRCOVERRIDE)) != 0;
         uint32_t key = (flags & DDBLT_KEYSRCOVERRIDE) ? rc_ld32(fx + 100) : s->ckey;
-        blit(d, dr, s, get_rect(srp, s), keyed && (s->has_ckey || (flags & DDBLT_KEYSRCOVERRIDE)), key);
+        keyed = keyed && (s->has_ckey || (flags & DDBLT_KEYSRCOVERRIDE));
+        rect sr = get_rect(srp, s);
+        if (stretch_w && sr.r - sr.l == 1) {
+            sr.l = typical_column(s, sr, keyed, key, stretch_range);
+            sr.r = sr.l + 1;
+            dr.r = dr.l + (int32_t)stretch_w;
+        }
+        stretch_w = 0;
+        blit(d, dr, s, sr, keyed, key);
     }
     if ((uint32_t)(x - objects) == display.primary) {
         present();

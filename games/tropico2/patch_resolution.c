@@ -126,7 +126,8 @@ static void hud_size(rc_cpu *c)
 static struct {
     uint32_t window;
     unsigned width;
-    int ends; /* its right end differs (the rail's rises to the wheel) */
+    int ends; /* its right end must meet what follows it (the rail's left
+               * piece, its rising middle) */
 } tiles[8];
 static unsigned n_tiles;
 
@@ -174,8 +175,10 @@ static void widen(uint32_t w, unsigned dx)
 
 /* The bar laid out for the size's own width, on a wider screen: its right
  * part (from the rail's right end, the wheel and what is beside it) moves to
- * the right edge; the rail's middle, the balustrade behind the panels and
- * the planks at the bottom are drawn as often as the width needs; the panels
+ * the right edge, and with it the rail's middle, which already rises towards
+ * the wheel (repeated, it would make steps); the rail's flat left piece, the
+ * balustrade behind the panels and the planks at the bottom are drawn as
+ * often as the width needs; the panels
  * between the balusters move to the middle; the status line (in the planks)
  * is as wide as they are, so that it stays centred. */
 static void arrange(uint32_t bar)
@@ -212,12 +215,12 @@ static void arrange(uint32_t bar)
     {
         uint32_t name = rc_ld32(k + W_NAME);
         int32_t x = (int32_t)rc_ld32(k + W_PLACE);
-        if (name == NAME('b', 'a', 'c', '0') || name == NAME('b', 'a', 'k', '0') || name == NAME('b', 'o', 't', 't') ||
+        if (name == NAME('b', 'a', 'l', '0') || name == NAME('b', 'a', 'k', '0') || name == NAME('b', 'o', 't', 't') ||
             name == NAME('b', 'o', 't', '0')) {
             if (n_tiles < sizeof tiles / sizeof tiles[0]) {
                 tiles[n_tiles].window = k;
                 tiles[n_tiles].width = rc_ld32(k + W_RECT + 8);
-                tiles[n_tiles].ends = name == NAME('b', 'a', 'c', '0');
+                tiles[n_tiles].ends = name == NAME('b', 'a', 'l', '0');
                 n_tiles++;
             }
             widen(k, dx);
@@ -234,7 +237,7 @@ static void arrange(uint32_t bar)
             }
         } else if (name == NAME('_', 'd', 'e', 'b')) {
             rc_st32(k + W_PLACE, (uint32_t)(x + (int32_t)dx / 2));
-        } else if (x >= right) {
+        } else if (x >= right || name == NAME('b', 'a', 'c', '0')) {
             rc_st32(k + W_PLACE, (uint32_t)(x + (int32_t)dx));
         }
     }
@@ -288,7 +291,7 @@ static void bar_draw(rc_cpu *c)
 }
 
 /* A picture is drawn by its image (thiscall: the surface, x, y, width and
- * height (0 for the picture's), and the source's x and y). While a piece is
+ * height (an image window passes its own), and the source's x and y). While a piece is
  * drawn again further right, its picture moves with it, and only a part of
  * it is drawn: from tile_sx, tile_w wide. */
 #define PICTURE_DRAW 0x008ea170u
@@ -296,17 +299,23 @@ static void bar_draw(rc_cpu *c)
 static int32_t tile_dx;
 static uint32_t tile_sx, tile_w;
 
+static uint32_t tile_stretch, tile_range; /* a column stretched this wide */
+
 static void picture_draw(rc_cpu *c)
 {
     if (tile_dx) {
         uint32_t esp = c->r[RC_ESP];
         rc_st32(esp + 8, rc_ld32(esp + 8) + (uint32_t)tile_dx);
-        if (rc_ld32(esp + 16) == 0 && tile_w) {
+        if (tile_w) {
             rc_st32(esp + 16, tile_w);
             rc_st32(esp + 24, rc_ld32(esp + 24) + tile_sx);
+            if (tile_stretch) {
+                rc_ddraw_stretch_next(tile_stretch, tile_range);
+            }
         }
     }
     rc_lookup_lifted(PICTURE_DRAW)(c);
+    rc_ddraw_stretch_next(0, 0);
 }
 
 /* A piece to fill: drawn once for each width of its picture. */
@@ -331,31 +340,53 @@ static void image_draw(rc_cpu *c)
     }
     /* The picture whole; then its middle (but its edges) as often as the
      * gap needs, each copy where the last one's ends. A piece whose right
-     * end differs repeats only its left half, and its right end comes last
-     * at the window's right end, where it meets what stands beside it. */
+     * end must meet what follows it (the rail, a moulding whose shading
+     * changes along it, so that any slice repeated shows its joints) is
+     * continued by one column of its middle stretched over the gap (of the
+     * columns near the middle the most typical one), and its right half
+     * comes last, at the window's right end. */
     int ends = tiles[i].ends;
-    uint32_t step = ends ? piece / 2 - TILE_EDGE : piece - 2 * TILE_EDGE;
-    uint32_t last = ends ? total - piece : total;
-    for (uint32_t at = 0;; at = at ? at + step : (ends ? piece / 2 : piece - TILE_EDGE)) {
-        int final = at >= last;
-        if (final && !ends) {
-            break;
+    uint32_t half = piece / 2, gap = total - piece;
+    /* The part of the gap within this drawing's clip (the game draws in
+     * pieces, each clipped: the column must stand inside). */
+    int32_t x0 = (int32_t)rc_ld32(w + W_RECT), cl = (int32_t)rc_ld32(a2), cr = (int32_t)rc_ld32(a2 + 8);
+    int32_t from = x0 + (int32_t)half, to = from + (int32_t)gap;
+    from = from > cl ? from : cl;
+    to = to < cr ? to : cr;
+    for (int copy = 0;; copy++) {
+        uint32_t at;
+        if (ends) {
+            if (copy > 2) {
+                break;
+            }
+            if (copy == 1 && from >= to) {
+                continue;
+            }
+            at = copy == 0 ? 0 : copy == 1 ? (uint32_t)(from - x0) : gap + half;
+            tile_sx = half;
+            tile_w = copy == 1 ? 1 : piece - half;
+            tile_stretch = copy == 1 ? (uint32_t)(to - from) : 0;
+            tile_range = piece / 4;
+        } else {
+            at = copy == 0 ? 0 : piece - TILE_EDGE + (uint32_t)(copy - 1) * (piece - 2 * TILE_EDGE);
+            if (at >= total) {
+                break;
+            }
+            tile_sx = TILE_EDGE;
+            tile_w = piece - 2 * TILE_EDGE;
+            tile_stretch = 0;
         }
-        if (at) {
+        if (copy) {
             c->r[RC_ESP] = esp;
             rc_st32(esp, ret);
             rc_st32(esp + 4, a1);
             rc_st32(esp + 8, a2);
             c->r[RC_ECX] = w;
         }
-        tile_dx = (int32_t)(final ? last + TILE_EDGE : at);
-        tile_sx = TILE_EDGE;
-        tile_w = final ? piece - TILE_EDGE : step;
+        tile_dx = (int32_t)at;
         rc_lookup_lifted(IMAGE_DRAW)(c);
-        if (final) {
-            break;
-        }
     }
+    tile_stretch = 0;
     tile_dx = 0;
 }
 

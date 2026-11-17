@@ -44,6 +44,11 @@ void rc_ddraw_extra_mode(uint32_t w, uint32_t h);
 /* Further display modes DirectDraw lists beside its own, kept (up to 8);
  * for a game that enumerates the modes once and looks its size up there. */
 void rc_ddraw_add_mode(uint32_t w, uint32_t h);
+/* The next Blt from a source one column wide stretches it to `width`
+ * columns; the column it takes is, within `range` columns of its own, the
+ * one whose colours are closest to theirs on average (neither a shadow nor
+ * a highlight). For a game project's patch that widens a picture; 0 cancels. */
+void rc_ddraw_stretch_next(uint32_t width, uint32_t range);
 
 #ifdef __cplusplus
 }
