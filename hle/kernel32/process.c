@@ -218,11 +218,11 @@ static void k_CreateThread(rc_cpu *c)
 {
     uint32_t stack = RC_ARG(c, 1), start = RC_ARG(c, 2), param = RC_ARG(c, 3);
     uint32_t flags = RC_ARG(c, 4), id_out = RC_ARG(c, 5);
-    if (flags & 4) { /* CREATE_SUSPENDED: nothing here resumes threads */
-        rc_fatal("CreateThread: suspended threads are not supported");
-    }
     uint32_t id = 0;
     uint32_t h = rc_thread_create(start, param, stack, &id);
+    if (h && (flags & 4)) { /* CREATE_SUSPENDED: until ResumeThread */
+        rc_thread_suspend(h, 1);
+    }
     if (!h) {
         rc_last_error = 8; /* ERROR_NOT_ENOUGH_MEMORY */
     }
@@ -230,6 +230,18 @@ static void k_CreateThread(rc_cpu *c)
         rc_st32(id_out, id);
     }
     RC_RETURN(c, h, 6);
+}
+
+static void k_ResumeThread(rc_cpu *c)
+{
+    int n = rc_thread_suspend(RC_ARG(c, 0), -1);
+    RC_RETURN(c, (uint32_t)n, 1);
+}
+
+static void k_SuspendThread(rc_cpu *c)
+{
+    int n = rc_thread_suspend(RC_ARG(c, 0), 1);
+    RC_RETURN(c, (uint32_t)n, 1);
 }
 
 static void k_GetLastError(rc_cpu *c) { RC_RETURN(c, rc_last_error, 0); }
@@ -602,6 +614,8 @@ const rc_import_def rc_k32_process[] = {
     {K32, "GetCurrentThread", k_GetCurrentThread},
     {K32, "GetCurrentThreadId", k_GetCurrentThreadId},
     {K32, "CreateThread", k_CreateThread},
+    {K32, "ResumeThread", k_ResumeThread},
+    {K32, "SuspendThread", k_SuspendThread},
     {K32, "GetLastError", k_GetLastError},
     {K32, "SetLastError", k_SetLastError},
     {K32, "TlsAlloc", k_TlsAlloc},

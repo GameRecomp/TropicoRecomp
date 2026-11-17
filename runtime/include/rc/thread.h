@@ -43,6 +43,10 @@ uint32_t rc_thread_id(void);
 /* The current thread's TIB. */
 uint32_t rc_thread_tib(void);
 
+/* SuspendThread (delta 1) and ResumeThread (-1): the suspend count before,
+ * or -1 if `h` is no thread. A thread runs only while its count is 0. */
+int rc_thread_suspend(uint32_t h, int delta);
+
 /* Whether `h` is a thread handle; its exit code if it has ended. */
 bool rc_thread_handle(uint32_t h, bool *ended, uint32_t *exit_code);
 

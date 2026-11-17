@@ -82,6 +82,7 @@ typedef struct thread {
     uint32_t start, param;
     uint32_t exit_code;
     uint64_t wake; /* runs again from this time on */
+    uint32_t suspended; /* SuspendThread count: runs only at 0 */
 #if BACKEND_FIBERS
     void *fiber;
 #elif BACKEND_UCONTEXT
@@ -122,6 +123,21 @@ void rc_thread_init_main(rc_cpu *c, uint32_t tib)
 uint32_t rc_thread_id(void) { return current + 1; }
 
 uint32_t rc_thread_tib(void) { return threads[current].tib; }
+
+int rc_thread_suspend(uint32_t h, int delta)
+{
+    uint32_t i = h - HANDLE_BASE;
+    if (i >= nthreads || threads[i].state == T_FREE) {
+        return -1;
+    }
+    uint32_t before = threads[i].suspended;
+    if (delta > 0) {
+        threads[i].suspended++;
+    } else if (before > 0) {
+        threads[i].suspended--;
+    }
+    return (int)before;
+}
 
 bool rc_thread_handle(uint32_t h, bool *ended, uint32_t *exit_code)
 {
@@ -190,7 +206,7 @@ static uint32_t pick(void)
         uint64_t earliest = UINT64_MAX;
         for (uint32_t k = 1; k <= nthreads; k++) {
             uint32_t i = (current + k) % nthreads;
-            if (threads[i].state != T_RUNNING) {
+            if (threads[i].state != T_RUNNING || threads[i].suspended) {
                 continue;
             }
             if (threads[i].wake <= now) {
@@ -221,7 +237,7 @@ void rc_thread_yield(void)
     /* Cheap when nothing else is due, which is most of the time. */
     bool due = false;
     for (uint32_t i = 0; i < nthreads; i++) {
-        if (i != current && threads[i].state == T_RUNNING && threads[i].wake <= now) {
+        if (i != current && threads[i].state == T_RUNNING && !threads[i].suspended && threads[i].wake <= now) {
             due = true;
             break;
         }

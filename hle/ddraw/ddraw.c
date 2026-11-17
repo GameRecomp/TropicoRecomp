@@ -767,6 +767,21 @@ static void k_CreateClipper(rc_cpu *c)
     RC_RETURN(c, DD_OK, 4);
 }
 
+/* A clip list (RGNDATA): only its bounds are kept; blits are clipped to the
+ * surface anyway. */
+static void k_ClipperSetClipList(rc_cpu *c)
+{
+    object *x = self(c, O_CLIPPER);
+    uint32_t rgn = RC_ARG(c, 1);
+    x->hwnd = 0;
+    if (rc_trace("ddraw") && rgn) {
+        rc_log("[ddraw] clip list of %u rectangles, bounds %d,%d-%d,%d", rc_ld32(rgn + 8),
+               (int32_t)rc_ld32(rgn + 16), (int32_t)rc_ld32(rgn + 20), (int32_t)rc_ld32(rgn + 24),
+               (int32_t)rc_ld32(rgn + 28));
+    }
+    RC_RETURN(c, DD_OK, 3);
+}
+
 static void k_ClipperSetHWnd(rc_cpu *c)
 {
     object *x = self(c, O_CLIPPER);
@@ -1063,5 +1078,6 @@ const rc_import_def rc_ddraw_defs[] = {
     M("IDirectDrawClipper", "AddRef", k_AddRef),
     M("IDirectDrawClipper", "Release", k_Release),
     M("IDirectDrawClipper", "SetHWnd", k_ClipperSetHWnd),
+    M("IDirectDrawClipper", "SetClipList", k_ClipperSetClipList),
 };
 const uint32_t rc_ddraw_count = sizeof rc_ddraw_defs / sizeof rc_ddraw_defs[0];

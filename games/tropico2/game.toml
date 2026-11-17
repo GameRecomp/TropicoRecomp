@@ -23,6 +23,14 @@ seeds = []
 data = []
 noreturn = []
 
+# The statically linked CRT's memcpy and memmove copy a short tail with
+# `sub ecx, 4; jb tail; ...; tail: jmp [ecx*4 + table]`, indexing the table
+# with -4..-1, as in Tropico 1. Nothing bounds that for the analysis.
+tables = [
+    { jump = 0x008a7d64, first = -4, count = 4 },
+    { jump = 0x008acc44, first = -4, count = 4 },
+]
+
 # DLLs the game ships whose code is lifted with it: the Bink video codec of
 # this release (its own copy, as for the executable; a newer one than
 # Tropico's).

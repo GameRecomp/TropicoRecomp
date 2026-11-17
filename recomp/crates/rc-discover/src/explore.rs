@@ -1125,6 +1125,18 @@ impl Explorer<'_> {
                 self.problem(va, ProblemKind::UnboundedTable);
                 return false;
             }
+        } else {
+            // Without relocations, entries an index cannot reach (a switch
+            // whose lowest case maps to 1) hold whatever follows: skip
+            // those that do not point into code.
+            while first < len
+                && !self
+                    .image
+                    .u32(base + first * 4)
+                    .is_some_and(|t| self.ex.in_code(t))
+            {
+                first += 1;
+            }
         }
         let mut targets = Vec::with_capacity(len as usize);
         for i in first..len {
