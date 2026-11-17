@@ -765,6 +765,72 @@ static int32_t typical_column(const surface *s, rect sr, int keyed, uint32_t key
     return best;
 }
 
+static uint32_t widen_w;
+
+void rc_ddraw_widen_next(uint32_t width) { widen_w = width; }
+
+/* The period of the pattern across `sr` of `s`: the shift (from 1/16 to 1/2
+ * of its width) at which its columns' brightness repeats best. */
+static int32_t pattern_period(const surface *s, rect sr, int keyed, uint32_t key)
+{
+    int32_t w = sr.r - sr.l;
+    static int col[4096];
+    if (w < 32 || w > 4096) {
+        return 0;
+    }
+    for (int32_t x = 0; x < w; x++) {
+        int sum = 0, n = 0;
+        for (int32_t y = sr.t; y < sr.b; y++) {
+            uint32_t v = pixel_at(s, (uint32_t)(sr.l + x), (uint32_t)y);
+            if (keyed && v == key) {
+                continue;
+            }
+            sum += channel(v, s->rmask) + channel(v, s->gmask) + channel(v, s->bmask);
+            n++;
+        }
+        col[x] = n ? sum / n : 0;
+    }
+    int32_t best = 0;
+    int64_t best_score = -1;
+    for (int32_t p = w / 16 > 8 ? w / 16 : 8; p <= w / 2; p++) {
+        int64_t score = 0;
+        for (int32_t x = 0; x + p < w; x++) {
+            int d = col[x] - col[x + p];
+            score += (int64_t)d * d;
+        }
+        score = score * 1024 / (w - p);
+        if (best_score < 0 || score < best_score) {
+            best_score = score;
+            best = p;
+        }
+    }
+    return best;
+}
+
+/* A picture drawn `width` wide (rc_ddraw_widen_next). */
+static void widen_blit(surface *d, rect dr, const surface *s, rect sr, int keyed, uint32_t key, int32_t width)
+{
+    int32_t pw = sr.r - sr.l, half = pw / 2;
+    int32_t period = pattern_period(s, sr, keyed, key);
+    if (width <= pw || dr.r - dr.l != pw || period <= 0 || period > half) {
+        blit(d, dr, s, sr, keyed, key);
+        return;
+    }
+    /* The halves' meeting points lie at the source's middle: the copies of
+     * the period start there too, so the pattern runs on through them. */
+    int32_t left = dr.l + half, right = dr.l + width - (pw - half), gap = right - left;
+    blit(d, (rect){dr.l, dr.t, left, dr.b}, s, (rect){sr.l, sr.t, sr.l + half, sr.b}, keyed, key);
+    int32_t n = (gap + period / 2) / period;
+    if (n < 1 && gap > 0) {
+        n = 1;
+    }
+    for (int32_t i = 0; i < n; i++) {
+        rect to = {left + (int32_t)((int64_t)gap * i / n), dr.t, left + (int32_t)((int64_t)gap * (i + 1) / n), dr.b};
+        blit(d, to, s, (rect){sr.l + half, sr.t, sr.l + half + period, sr.b}, keyed, key);
+    }
+    blit(d, (rect){right, dr.t, dr.l + width, dr.b}, s, (rect){sr.l + half, sr.t, sr.r, sr.b}, keyed, key);
+}
+
 static void fill(surface *d, rect r, uint32_t color)
 {
     for (int32_t y = r.t < 0 ? 0 : r.t; y < r.b && y < (int32_t)d->h; y++) {
@@ -803,7 +869,12 @@ static void k_Blt(rc_cpu *c)
             dr.r = dr.l + (int32_t)stretch_w;
         }
         stretch_w = 0;
-        blit(d, dr, s, sr, keyed, key);
+        if (widen_w) {
+            widen_blit(d, dr, s, sr, keyed, key, (int32_t)widen_w);
+            widen_w = 0;
+        } else {
+            blit(d, dr, s, sr, keyed, key);
+        }
     }
     if ((uint32_t)(x - objects) == display.primary) {
         present();

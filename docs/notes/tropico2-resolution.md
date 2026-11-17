@@ -84,11 +84,19 @@ arranges it once (again after the game lays it out anew):
 - what stands from the rail's right end on moves to the right edge;
 - the rail's middle piece (`'bac0'`) moves with the right part: it already
   rises towards the wheel, and repeated it made a sawtooth;
-- the balustrade and the planks are made as wide as the gap needs and drawn
-  as often as that takes: the picture once, then only its middle (6 pixels
-  less at each end, whose edges would show as seams), each copy where the
-  last one's middle ended, by moving x and setting the width and the
-  source's x in the picture's draw (an image window passes its own width);
+- the planks are made as wide as the gap needs and drawn as often as that
+  takes: the picture once, then only its middle (6 pixels less at each end,
+  whose edges would show as seams), each copy where the last one's middle
+  ended, by moving x and setting the width and the source's x in the
+  picture's draw (an image window passes its own width, which the copy's
+  replaces, so the last copy is cut to the window by the patch);
+- the balustrade's right end must meet the rail's rising piece, whose posts
+  continue its balusters' rhythm: copies of it break that rhythm. It is
+  drawn in one blit that DirectDraw widens (`rc_ddraw_widen_next`): its left
+  half at the left, its right half at the right end as in the stock layout,
+  and between them its pattern's period, found in the picture (the shift at
+  which its columns' brightness repeats best), as often as fits, each copy
+  stretched a little so that they fit exactly;
 - the rail's flat left piece (`'bal0'`) is a moulding whose shading changes
   along it, so any slice of it repeated shows its joints: it is drawn whole,
   then one column of its middle stretched over the gap, then its right half

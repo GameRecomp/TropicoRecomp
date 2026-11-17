@@ -49,6 +49,12 @@ void rc_ddraw_add_mode(uint32_t w, uint32_t h);
  * one whose colours are closest to theirs on average (neither a shadow nor
  * a highlight). For a game project's patch that widens a picture; 0 cancels. */
 void rc_ddraw_stretch_next(uint32_t width, uint32_t range);
+/* The next Blt of a picture with a repeating pattern (a balustrade) draws
+ * it `width` wide: its left half at the left, its right half at the right
+ * end, and between them its pattern's period (found in the picture) as
+ * often as fits, each copy stretched a little so that they fit exactly.
+ * 0 cancels. */
+void rc_ddraw_widen_next(uint32_t width);
 
 #ifdef __cplusplus
 }

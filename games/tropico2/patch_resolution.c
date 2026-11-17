@@ -126,10 +126,16 @@ static void hud_size(rc_cpu *c)
 static struct {
     uint32_t window;
     unsigned width;
-    int ends; /* its right end must meet what follows it (the rail's left
-               * piece, its rising middle) */
+    int how; /* TILE_MIDDLES, TILE_COLUMN or TILE_PATTERN */
 } tiles[8];
 static unsigned n_tiles;
+
+/* How a piece is drawn wider: its middle repeated (the planks); one column
+ * stretched between its halves (the rail's flat piece, a moulding whose
+ * shading changes along it, so that any slice repeated shows its joints);
+ * its pattern repeated between its halves (the balustrade: its right end
+ * then meets the rail's rising piece, whose posts continue its own). */
+enum { TILE_MIDDLES, TILE_COLUMN, TILE_PATTERN };
 
 /* The widths the bar's widened windows keep (the game sets some back when
  * a panel opens), and the balustrade, which the game hides behind a panel
@@ -220,7 +226,9 @@ static void arrange(uint32_t bar)
             if (n_tiles < sizeof tiles / sizeof tiles[0]) {
                 tiles[n_tiles].window = k;
                 tiles[n_tiles].width = rc_ld32(k + W_RECT + 8);
-                tiles[n_tiles].ends = name == NAME('b', 'a', 'l', '0');
+                tiles[n_tiles].how = name == NAME('b', 'a', 'l', '0')   ? TILE_COLUMN
+                                     : name == NAME('b', 'a', 'k', '0') ? TILE_PATTERN
+                                                                       : TILE_MIDDLES;
                 n_tiles++;
             }
             widen(k, dx);
@@ -300,10 +308,12 @@ static int32_t tile_dx;
 static uint32_t tile_sx, tile_w;
 
 static uint32_t tile_stretch, tile_range; /* a column stretched this wide */
+static uint32_t tile_widen;               /* a pattern drawn this wide */
+static int tile_on;
 
 static void picture_draw(rc_cpu *c)
 {
-    if (tile_dx) {
+    if (tile_on) {
         uint32_t esp = c->r[RC_ESP];
         rc_st32(esp + 8, rc_ld32(esp + 8) + (uint32_t)tile_dx);
         if (tile_w) {
@@ -312,10 +322,14 @@ static void picture_draw(rc_cpu *c)
             if (tile_stretch) {
                 rc_ddraw_stretch_next(tile_stretch, tile_range);
             }
+            if (tile_widen) {
+                rc_ddraw_widen_next(tile_widen);
+            }
         }
     }
     rc_lookup_lifted(PICTURE_DRAW)(c);
     rc_ddraw_stretch_next(0, 0);
+    rc_ddraw_widen_next(0);
 }
 
 /* A piece to fill: drawn once for each width of its picture. */
@@ -338,24 +352,33 @@ static void image_draw(rc_cpu *c)
         rc_lookup_lifted(IMAGE_DRAW)(c);
         return;
     }
-    /* The picture whole; then its middle (but its edges) as often as the
-     * gap needs, each copy where the last one's ends. A piece whose right
-     * end must meet what follows it (the rail, a moulding whose shading
-     * changes along it, so that any slice repeated shows its joints) is
-     * continued by one column of its middle stretched over the gap (of the
-     * columns near the middle the most typical one), and its right half
-     * comes last, at the window's right end. */
-    int ends = tiles[i].ends;
+    /* TILE_MIDDLES: the picture whole, then its middle (but its edges) as
+     * often as the gap needs, each copy where the last one's ends.
+     * TILE_COLUMN: its left half, one column of its middle stretched over
+     * the gap (of the columns near the middle the most typical one), and its
+     * right half at the window's right end. TILE_PATTERN: one draw, which
+     * DirectDraw widens (rc_ddraw_widen_next). */
+    int how = tiles[i].how, ends = how == TILE_COLUMN;
     uint32_t half = piece / 2, gap = total - piece;
-    /* The part of the gap within this drawing's clip (the game draws in
-     * pieces, each clipped: the column must stand inside). */
+    /* The part of the gap within this drawing's clip. */
     int32_t x0 = (int32_t)rc_ld32(w + W_RECT), cl = (int32_t)rc_ld32(a2), cr = (int32_t)rc_ld32(a2 + 8);
     int32_t from = x0 + (int32_t)half, to = from + (int32_t)gap;
     from = from > cl ? from : cl;
     to = to < cr ? to : cr;
+    tile_on = 1;
     for (int copy = 0;; copy++) {
         uint32_t at;
-        if (ends) {
+        tile_widen = 0;
+        if (how == TILE_PATTERN) {
+            if (copy > 0) {
+                break;
+            }
+            at = 0;
+            tile_sx = 0;
+            tile_w = piece;
+            tile_stretch = 0;
+            tile_widen = total;
+        } else if (ends) {
             if (copy > 2) {
                 break;
             }
@@ -363,8 +386,8 @@ static void image_draw(rc_cpu *c)
                 continue;
             }
             at = copy == 0 ? 0 : copy == 1 ? (uint32_t)(from - x0) : gap + half;
-            tile_sx = half;
-            tile_w = copy == 1 ? 1 : piece - half;
+            tile_sx = copy == 0 ? 0 : half;
+            tile_w = copy == 0 ? half : copy == 1 ? 1 : piece - half;
             tile_stretch = copy == 1 ? (uint32_t)(to - from) : 0;
             tile_range = piece / 4;
         } else {
@@ -372,8 +395,13 @@ static void image_draw(rc_cpu *c)
             if (at >= total) {
                 break;
             }
-            tile_sx = TILE_EDGE;
-            tile_w = piece - 2 * TILE_EDGE;
+            tile_sx = copy ? TILE_EDGE : 0;
+            tile_w = copy ? piece - 2 * TILE_EDGE : piece;
+            /* No copy goes beyond the window (the width given replaces the
+             * game's, which was cut to it). */
+            if (tile_w > total - at) {
+                tile_w = total - at;
+            }
             tile_stretch = 0;
         }
         if (copy) {
@@ -387,6 +415,8 @@ static void image_draw(rc_cpu *c)
         rc_lookup_lifted(IMAGE_DRAW)(c);
     }
     tile_stretch = 0;
+    tile_widen = 0;
+    tile_on = 0;
     tile_dx = 0;
 }
 
