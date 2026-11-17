@@ -29,10 +29,11 @@ static const char DEFAULTS[] =
     "# A resolution for the game besides its own (640x480 to 1600x1200), for\n"
     "# example 1920x1080. The game's options page offers common ones too, and\n"
     "# what is chosen there is written here.\n"
-    "# window: the size of the window (divided by the scale), following it when\n"
-    "# the window changes size; the game then always plays at it.\n"
+    "# window (the default): the size of the window (divided by the scale),\n"
+    "# following it when the window changes size; the game then always plays\n"
+    "# at it.\n"
     "# off: only the game's own.\n"
-    "resolution = off\n";
+    "resolution = window\n";
 
 static void set(rc_display *d, const char *key, const char *value)
 {
@@ -167,9 +168,13 @@ void rc_plat_display_load(const char *user_dir)
         if (f) {
             parse(&d, f);
             fclose(f);
-        } else if ((f = fopen(path, "w")) != NULL) {
-            fputs(DEFAULTS, f);
-            fclose(f);
+        } else {
+            /* A new user directory: the defaults, as written. */
+            set(&d, "resolution", "window");
+            if ((f = fopen(path, "w")) != NULL) {
+                fputs(DEFAULTS, f);
+                fclose(f);
+            }
         }
     }
 #else

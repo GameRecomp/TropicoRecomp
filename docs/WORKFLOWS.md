@@ -85,9 +85,10 @@ start) decides how the frame is shown: `scale` (`fit` or a whole number),
 `pixels` (`sharp` or `smooth`), `fullscreen` (Alt+Enter switches), and
 `resolution`: a size for the game besides its own (Tropico: its patch puts
 it in slot 4, with art made for it), or `window` to follow the window's
-size. The environment variables `RC_SCALE`, `RC_PIXELS`, `RC_FULLSCREEN`
-and `RC_RESOLUTION` override it; in a scripted run `FRAME area W H` sets
-the window's size. The browser player has the same choices in its bar.
+size (the default; scripted runs use `off`). The environment variables
+`RC_SCALE`, `RC_PIXELS`, `RC_FULLSCREEN` and `RC_RESOLUTION` override it; in
+a scripted run `FRAME area W H` sets the window's size. The browser player
+has the same choices in its bar.
 
 ### Systems that are on and off
 

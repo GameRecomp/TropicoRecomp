@@ -15,7 +15,9 @@
 #                      changed in the user directory's copy of it (made
 #                      from the game's at the start of the run)
 # and runs build/release/games/GAME/GAME headless, on the virtual clock, on the game in $<GAME>_DIR
-# (default orig/t1/app for tropico1) with a fresh user directory.
+# (default orig/t1/app for tropico1) with a fresh user directory, at the
+# game's own resolution (RC_RESOLUTION=off unless set: a fresh settings.ini
+# would follow the window, whose size depends on the screen).
 #
 # The sequence of API calls (names only, gzip-compressed: Bink alone makes
 # millions) and the screenshot are compared with the accepted ones in
@@ -65,7 +67,7 @@ done
 shot=
 [ -n "$SCREENSHOT" ] && shot="$SCREENSHOT:$base.bmp"
 rm -f "$base.bmp"
-RC_CLOCK=virtual SDL_VIDEO_DRIVER=${SDL_VIDEO_DRIVER:-offscreen} RC_STOP_AT="$STOP_AT" RC_FRAMES="$FRAMES" \
+RC_CLOCK=virtual RC_RESOLUTION=${RC_RESOLUTION:-off} SDL_VIDEO_DRIVER=${SDL_VIDEO_DRIVER:-offscreen} RC_STOP_AT="$STOP_AT" RC_FRAMES="$FRAMES" \
     RC_INPUT="${INPUT:+$dir_s/$INPUT}" RC_SCREENSHOT="$shot" RC_TRACE=imports \
     timeout "$TIMEOUT" "$bin" "$dir" "$user" 2>&1 |
     LC_ALL=C awk -v gz="gzip -n > $base.trace.gz" -v logf="$log" '
