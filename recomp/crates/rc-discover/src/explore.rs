@@ -334,6 +334,10 @@ struct Explorer<'a> {
     /// starts (a prologue, a pointer to one in data, an immediate operand),
     /// tried speculatively after the first exploration.
     candidates: Vec<u32>,
+    /// A first pass over an image without relocations believes only
+    /// speculative code whose calls go to plausible function starts, so that
+    /// real functions are in place before looser decodes run into them.
+    strict_calls: bool,
 }
 
 pub(crate) fn explore(
@@ -386,6 +390,7 @@ pub(crate) fn explore(
         why: None,
         info: InstructionInfoFactory::new(),
         candidates: Vec::new(),
+        strict_calls: false,
     };
 
     if pe.entry_rva != 0 {
@@ -404,6 +409,11 @@ pub(crate) fn explore(
     }
     x.run();
     if !x.has_relocs {
+        x.strict_calls = true;
+        x.prologues();
+        x.data_pointers(pe);
+        x.try_candidates();
+        x.strict_calls = false;
         x.prologues();
         x.data_pointers(pe);
         x.try_candidates();
@@ -840,6 +850,17 @@ impl Explorer<'_> {
                     st = fall;
                 }
                 Flow::Call(t) => {
+                    // Without relocations a speculative decode is believed
+                    // only if what it calls looks like a function: junk
+                    // decodes to calls into the middle of real code.
+                    if self.strict_calls
+                        && self.undo.is_some()
+                        && !self.ex.entries.contains_key(&t)
+                        && !self.plausible_start(t)
+                    {
+                        self.reject(t, ProblemKind::IntoOtherFunction);
+                        return;
+                    }
                     self.add_entry(t, EntrySource::Call);
                     if self.noreturn.contains(&t) {
                         return;
