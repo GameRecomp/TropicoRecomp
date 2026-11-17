@@ -156,8 +156,9 @@ void rc_plat_display_store(void)
 void rc_plat_display_load(const char *user_dir)
 {
     rc_display d = {0, false, false, 0, 0};
-#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
-    /* (A browser's page and Android's full screen decide for themselves.) */
+#if !defined(__EMSCRIPTEN__)
+    /* (A browser's page decides for itself. On Android the file keeps the
+     * resolution too; full screen is always on there, whatever it says.) */
     if (user_dir && *user_dir) {
         char path[1024];
         size_t n = strlen(user_dir);
