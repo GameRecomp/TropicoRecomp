@@ -19,7 +19,9 @@ result.
 **Status:** Tropico 1 runs: the intro movies, the menus, and a new game on
 a random island, with sound. Ten game years and saving are next. A
 converter page turns the GOG installer into a build for Windows, Linux,
-macOS or Android. Tropico 2 has not started. See
+macOS or Android. Tropico 2 (built from the command line only, not yet by
+the converter) plays its intro, its menus and a new game on a generated
+island, its world drawn by our Direct3D 7. See
 [docs/PLAN.md](docs/PLAN.md).
 
 ## You bring the game

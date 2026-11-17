@@ -54,11 +54,15 @@ first game carries over to the second.
 | M8 Sound and video | Mostly done: Miles on `SDL3_mixer` (samples, streams, music); Bink by lifting the game's own `binkw32.dll` with the executable (its thread runs as a cooperative guest thread, its sound goes through our Miles). Open: the audio capture test, a check of sync over a whole movie |
 | M12 Converter | Working end to end on Linux: the page (or `recomp convert`) turns the GOG installer into a zip in about two minutes in Firefox; the Linux AppImage from it reaches the main menu identically to the C build. The Android APK is made and signed (its signature verifies, checked from scratch). CI builds the shells for all four systems and publishes the site. Open: the Windows, macOS and Android shells have not run on their systems yet; several workers for compiling; Tropico 2 |
 
-Tropico 2: discovery (T2-1) runs in seconds and classifies 95.7% of `.text`
-as code (34,151 functions, 457 jump tables): frame set-ups, data words and
-immediates that land on plausible function starts are tried speculatively,
-and switch bounds kept in frame locals are followed. (It used to run
-forever: an empty data range stopped the gap scan.)
+Tropico 2: discovery (T2-1) runs in seconds and classifies 95.6% of `.text`
+as code (about 32,900 functions, 471 jump tables): frame set-ups, data
+words and immediates that land on plausible function starts are tried
+speculatively, junk is told apart by instructions no Win32 program has and
+by jumps or calls into the middle of real code, and switch bounds kept in
+frame locals are followed. It lifts and compiles (T2-2); with VERSION,
+ole32, more of kernel32, user32 and Miles, and Direct3D 7 with a software
+rasteriser (T2-3), it plays the intro, the menus and a new game on a
+generated island (T2-4 started). No patches yet.
 
 ## Milestones
 
