@@ -11,6 +11,9 @@
 #   SCREENSHOT=N       compare frame N with the accepted screenshot
 #   TOLERANCE=B        differing bytes allowed in that comparison (default 0)
 #   TIMEOUT=S          seconds (default 60)
+#   INI_SET="F:K=V ..." settings in the game's initialisation file F,
+#                      changed in the user directory's copy of it (made
+#                      from the game's at the start of the run)
 # and runs build/release/games/GAME/GAME headless, on the virtual clock, on the game in $<GAME>_DIR
 # (default orig/t1/app for tropico1) with a fresh user directory.
 #
@@ -34,6 +37,7 @@ INPUT=
 SCREENSHOT=
 TOLERANCE=0
 TIMEOUT=60
+INI_SET=
 # shellcheck disable=SC1090
 . "$conf"
 
@@ -52,6 +56,12 @@ mkdir -p "$out"
 base="$out/$game-$scenario"
 user=$(mktemp -d)
 log="$base.log"
+for set in $INI_SET; do
+    file=${set%%:*}
+    kv=${set#*:}
+    [ -f "$user/$file" ] || cp "$dir/$file" "$user/$file"
+    sed -i "s/^${kv%%=*}=.*/$kv/" "$user/$file"
+done
 shot=
 [ -n "$SCREENSHOT" ] && shot="$SCREENSHOT:$base.bmp"
 rm -f "$base.bmp"

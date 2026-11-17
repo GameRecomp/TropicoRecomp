@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+# Main menu: Single Games. Single games: Sandbox. OK on the island's
+# settings, OK on the game's settings, Start with the first captain.
+600 move 320 240
+700 down 1
+700 up 1
+1000 move 320 144
+1100 down 1
+1100 up 1
+1400 move 486 430
+1500 down 1
+1500 up 1
+1900 down 1
+1900 up 1
+2400 down 1
+2400 up 1
