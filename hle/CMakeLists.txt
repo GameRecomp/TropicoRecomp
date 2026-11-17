@@ -15,6 +15,7 @@ add_library(rc_hle STATIC
     gdi32/dc.c
     gdi32/text.c
     ddraw/ddraw.c
+    ddraw/d3d.c
     frames.c
     mss32/mss32.c
     winmm/winmm.c

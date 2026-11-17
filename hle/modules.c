@@ -31,7 +31,11 @@ void rc_hle_gdi32(void)
     rc_register_imports(rc_gdi32_text, rc_gdi32_text_count);
 }
 
-void rc_hle_ddraw(void) { rc_register_imports(rc_ddraw_defs, rc_ddraw_count); }
+void rc_hle_ddraw(void)
+{
+    rc_register_imports(rc_ddraw_defs, rc_ddraw_count);
+    rc_register_imports(rc_d3d_defs, rc_d3d_count);
+}
 
 void rc_hle_mss32(void)
 {

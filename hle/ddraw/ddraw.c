@@ -64,17 +64,18 @@
 
 /* ---- host objects ---- */
 
-enum kind { O_FREE, O_DDRAW, O_SURFACE, O_PALETTE, O_CLIPPER };
+enum kind {
+    O_FREE,
+    O_DDRAW,
+    O_SURFACE,
+    O_PALETTE,
+    O_CLIPPER,
+    O_D3D = RC_DD_D3D,
+    O_DEVICE = RC_DD_DEVICE,
+    O_VB = RC_DD_VB,
+};
 
-typedef struct surface {
-    uint32_t w, h, bpp, pitch, pixels, caps;
-    uint32_t rmask, gmask, bmask;
-    uint32_t back;    /* object index of the attached back buffer, or 0 */
-    uint32_t palette; /* object index, or 0 */
-    uint32_t ckey;
-    int has_ckey;
-    int locked;
-} surface;
+typedef rc_dd_surface surface;
 
 typedef struct palette {
     uint32_t rgb[256]; /* 0x00RRGGBB */
@@ -127,6 +128,26 @@ static const char *const clipper_methods[] = {
     "QueryInterface", "AddRef", "Release", "GetClipList", "GetHWnd", "Initialize", "IsClipListChanged",
     "SetClipList", "SetHWnd",
 };
+/* Direct3D 7 (d3d.c implements them). */
+static const char *const d3d_methods[] = {
+    "QueryInterface", "AddRef", "Release", "EnumDevices", "CreateDevice", "CreateVertexBuffer",
+    "EnumZBufferFormats", "EvictManagedTextures",
+};
+static const char *const device_methods[] = {
+    "QueryInterface", "AddRef", "Release", "GetCaps", "EnumTextureFormats", "BeginScene", "EndScene",
+    "GetDirect3D", "SetRenderTarget", "GetRenderTarget", "Clear", "SetTransform", "GetTransform",
+    "SetViewport", "MultiplyTransform", "GetViewport", "SetMaterial", "GetMaterial", "SetLight", "GetLight",
+    "SetRenderState", "GetRenderState", "BeginStateBlock", "EndStateBlock", "PreLoad", "DrawPrimitive",
+    "DrawIndexedPrimitive", "SetClipStatus", "GetClipStatus", "DrawPrimitiveStrided",
+    "DrawIndexedPrimitiveStrided", "DrawPrimitiveVB", "DrawIndexedPrimitiveVB", "ComputeSphereVisibility",
+    "GetTexture", "SetTexture", "GetTextureStageState", "SetTextureStageState", "ValidateDevice",
+    "ApplyStateBlock", "CaptureStateBlock", "DeleteStateBlock", "CreateStateBlock", "Load", "LightEnable",
+    "GetLightEnable", "SetClipPlane", "GetClipPlane", "GetInfo",
+};
+static const char *const vb_methods[] = {
+    "QueryInterface", "AddRef", "Release", "Lock", "Unlock", "ProcessVertices", "GetVertexBufferDesc",
+    "Optimize", "ProcessVerticesStrided",
+};
 
 /* Methods per interface version. */
 static uint32_t method_count(enum kind k, int v)
@@ -135,6 +156,9 @@ static uint32_t method_count(enum kind k, int v)
     case O_DDRAW: return v == 1 ? 23 : v == 2 ? 24 : v == 4 ? 28 : 30;
     case O_SURFACE: return v == 1 ? 36 : v == 2 ? 39 : v == 3 ? 40 : v == 4 ? 45 : 49;
     case O_PALETTE: return 7;
+    case O_D3D: return 8;
+    case O_DEVICE: return 49;
+    case O_VB: return 9;
     default: return 9;
     }
 }
@@ -145,6 +169,9 @@ static const char *iface_name(enum kind k)
     case O_DDRAW: return "IDirectDraw";
     case O_SURFACE: return "IDirectDrawSurface";
     case O_PALETTE: return "IDirectDrawPalette";
+    case O_D3D: return "IDirect3D7";
+    case O_DEVICE: return "IDirect3DDevice7";
+    case O_VB: return "IDirect3DVertexBuffer7";
     default: return "IDirectDrawClipper";
     }
 }
@@ -156,6 +183,9 @@ static const char *method_name(enum kind k, int v, uint32_t i, char *buf, size_t
     const char *m = k == O_DDRAW ? ddraw_methods[i]
                   : k == O_SURFACE ? surface_methods[i]
                   : k == O_PALETTE ? palette_methods[i]
+                  : k == O_D3D ? d3d_methods[i]
+                  : k == O_DEVICE ? device_methods[i]
+                  : k == O_VB ? vb_methods[i]
                   : clipper_methods[i];
     int versioned = (k == O_DDRAW && v == 1 && !strcmp(m, "SetDisplayMode")) ||
                     (k == O_DDRAW && v >= 4 && (!strcmp(m, "EnumDisplayModes") || !strcmp(m, "GetDisplayMode"))) ||
@@ -165,7 +195,7 @@ static const char *method_name(enum kind k, int v, uint32_t i, char *buf, size_t
     return buf;
 }
 
-static uint32_t vtables[8][VERSIONS];
+static uint32_t vtables[16][VERSIONS];
 
 static uint32_t vtable(enum kind k, int v)
 {
@@ -223,6 +253,24 @@ static object *self(rc_cpu *c, enum kind k)
 
 static int self_version(rc_cpu *c) { return (int)rc_ld32(RC_ARG(c, 0) + 8); }
 
+/* ---- for d3d.c ---- */
+
+uint32_t rc_dd_new(int kind) { return new_object((enum kind)kind); }
+
+uint32_t rc_dd_iface(uint32_t o, int v) { return iface(o, v); }
+
+uint32_t rc_dd_self(rc_cpu *c, int kind) { return (uint32_t)(self(c, (enum kind)kind) - objects); }
+
+uint32_t rc_dd_object_of(uint32_t guest, int kind)
+{
+    uint32_t o = guest ? rc_ld32(guest + 4) : 0;
+    return o && o < OBJECTS && objects[o].kind == (enum kind)kind ? o : 0;
+}
+
+rc_dd_surface *rc_dd_surf(uint32_t o) { return o && o < OBJECTS && objects[o].kind == O_SURFACE ? &objects[o].s : NULL; }
+
+uint32_t *rc_dd_refs(uint32_t o) { return &objects[o].refs; }
+
 /* ---- pixel formats ---- */
 
 static void format_for(uint32_t bpp, uint32_t *r, uint32_t *g, uint32_t *b)
@@ -239,11 +287,12 @@ static void put_pixel_format(uint32_t p, const surface *s)
 {
     memset(rc_ptr(p), 0, 32);
     rc_st32(p, 32);
-    rc_st32(p + 4, s->bpp == 8 ? DDPF_PALETTEINDEXED8 | DDPF_RGB : DDPF_RGB);
+    rc_st32(p + 4, s->bpp == 8 ? DDPF_PALETTEINDEXED8 | DDPF_RGB : DDPF_RGB | (s->amask ? 0x1u : 0u));
     rc_st32(p + 12, s->bpp);
     rc_st32(p + 16, s->rmask);
     rc_st32(p + 20, s->gmask);
     rc_st32(p + 24, s->bmask);
+    rc_st32(p + 28, s->amask);
 }
 
 /* Fill a DDSURFACEDESC(2) for a surface; `lp` is the pixel address. */
@@ -384,11 +433,13 @@ static void k_CreateSurface(rc_cpu *c)
     if (!o) {
         RC_RETURN(c, DDERR_OUTOFMEMORY, 4);
     }
-    if ((flags & DDSD_PIXELFORMAT) && bpp == 16) {
+    if ((flags & DDSD_PIXELFORMAT) && (bpp == 16 || bpp == 32) && (rc_ld32(d + 72 + 4) & 0x40)) {
+        /* DDPF_RGB: its masks, and the alpha mask with DDPF_ALPHAPIXELS. */
         surface *s = &objects[o].s;
         s->rmask = rc_ld32(d + 72 + 16);
         s->gmask = rc_ld32(d + 72 + 20);
         s->bmask = rc_ld32(d + 72 + 24);
+        s->amask = (rc_ld32(d + 72 + 4) & 0x1) ? rc_ld32(d + 72 + 28) : 0;
     }
     if (flags & DDSD_CKSRCBLT) {
         objects[o].s.ckey = rc_ld32(d + 64);
@@ -796,6 +847,10 @@ static void k_DDQueryInterface(rc_cpu *c)
     object *x = self(c, O_DDRAW);
     uint32_t iid = rc_ld32(RC_ARG(c, 1)), out = RC_ARG(c, 2);
     int v = iid == 0x6c14db80u ? 1 : iid == 0xb3a6f3e0u ? 2 : iid == 0x9c59509au ? 4 : iid == 0x15e65ec0u ? 7 : 0;
+    if (iid == 0xf5049e77u) { /* IID_IDirect3D7 */
+        rc_st32(out, rc_d3d_create());
+        RC_RETURN(c, DD_OK, 3);
+    }
     if (!v) {
         if (rc_trace("ddraw")) {
             rc_log("[ddraw] QueryInterface for %08x: not offered", iid);
