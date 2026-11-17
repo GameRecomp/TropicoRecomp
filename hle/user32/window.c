@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "rc/hle.h"
+#include "rc/hle_modules.h"
 #include "rc/log.h"
 #include "rc/thread.h"
 #include "rc/platform.h"
@@ -591,9 +592,21 @@ void rc_input_deliver(const rc_event *ev)
     if (!to) {
         return;
     }
-    if (pointer_map &&
-        (e.type == RC_EV_MOUSE_MOVE || e.type == RC_EV_MOUSE_BUTTON || e.type == RC_EV_WHEEL)) {
-        pointer_map(&e.x, &e.y);
+    if (e.type == RC_EV_MOUSE_MOVE || e.type == RC_EV_MOUSE_BUTTON || e.type == RC_EV_WHEEL) {
+        /* On the screen, as Windows keeps the cursor: the window can be
+         * larger than the game's frame (bars beside it), and a drag goes
+         * on outside the window. Tropico 2 crashes on a point off its
+         * screen (no window is under it, and the window under the
+         * pointer is used without a check). */
+        uint32_t sw, sh;
+        rc_ddraw_mode(&sw, &sh);
+        if (sw && sh) {
+            e.x = e.x < 0 ? 0 : e.x >= (int)sw ? (int)sw - 1 : e.x;
+            e.y = e.y < 0 ? 0 : e.y >= (int)sh ? (int)sh - 1 : e.y;
+        }
+        if (pointer_map) {
+            pointer_map(&e.x, &e.y);
+        }
     }
     switch (e.type) {
     case RC_EV_QUIT:
