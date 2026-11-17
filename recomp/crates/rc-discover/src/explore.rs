@@ -338,6 +338,8 @@ struct Explorer<'a> {
     /// speculative code whose calls go to plausible function starts, so that
     /// real functions are in place before looser decodes run into them.
     strict_calls: bool,
+    /// Candidates already tried, so a failed one is not tried again.
+    tried: BTreeSet<u32>,
 }
 
 pub(crate) fn explore(
@@ -391,6 +393,7 @@ pub(crate) fn explore(
         info: InstructionInfoFactory::new(),
         candidates: Vec::new(),
         strict_calls: false,
+        tried: BTreeSet::new(),
     };
 
     if pe.entry_rva != 0 {
@@ -419,6 +422,13 @@ pub(crate) fn explore(
         x.try_candidates();
     }
     x.gaps();
+    if !x.has_relocs {
+        // Immediates in code found speculatively name functions too.
+        while x.immediate_candidates() {
+            x.try_candidates();
+            x.gaps();
+        }
+    }
     x.ex
 }
 
@@ -584,6 +594,9 @@ impl Explorer<'_> {
         c.sort_unstable();
         c.dedup();
         for va in c {
+            if !self.strict_calls {
+                self.tried.insert(va);
+            }
             if self.ex.insns.contains_key(&va)
                 || self.ex.inside_insn(va).is_some()
                 || self.ex.data_at(va).is_some()
@@ -610,6 +623,43 @@ impl Explorer<'_> {
                 a + u32::from(i.len) == va
                     && matches!(i.flow, Flow::Next | Flow::Cond(_) | Flow::CallIndirect)
             })
+    }
+
+    /// Immediate operands of all decoded code that land on a plausible
+    /// function start not yet decoded: candidates. Whether there were any.
+    fn immediate_candidates(&mut self) -> bool {
+        let addrs: Vec<(u32, u8)> = self.ex.insns.iter().map(|(&a, i)| (a, i.len)).collect();
+        for (va, len) in addrs {
+            let Some(bytes) = self.image.slice(va, len as usize) else {
+                continue;
+            };
+            let mut dec = Decoder::with_ip(32, bytes, u64::from(va), DecoderOptions::NONE);
+            let ins = dec.decode();
+            let co = dec.get_constant_offsets(&ins);
+            if co.has_immediate() && co.immediate_size() == 4 {
+                let v = self
+                    .image
+                    .u32(va + co.immediate_offset() as u32)
+                    .unwrap_or(0);
+                if self.ex.in_code(v)
+                    && !self.ex.insns.contains_key(&v)
+                    && self.ex.inside_insn(v).is_none()
+                    && self.plausible_start(v)
+                    && !self.tried.contains(&v)
+                {
+                    match self.ex.data_at(v) {
+                        None => self.candidates.push(v),
+                        // Code nothing seemed to reach, which this names.
+                        Some((start, _, DataKind::Unreached)) => {
+                            self.ex.data.remove(&start);
+                            self.candidates.push(v);
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }
+        }
+        !self.candidates.is_empty()
     }
 
     /// The next plausible function start in `(va, stop)`, or `stop`.
@@ -789,6 +839,19 @@ impl Explorer<'_> {
         let start = va;
         loop {
             if self.ex.insns.contains_key(&va) {
+                // Without relocations, speculative code that jumps into the
+                // middle of code already decoded is junk: taken, it would
+                // split a real function.
+                if va == start
+                    && !self.has_relocs
+                    && let Some(u) = &self.undo
+                    && !u.added.contains(&va)
+                    && !self.ex.entries.contains_key(&va)
+                    && self.flows_into(va)
+                {
+                    self.reject(va, ProblemKind::IntoOtherFunction);
+                    return;
+                }
                 // Jumping into another function happens (hand-written
                 // assembly does it); falling into the middle of one does
                 // not: code that does was decoded from the wrong place.
