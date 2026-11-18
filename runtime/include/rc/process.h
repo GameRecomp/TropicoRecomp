@@ -79,8 +79,10 @@ int rc_run(const rc_config *cfg);
 RC_NORETURN void rc_exit(uint32_t code);
 
 /* A resource of the executable (`module` is its base): guest address and
- * size of its data. Numeric types and names only. */
+ * size of its data, by its number or (rc_resource_named) its name; the type
+ * is a number. */
 bool rc_resource(uint32_t module, uint32_t type, uint32_t id, uint32_t *data, uint32_t *size);
+bool rc_resource_named(uint32_t module, uint32_t type, const char *name, uint32_t *data, uint32_t *size);
 
 /* Milliseconds on a monotonic clock (GetTickCount). */
 uint64_t rc_ticks_ms(void);

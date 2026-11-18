@@ -31,3 +31,15 @@ speed whatever the game's frame rate. It is scaled with the frame: at twice
 the game's resolution the 32 x 32 cursor is 64 x 64 on the screen, as on a
 monitor of the time. The image is made again whenever the frame is shown at
 another size.
+
+## The program's own cursors
+
+`LoadCursorA` with the program's module reads its cursor resources: the
+group (`RT_GROUP_CURSOR`, by number or name) lists the images, of which the
+one with the most colours at up to 32 x 32 is taken, and the image
+(`RT_CURSOR`) is the hot spot followed by a bitmap as in a `.ico` file (the
+colour image over the AND mask). A masked pixel is transparent unless its
+colour would visibly invert the screen (drawn black then). Tropico does not
+use them; Tropico 2 has 19 (`SCROLL0` to `SCROLL7` at the edges,
+`CONSTRUCTION`, `DESTRUCTION`, `ROAD`, `WAIT` and others, each in colour
+and black and white). Before, every such cursor was the arrow.

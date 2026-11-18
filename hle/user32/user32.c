@@ -81,14 +81,16 @@ static void k_LoadAcceleratorsA(rc_cpu *c)
 }
 
 /* ---- cursors ----
- * A cursor is one of the system's (LoadCursorA with a standard id) or an
- * image a program made (CreateIconIndirect), shown by the platform over the
- * window as the mouse's own pointer. */
+ * A cursor is one of the system's (LoadCursorA with a standard id), one of
+ * the program's own resources (LoadCursorA with its module), or an image a
+ * program made (CreateIconIndirect), shown by the platform over the window
+ * as the mouse's own pointer. */
 #define CURSORS 64
 #define CURSOR_HANDLE 0x00030000u
 typedef struct ucursor {
     bool used;
     int system; /* RC_CURSOR_*, or -1 for the image */
+    uint32_t res; /* the program's cursor resource it was made from, or 0 */
     uint32_t *argb;
     int w, h, hx, hy;
 } ucursor;
@@ -133,10 +135,140 @@ static int system_cursor(uint32_t id)
     }
 }
 
+/* A cursor image of the program's (RT_CURSOR): the hot spot (two 16-bit
+ * words), then a bitmap as in a .ico file: a BITMAPINFOHEADER whose height
+ * counts the colour image and the AND mask below it, the colour table, the
+ * colour image (bottom row first) and the 1-bit AND mask (1: transparent). */
+static uint32_t *cursor_image(uint32_t at, uint32_t size, int *w_out, int *h_out, int *hx, int *hy)
+{
+    if (size < 4 + 40) {
+        return NULL;
+    }
+    *hx = (int)rc_ld16(at);
+    *hy = (int)rc_ld16(at + 2);
+    uint32_t bi = at + 4;
+    uint32_t hs = rc_ld32(bi), w = rc_ld32(bi + 4), h2 = rc_ld32(bi + 8), bpp = rc_ld16(bi + 14);
+    uint32_t used = rc_ld32(bi + 32), h = h2 / 2;
+    if (w == 0 || h == 0 || w > 256 || h > 256 || (bpp != 1 && bpp != 4 && bpp != 8 && bpp != 24 && bpp != 32)) {
+        return NULL;
+    }
+    uint32_t colours = bpp <= 8 ? (used ? used : 1u << bpp) : 0;
+    uint32_t pal = bi + hs, bits = pal + 4 * colours;
+    uint32_t stride = (w * bpp + 31) / 32 * 4, mstride = (w + 31) / 32 * 4;
+    uint32_t mask = bits + stride * h;
+    if (mask + mstride * h > at + size) {
+        return NULL;
+    }
+    uint32_t *out = malloc((size_t)w * h * 4);
+    if (!out) {
+        return NULL;
+    }
+    bool alpha = false; /* a 32-bit image with its own alpha */
+    for (uint32_t i = 0; bpp == 32 && i < w * h; i++) {
+        alpha |= (rc_ld32(bits + 4 * i) >> 24) != 0;
+    }
+    for (uint32_t y = 0; y < h; y++) {
+        uint32_t row = bits + (h - 1 - y) * stride, mrow = mask + (h - 1 - y) * mstride;
+        for (uint32_t x = 0; x < w; x++) {
+            uint32_t rgb;
+            if (bpp <= 8) {
+                uint32_t bit = x * bpp, idx = (rc_ld8(row + bit / 8) >> (8 - bpp - bit % 8)) & ((1u << bpp) - 1);
+                uint32_t q = idx < colours ? rc_ld32(pal + 4 * idx) : 0;
+                rgb = q & 0xffffffu;
+            } else if (bpp == 24) {
+                uint32_t p = row + 3 * x;
+                rgb = (uint32_t)rc_ld8(p + 2) << 16 | (uint32_t)rc_ld8(p + 1) << 8 | rc_ld8(p);
+            } else {
+                uint32_t q = rc_ld32(row + 4 * x);
+                rgb = q & 0xffffffu;
+                if (alpha) {
+                    out[y * w + x] = (q >> 24) ? q : 0;
+                    continue;
+                }
+            }
+            int and = (rc_ld8(mrow + x / 8) >> (7 - x % 8)) & 1;
+            if (and) {
+                /* The screen XORed with the image: transparent where that
+                 * is (nearly) black, which barely changes the screen, and
+                 * black where it would invert it. */
+                int bright = ((rgb >> 16) & 0xff) + ((rgb >> 8) & 0xff) + (rgb & 0xff) > 3 * 64;
+                out[y * w + x] = bright ? 0xff000000u : 0;
+            } else {
+                out[y * w + x] = 0xff000000u | rgb;
+            }
+        }
+    }
+    *w_out = (int)w;
+    *h_out = (int)h;
+    return out;
+}
+
+/* The program's cursor `name` (a string, or a number below 0x10000): the
+ * image its group (RT_GROUP_CURSOR) lists with the most colours, at the
+ * largest size up to 32 x 32 if it has one. */
+static uint32_t own_cursor(uint32_t inst, uint32_t name)
+{
+    uint32_t grp, gsize;
+    bool found;
+    if (name < 0x10000u) {
+        found = rc_resource(inst, 12, name, &grp, &gsize);
+    } else {
+        char s[64];
+        uint32_t i = 0;
+        for (; i < sizeof s - 1 && rc_ld8(name + i); i++) {
+            s[i] = (char)rc_ld8(name + i);
+        }
+        s[i] = 0;
+        found = rc_resource_named(inst, 12, s, &grp, &gsize);
+    }
+    if (!found || gsize < 6) {
+        return 0;
+    }
+    for (uint32_t i = 1; i < CURSORS; i++) {
+        if (cursors[i].used && cursors[i].res == grp) {
+            return CURSOR_HANDLE + 4 * i;
+        }
+    }
+    uint32_t n = rc_ld16(grp + 4), best = 0, best_score = 0;
+    for (uint32_t i = 0; i < n && 6 + 14 * (i + 1) <= gsize; i++) {
+        uint32_t e = grp + 6 + 14 * i;
+        uint32_t w = rc_ld16(e), bits = rc_ld16(e + 6), id = rc_ld16(e + 12);
+        uint32_t score = (w <= 32 ? 0x10000u : 0) + bits * 256 + (w & 0xff);
+        if (score > best_score) {
+            best_score = score;
+            best = id;
+        }
+    }
+    uint32_t img, isize;
+    if (!best || !rc_resource(inst, 1, best, &img, &isize)) {
+        return 0;
+    }
+    uint32_t h = cursor_new();
+    ucursor *u = cursor_get(h);
+    if (!u) {
+        return 0;
+    }
+    u->argb = cursor_image(img, isize, &u->w, &u->h, &u->hx, &u->hy);
+    if (!u->argb) {
+        *u = (ucursor){0};
+        return 0;
+    }
+    u->system = -1;
+    u->res = grp;
+    return h;
+}
+
 static void k_LoadCursorA(rc_cpu *c)
 {
     uint32_t inst = RC_ARG(c, 0), name = RC_ARG(c, 1);
-    /* The program's own cursor resources are not read: the arrow. */
+    if (inst) {
+        uint32_t own = own_cursor(inst, name);
+        if (own) {
+            RC_RETURN(c, own, 2);
+        }
+    }
+    /* A standard cursor, or one of the program's that is not there: the
+     * system's (the arrow for those it has not). */
     int sys = inst == 0 && name < 0x10000u ? system_cursor(name) : RC_CURSOR_ARROW;
     for (uint32_t i = 1; i < CURSORS; i++) {
         if (cursors[i].used && !cursors[i].argb && cursors[i].system == sys) {
