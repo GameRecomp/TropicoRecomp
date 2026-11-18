@@ -87,4 +87,10 @@ code = [
     # clamps of the destination to the source, jl -> jmp).
     { at = 0x00532065, from = "7c 06", to = "eb 06" },
     { at = 0x00532075, from = "7c 04", to = "eb 04" },
+    # scroll: an edge's step is the time since the last, at least none,
+    # not 45 ms (cmp and mov of the least), and its rate is read from the
+    # patch variable at 0x0001f008 (fmul by the constant 0.75 at 0x0057c340).
+    { at = 0x0051ee92, from = "83 ff 2d", to = "83 ff 00" },
+    { at = 0x0051ee97, from = "c7 44 24 08 2d 00 00 00", to = "c7 44 24 08 00 00 00 00" },
+    { at = 0x0051eea3, from = "dc 0d 40 c3 57 00", to = "dc 0d 08 f0 01 00" },
 ]

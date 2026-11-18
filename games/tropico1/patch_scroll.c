@@ -238,12 +238,32 @@ static void pump(rc_cpu *c)
 
 /* ---- the edge ---- */
 
+/* How far an edge scrolls: the milliseconds since its last step times a
+ * rate, which the game reads from here (the manifest's code: it was the
+ * constant 0.75 at 0x0057c340). The game made each step at least 45 ms
+ * long and stepped once a frame, so the map scrolled faster the faster the
+ * game ran (and in jumps of 45 ms); with no least step, it scrolls by the
+ * time that passed, as smoothly as the frames come (a pass within the same
+ * millisecond moves nothing, and the time goes on to the next). The map's rate is
+ * what it scrolled at 30 frames a second (45 ms of 0.75 every 33 ms); other
+ * edges keep the game's 0.75 (they step less often than every 45 ms). */
+#define VAR_EDGE_RATE (RC_PATCH_VARS + 0x08u)
+#define GAME_RATE 0.75
+#define MAP_RATE (0.75 * 45.0 / (1000.0 / 30.0))
+
+static void set_rate(double r)
+{
+    memcpy(rc_ptr(VAR_EDGE_RATE), &r, sizeof r);
+}
+
 static void edge_repeat(rc_cpu *c)
 {
     uint32_t w = c->r[RC_ECX], map = rc_ld32(MAP_WIDGET);
-    if (map && edge_off() && rc_ld16(w + EDGE_TARGET) == rc_ld16(map + W_ID)) {
+    int at_map = map && rc_ld16(w + EDGE_TARGET) == rc_ld16(map + W_ID);
+    if (at_map && edge_off()) {
         RC_RETURN(c, 0, 0);
     }
+    set_rate(at_map ? MAP_RATE : GAME_RATE);
     rc_lookup_lifted(EDGE_REPEAT)(c);
 }
 
@@ -284,5 +304,6 @@ void tropico1_patch_scroll(void)
     rc_set_input_filter(filter);
     rc_add_pump_hook(pump);
     rc_hook(EDGE_REPEAT, edge_repeat);
+    set_rate(GAME_RATE);
     rc_hook(TEXT, text);
 }

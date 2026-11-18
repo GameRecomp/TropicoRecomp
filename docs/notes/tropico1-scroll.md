@@ -57,3 +57,25 @@ under the other check boxes; the page ticks it when the settings' byte at
 settings file. The text lookup (`0x004f1f40`, the number in `ecx`) gives our
 label and tooltip for its texts 3211 and 3212, in the game's language
 (`lang.c`).
+
+## The speed at the edge
+
+While the mouse is at an edge, `0x0051edc0` runs on every pass of the
+game's loop (the edge's repeat interval at `+0x80` is 0). Each pass it takes
+the milliseconds since its last step (`+0x98`), at least 45 (and at most 400,
+800 after eight seconds), times the rate 0.75 (the double at `0x0057c340`),
+and has the map's view scroll by that many virtual units (through the map
+widget's method `0x0050b340`). The least of 45 ms was made for machines that
+took longer than that for a pass: with faster passes the map scrolled 45 ms
+worth each pass, faster the faster the game ran, and in jumps.
+
+The manifest's code makes the least 0 and has the rate read from the patch
+variable at `0x0001f008`. For the map's edges `patch_scroll.c` puts there
+0.75 x 45 / 33.3 (about one virtual unit a millisecond, about 680 pixels a
+second at 1024 wide): the speed the map had when the game showed 30 frames a
+second, as it did on a 60 Hz screen, where the game's two copies to the
+screen each pass each waited for the display. Other widgets that repeat
+while the mouse is over them keep 0.75 (they step less often than every
+45 ms, so the least never mattered). The map now scrolls by the time that
+passed, in steps as small as the frames come, at the same speed whatever
+the frame rate.
