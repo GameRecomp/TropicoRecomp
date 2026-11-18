@@ -51,6 +51,8 @@ hooks = [
     0x008ea170, # resolution: an image draws its picture
     0x008de6e0, # resolution: a window and those in it are drawn
     0x008b91e0, # resolution: a display mode is looked up among those listed
+    0x008674e0, # resolution: the height of a screen-size setting
+    0x008df1d0, # resolution: the hit test (the window that gets the mouse at a point)
     0x008eb180, # textedit: a behaviour is attached to its window
     0x008eb670, # textedit: and detached
     0x008d1130, # fullscreen: the game goes full screen

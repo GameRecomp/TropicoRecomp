@@ -117,7 +117,9 @@ static uint32_t window_at(uint32_t w, int x, int y, int depth)
     if (!w || depth > 32) {
         return 0;
     }
-    int l = (int)rc_ld32(w + W_RECT) + tropico2_drawn_by(w), t = (int)rc_ld32(w + W_RECT + 4);
+    int32_t dx, dy;
+    tropico2_drawn_by(w, &dx, &dy);
+    int l = (int)rc_ld32(w + W_RECT) + dx, t = (int)rc_ld32(w + W_RECT + 4) + dy;
     if (x < l || y < t || x >= l + (int)rc_ld32(w + W_RECT + 8) || y >= t + (int)rc_ld32(w + W_RECT + 12)) {
         return 0;
     }

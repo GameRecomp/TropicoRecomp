@@ -1,4 +1,4 @@
-# Tropico 2: widescreen
+# Tropico 2: widescreen and the window's size
 
 What `games/tropico2/patch_resolution.c` changes and why. Addresses are in
 `Tropico2.exe` of the GOG release 2.1.0.14. No widescreen patch for Tropico 2
@@ -29,18 +29,24 @@ For each size the interface has its own art and layout: `Data/0640,6.{}` to
 given to the game: the HUD would be placed for the stock size (at 1920x1080
 from the 1600x1200 layout its bottom is cut off).
 
-## Wider, at the same height
+## The window's size
 
-The height of the screen stays the stock size's, and only the width grows:
-the layout then still fits from top to bottom, the HUD stays at the bottom
-left where the game puts it, and the world is seen further to the side.
-Wrapped, the width function gives the stock height times the chosen shape
-(a multiple of 4, never narrower than the stock width). DirectDraw lists the
-widened mode of every size beside its own from the start
-(`rc_ddraw_add_mode`), and the lookup is wrapped to find every widened size
-at the shape in effect (see the graphics page below), so the shape may
-change while playing. At 1024x768 and 16:9 that is 1364x768,
-at 2560x1080 (21:9) 1820x768.
+The game screen takes the size wanted (the window's, or settings.ini's WxH)
+when that is at least as high as the interface size's own; the interface
+keeps its size and the rest is world. A window lower than the size's own
+gets the size's own height and only its shape (a multiple of 4 wide, never
+narrower than the stock width), and is shown smaller. A shape narrower
+than 4:3 keeps 4:3. Both the width function and the height function
+(`0x008674e0`) are wrapped. At the interface size 1024x768, a 1920x1080
+window gets a 1920x1080 screen; at 1600x1200, 2132x1200.
+
+Several sizes then share one screen (all those lower than the window), so
+the size a screen is at comes from the setting in effect (`0x00993de8`),
+and while the patch changes the size (the setting says another one then)
+from the one it changes to. DirectDraw lists every size's screen from the
+start (`rc_ddraw_add_mode`), and the lookup is wrapped to find every size's
+screen in effect (see the graphics page below), so the size may change
+while playing.
 
 The game screen's root window lays out its two parts in `0x006a7ea0` (the
 root in `ecx`; the screen's width and height in its frame at `[ebp-0x14]`
@@ -106,7 +112,11 @@ arranges it once (again after the game lays it out anew):
   from one column is stretched to a width) and picks, among the columns near
   it, the one whose colours are closest to their average, so that it is
   neither a shadow nor a highlight;
-- the panels move to the middle of the balustrade;
+- the panels (`'_deb'`, the build menu's and the others, over the
+  balustrade) stay at the left, where the game puts them: what they hold
+  (the build menu's tabs and buttons) is placed from the stock layout when
+  they open, and came out crammed and overlapping in a panel moved to the
+  middle;
 - the status line is as wide as the planks, so it stays centred.
 
 The game sets some of those widths back when a panel opens, and hides the
@@ -118,7 +128,26 @@ so by the distance the piece moved too far left (no stock layout puts a
 child there); when the piece's window is drawn, such children move back by
 that distance (before they are drawn, as outside they would be skipped).
 
-## Dialogs in the middle
+## The HUD at the bottom, dialogs in the middle
+
+On a screen higher than the size's own, the game keeps the HUD's part where
+its layout puts it, and the patch only draws it lower, at the bottom. The
+layouts are written in the stock size's screen coordinates, and the game
+makes the HUD's pieces (and what opens in it later) from them as places
+relative to their parent's place then: moved by the layout, the part would
+hold its pieces too high. So:
+
+- the HUD's part (the root's `+0x198`) is drawn lower by the extra height,
+  as dialogs are drawn moved (below);
+- the pointer over the HUD as drawn is moved up by as much for the game;
+- the game's hit test (`0x008df1d0`, thiscall on a window: x and y; it is
+  also asked of windows in the HUD directly, such as the bar) finds nothing
+  in the HUD for a pointer over the world where the HUD is in the layout;
+- the world's part (the root's `+0xd4`) and the windows in it as wide as it
+  (the world's window and its view) are kept the whole height: after the
+  size changes while playing, the game sets the world's part back to the
+  layout's height, and the part's resize does not reach the view.
+
 
 The dialogs (the game's menu, the settings book) are windows of the desktop
 (`0x009b5c9c` in the runs seen, the game screen's grandparent's parent),
@@ -133,7 +162,7 @@ put them, and they are only drawn elsewhere:
 - `0x008de6e0` draws a window and those in it (thiscall: the surface and the
   clip; it clips with the window's rectangle and calls itself for the
   children). Wrapped, a dialog's place and the rectangles in it are moved
-  right by half of what the screen is wider than the size's own, for that
+  right and down by half of what the screen is larger than the size's own, for that
   call, and back after.
 - The pointer over a dialog (where it is drawn) is moved back by as much
   before the program sees it (`rc_set_pointer_map`, applied by user32 to every

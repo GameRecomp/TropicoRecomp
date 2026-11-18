@@ -107,7 +107,9 @@ static void pump(rc_cpu *c)
         }
         return;
     }
-    int nx = (int)rc_ld32(win + W_RECT) + tropico2_drawn_by(win), ny = (int)rc_ld32(win + W_RECT + 4);
+    int32_t dx, dy;
+    tropico2_drawn_by(win, &dx, &dy);
+    int nx = (int)rc_ld32(win + W_RECT) + dx, ny = (int)rc_ld32(win + W_RECT + 4) + dy;
     int nw = (int)rc_ld32(win + W_RECT + 8), nh = (int)rc_ld32(win + W_RECT + 12);
     if (!on || nx != x || ny != y || nw != w || nh != h) {
         on = 1;

@@ -1,39 +1,42 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * Widescreen: the game screen as wide as the window's (or the chosen
- * resolution's) shape, at the height of the game's own screen size.
+ * Widescreen and the window's size: the game screen as large as the window
+ * (or the chosen resolution), the interface at the size chosen in the game.
  *
  * The game offers five screen sizes (640x480 to 1600x1200) and has its
  * interface drawn for each: the art of a size and where every piece goes
- * (Data/<width>,6.{}). So the height stays the size's, and only the width
- * grows: the world fills the screen, and the HUD's bar is drawn across the
- * whole width (its right part at the right edge, its middle repeated).
+ * (Data/<width>,6.{}). The interface keeps its size; the screen around it
+ * grows: the world fills the screen, the HUD's bar is drawn across the
+ * whole width (its right part at the right edge, its middle repeated) and
+ * at the bottom, and dialogs in the middle.
  *
- * - The game turns its screen-size setting (0 to 4) into a width with one
- *   function (WIDTH_OF, cdecl, the setting as its argument; HEIGHT_OF for
- *   the height). Wrapped, it gives the wider width; DirectDraw offers that
- *   mode beside its own. The menus are 640x480 by other means and stay so.
+ * - The game turns its screen-size setting (0 to 4) into a width and a
+ *   height (WIDTH_OF, HEIGHT_OF, cdecl, the setting as their argument).
+ *   Wrapped, they give the size wanted, or (for a window lower than the
+ *   size's own) the size's own height at the wanted shape. DirectDraw
+ *   offers those modes beside its own. The menus are 640x480 by other
+ *   means and stay so.
  * - The game looks a size up in the display modes it listed at the start
  *   (and, finding none, steps down through the smaller sizes, at the
- *   smallest for ever), so DirectDraw lists the five widened sizes from the
- *   start, and the lookup finds the widened sizes of any shape.
+ *   smallest for ever), so DirectDraw lists them from the start, and the
+ *   lookup finds them whatever the size wanted is now.
  * - The game screen's root window lays out its two parts (LAYOUT): the HUD's
  *   part, from the HUD's top to the bottom at the screen's width, and the
  *   world's, from the top to the HUD's top. At the calls that size them,
  *   the HUD's part is given the size's own width until its bar is arranged
  *   for the whole width, and the world's the whole height (else the world
- *   is not drawn beside and behind the HUD).
+ *   is not drawn beside and behind the HUD). On a higher screen the HUD's
+ *   part stays where the layout puts it and is drawn lower (hud_size).
  * - The bar is arranged for the whole width when it is drawn (see arrange).
  * - Dialogs are drawn in the middle (and the pointer over them is where the
  *   game has them); on the settings' graphics page the 3D mode's choice
  *   becomes the shape's (the window's or 4:3), and the resolution shows the
- *   size with its shape.
+ *   screen's size with its shape.
  *
- * settings.ini's `resolution` gives the shape: WxH its width to height,
- * `window` the window's, following it (the screen's in full screen, the
- * page's in a browser), `off` the game's own 4:3; the graphics page writes
- * it. A shape narrower than 4:3 keeps 4:3. What the
- * game does at each place is in docs/notes/tropico2-resolution.md.
+ * settings.ini's `resolution` gives the size: WxH, `window` the window's,
+ * following it (the screen's in full screen, the page's in a browser),
+ * `off` the game's own; the graphics page writes it. What the game does at
+ * each place is in docs/notes/tropico2-resolution.md.
  */
 #include <stdio.h>
 #include <string.h>
@@ -51,6 +54,7 @@
 #include "rc/vm.h"
 
 #define WIDTH_OF 0x00867480u
+#define HEIGHT_OF 0x008674e0u
 
 /* In the root window's layout (0x006a7ea0), the calls of the parts' resize
  * method (vtable +0x14; ecx the part, the width and the height on the
@@ -66,21 +70,74 @@
 static const unsigned stock_w[5] = {640, 800, 1024, 1280, 1600};
 static const unsigned stock_h[5] = {480, 600, 768, 1024, 1200};
 
-static unsigned aspect_w, aspect_h; /* the shape; 0 for the game's own */
+/* The size wanted (the window's, or settings.ini's WxH); 0 for the game's
+ * own. */
+static unsigned aspect_w, aspect_h;
 
-/* The width for a size of the game: its height at the shape, a multiple of
- * 4 (rows are not padded), never narrower than the size's own. */
-static unsigned widened(unsigned slot)
+#define SIZE_SETTING 0x00993de8u
+
+/* The game screen for a size of the game (0 to 4): the size wanted, when it
+ * is at least as high as the size's own (no narrower than 4:3: a taller
+ * window shows it with bars); else the size's own height at the wanted
+ * shape. A multiple of 4 wide (rows are not padded), never smaller than
+ * the size's own. */
+static void size_of(unsigned slot, unsigned *w, unsigned *h)
 {
     unsigned aw = aspect_w, ah = aspect_h;
+    *w = stock_w[slot];
+    *h = stock_h[slot];
     if (!aw || !ah) {
-        return stock_w[slot];
+        return;
     }
-    unsigned w = (unsigned)(((uint64_t)stock_h[slot] * aw + ah / 2) / ah) & ~3u;
-    if (w <= stock_w[slot]) {
-        return stock_w[slot];
+    if ((uint64_t)ah * 4 > (uint64_t)aw * 3) {
+        ah = aw * 3 / 4;
     }
-    return w > 4096 ? 4096 : w;
+    if (ah >= stock_h[slot]) {
+        *h = ah > 3072 ? 3072 : ah;
+        unsigned ww = (unsigned)((uint64_t)aw * *h / ah) & ~3u;
+        *w = ww < stock_w[slot] ? stock_w[slot] : ww > 4096 ? 4096 : ww;
+        return;
+    }
+    unsigned ww = (unsigned)(((uint64_t)stock_h[slot] * aw + ah / 2) / ah) & ~3u;
+    if (ww > stock_w[slot]) {
+        *w = ww > 4096 ? 4096 : ww;
+    }
+}
+
+static unsigned widened(unsigned slot)
+{
+    unsigned w, h;
+    size_of(slot, &w, &h);
+    return w;
+}
+
+static unsigned heightened(unsigned slot)
+{
+    unsigned w, h;
+    size_of(slot, &w, &h);
+    return h;
+}
+
+/* The size is not the game's own. */
+static int changed(unsigned slot) { return widened(slot) != stock_w[slot] || heightened(slot) != stock_h[slot]; }
+
+/* The size of the game a screen of w x h is at, if not its own; -1 for
+ * none (the setting in effect first: several sizes may share a screen,
+ * when the size wanted is higher than theirs). */
+static int changing_to = -1; /* the size the screen changes to (reshape), which the setting does not say then */
+
+static int slot_of(unsigned w, unsigned h)
+{
+    uint32_t s = changing_to >= 0 ? (uint32_t)changing_to : rc_ld32(SIZE_SETTING);
+    if (s < 5 && widened(s) == w && heightened(s) == h && changed(s)) {
+        return (int)s;
+    }
+    for (unsigned i = 0; i < 5; i++) {
+        if (widened(i) == w && heightened(i) == h && changed(i)) {
+            return (int)i;
+        }
+    }
+    return -1;
 }
 
 static void width_of(rc_cpu *c)
@@ -93,25 +150,48 @@ static void width_of(rc_cpu *c)
     RC_RETURN(c, widened(slot), 0);
 }
 
-/* The size of a game screen whose width is not its own. The layout keeps
- * the screen's width and height in its frame. */
+static void height_of(rc_cpu *c)
+{
+    uint32_t slot = RC_ARG(c, 0);
+    if (slot > 4) {
+        rc_lookup_lifted(HEIGHT_OF)(c);
+        return;
+    }
+    RC_RETURN(c, heightened(slot), 0);
+}
+
+/* The size's own width of a game screen that is not of its size; 0 for
+ * one that is. The layout keeps the screen's width and height in its
+ * frame. */
 static unsigned own_width(uint32_t ebp, unsigned *w, unsigned *h)
 {
     *w = rc_ld32(ebp + LAYOUT_W);
     *h = rc_ld32(ebp + LAYOUT_H);
-    for (unsigned i = 0; i < 5; i++) {
-        if (stock_h[i] == *h && *w > stock_w[i]) {
-            return stock_w[i];
-        }
-    }
-    return 0;
+    int s = slot_of(*w, *h);
+    return s < 0 ? 0 : stock_w[s];
 }
+
+/* The HUD's part, and how far below its place in the layout it is drawn:
+ * on a higher screen than the size's own, by as much (so that it is at the
+ * bottom). The game keeps it at its place in the layout, since what it
+ * makes in the HUD later it places from the layout's stock screen
+ * coordinates; it is only drawn lower (tree_draw), the pointer over it is
+ * moved up by as much (pointer_map), and the game's hit test does not find
+ * it for a pointer over the world where it would be in the layout
+ * (hit_test). */
+static uint32_t hud_part;
+static int32_t hud_down;
+static int pointer_in_hud; /* the pointer, as last seen, is over the HUD as drawn */
 
 /* At the HUD part's resize: the size's own width. */
 static void hud_size(rc_cpu *c)
 {
     unsigned w, h, own = own_width(c->r[RC_EBP], &w, &h);
+    hud_part = c->r[RC_ECX];
+    hud_down = 0;
     if (own) {
+        int s = slot_of(w, h);
+        hud_down = (int32_t)(h - stock_h[s]);
         rc_st32(c->r[RC_ESP], own);
         rc_st32(c->r[RC_ECX] + PART_W, own);
     }
@@ -157,6 +237,13 @@ static struct {
 } kept[16];
 static unsigned n_kept;
 static uint32_t balustrade;
+
+/* The places (x) the moved pieces keep: the game sets some back too when a
+ * panel opens (the rail's rising piece). */
+static struct {
+    uint32_t window, x;
+} kept_x[48];
+static unsigned n_kept_x;
 #define W_SHOWN 0x50u /* its low byte: the window is shown */
 
 static void keep(uint32_t w, unsigned width)
@@ -170,9 +257,10 @@ static void keep(uint32_t w, unsigned width)
 
 static uint32_t desktop_seen; /* the desktop, once the game screen is in it */
 static int32_t dialogs_by;    /* how far right dialogs are drawn (see tree_draw) */
+static int32_t dialogs_down;  /* and how far down */
 
 static uint32_t the_bar; /* the bar arranged, and how far its parts moved */
-static int32_t moved_right, moved_middle;
+static int32_t moved_right;
 
 /* What arranging changed, to be put back when the shape changes: a
  * window's place (x) and width. */
@@ -216,14 +304,66 @@ static void widen(uint32_t w, unsigned dx)
     rc_st32(w + W_RECT + 8, rc_ld32(w + W_RECT + 8) + dx);
 }
 
+/* The world's part (the root's +0xd4, as the HUD's is its +0x198) is the
+ * whole height (world_size), and the world's view in it as high; after the
+ * screen changes size while playing, the view keeps its height (the part's
+ * resize does not reach it), which leaves the rows below it black. They
+ * are resized (their method at vtable +0x14: width and height). */
+#define ROOT_HUD 0x198u
+#define ROOT_WORLD 0xd4u
+#define RESIZE 0x14u
+
+static void resize_to(rc_cpu *c, uint32_t win, uint32_t w, uint32_t h)
+{
+    if (rc_ld32(win + W_RECT + 12) == h) {
+        return;
+    }
+    rc_cpu saved = *c;
+    rc_st32(win + PART_W, w);
+    rc_st32(win + PART_H, h);
+    c->r[RC_ECX] = win;
+    uint32_t args[2] = {w, h};
+    rc_call_guest(c, rc_ld32(rc_ld32(win) + RESIZE), 2, args);
+    *c = saved;
+}
+
+/* A window and the windows in it that are as wide (the world's window and
+ * its view), at w x h. */
+static void resize_tree(rc_cpu *c, uint32_t win, uint32_t w, uint32_t h, int depth)
+{
+    resize_to(c, win, w, h);
+    if (depth < 4) {
+        EACH_CHILD(win, k)
+        {
+            if (rc_ld32(k + W_RECT + 8) == w) {
+                resize_tree(c, k, w, h, depth + 1);
+            }
+        }
+    }
+}
+
+static void keep_world_high(rc_cpu *c)
+{
+    if (!hud_part || !hud_down) {
+        return;
+    }
+    uint32_t root = rc_ld32(hud_part + W_PARENT);
+    if (!root || root + ROOT_HUD != hud_part) {
+        return;
+    }
+    uint32_t world = root + ROOT_WORLD;
+    uint32_t w = rc_ld32(root + W_RECT + 8), h = rc_ld32(root + W_RECT + 12);
+    resize_tree(c, world, w, h, 0);
+}
+
 /* The bar laid out for the size's own width, on a wider screen: its right
  * part (from the rail's right end, the wheel and what is beside it) moves to
  * the right edge, and with it the rail's middle, which already rises towards
  * the wheel (repeated, it would make steps); the rail's flat left piece, the
  * balustrade behind the panels and the planks at the bottom are drawn as
- * often as the width needs; the panels
- * between the balusters move to the middle; the status line (in the planks)
- * is as wide as they are, so that it stays centred. */
+ * often as the width needs; the panels between the balusters stay at the
+ * left, as the game puts them; the status line (in the planks) is as wide
+ * as the planks, so that it stays centred. */
 static void arrange(uint32_t bar)
 {
     uint32_t part = rc_ld32(bar + W_PARENT);
@@ -231,13 +371,10 @@ static void arrange(uint32_t bar)
     if (!root) {
         return;
     }
-    unsigned sw = rc_ld32(root + W_RECT + 8), sh = rc_ld32(root + W_RECT + 12), own = 0;
-    for (unsigned i = 0; i < 5; i++) {
-        if (stock_h[i] == sh) {
-            own = stock_w[i];
-        }
-    }
-    if (!own || sw <= own || rc_ld32(bar + W_RECT + 8) != own) {
+    unsigned sw = rc_ld32(root + W_RECT + 8), sh = rc_ld32(root + W_RECT + 12);
+    int s = slot_of(sw, sh);
+    unsigned own = s < 0 ? 0 : stock_w[s];
+    if (!own || sw < own || rc_ld32(bar + W_RECT + 8) != own) {
         return;
     }
     unsigned dx = sw - own;
@@ -253,6 +390,7 @@ static void arrange(uint32_t bar)
     }
     n_tiles = 0;
     n_kept = 0;
+    n_kept_x = 0;
     n_undo = 0;
     balustrade = 0;
     EACH_CHILD(bar, k)
@@ -282,11 +420,16 @@ static void arrange(uint32_t bar)
                 }
             }
         } else if (name == NAME('_', 'd', 'e', 'b')) {
-            remember(k);
-            rc_st32(k + W_PLACE, (uint32_t)(x + (int32_t)dx / 2));
+            /* The panels stay where the game puts them: what they hold is
+             * placed from the stock layout when they open. */
         } else if (x >= right || name == NAME('b', 'a', 'c', '0')) {
             remember(k);
             rc_st32(k + W_PLACE, (uint32_t)(x + (int32_t)dx));
+            if (n_kept_x < sizeof kept_x / sizeof kept_x[0]) {
+                kept_x[n_kept_x].window = k;
+                kept_x[n_kept_x].x = (uint32_t)(x + (int32_t)dx);
+                n_kept_x++;
+            }
         }
     }
     widen(part, sw - rc_ld32(part + W_RECT + 8));
@@ -294,7 +437,6 @@ static void arrange(uint32_t bar)
     place(bar);
     the_bar = bar;
     moved_right = (int32_t)dx;
-    moved_middle = (int32_t)dx / 2;
 }
 
 /* The game places what it opens later in a piece (the scales' detailed
@@ -312,7 +454,7 @@ static void fix_place(uint32_t w)
     uint32_t k = w, p = rc_ld32(w + W_PARENT);
     for (int depth = 0; p && depth < 16; depth++) {
         if (p == the_bar) {
-            by = rc_ld32(k + W_NAME) == NAME('_', 'd', 'e', 'b') ? moved_middle : moved_right;
+            by = rc_ld32(k + W_NAME) == NAME('_', 'd', 'e', 'b') ? 0 : moved_right;
             break;
         }
         k = p;
@@ -339,21 +481,28 @@ static void unarrange(void)
         rc_st32(undo[i].window + W_RECT + 8, undo[i].width);
     }
     place(the_bar);
-    n_undo = n_tiles = n_kept = 0;
+    n_undo = n_tiles = n_kept = n_kept_x = 0;
     balustrade = 0;
     the_bar = 0;
-    moved_right = moved_middle = 0;
+    moved_right = 0;
     desktop_seen = 0;
-    dialogs_by = 0;
+    dialogs_by = dialogs_down = 0;
 }
 
 static void bar_draw(rc_cpu *c)
 {
     uint32_t bar = c->r[RC_ECX];
+    keep_world_high(c);
     arrange(bar);
     if (bar == the_bar) {
         for (unsigned i = 0; i < n_kept; i++) {
             rc_st32(kept[i].window + W_RECT + 8, kept[i].width);
+        }
+        for (unsigned i = 0; i < n_kept_x; i++) {
+            if (rc_ld32(kept_x[i].window + W_PLACE) != kept_x[i].x) {
+                rc_st32(kept_x[i].window + W_PLACE, kept_x[i].x);
+                place(kept_x[i].window);
+            }
         }
         if (balustrade) {
             rc_st8(balustrade + W_SHOWN, 1);
@@ -405,24 +554,22 @@ static unsigned dialogs(uint32_t desktop, uint32_t *out, unsigned max)
     return n;
 }
 
-/* How far right dialogs go on this desktop: half of what the screen is
- * wider than the size's own. */
-static int32_t dialog_shift(uint32_t desktop)
+/* How far right and down dialogs go on this desktop: half of what the
+ * screen is larger than the size's own. */
+static void dialog_shift(uint32_t desktop, int32_t *dx, int32_t *dy)
 {
     unsigned sw = rc_ld32(desktop + W_RECT + 8), sh = rc_ld32(desktop + W_RECT + 12);
-    for (unsigned i = 0; i < 5; i++) {
-        if (stock_h[i] == sh && sw > stock_w[i]) {
-            return (int32_t)(sw - stock_w[i]) / 2;
-        }
-    }
-    return 0;
+    int s = slot_of(sw, sh);
+    *dx = s < 0 ? 0 : (int32_t)(sw - stock_w[s]) / 2;
+    *dy = s < 0 ? 0 : (int32_t)(sh - stock_h[s]) / 2;
 }
 
-/* A window's rectangle and its children's, moved by dx. */
-static void shift_rects(uint32_t w, int32_t dx)
+/* A window's rectangle and its children's, moved by dx, dy. */
+static void shift_rects(uint32_t w, int32_t dx, int32_t dy)
 {
     rc_st32(w + W_RECT, rc_ld32(w + W_RECT) + (uint32_t)dx);
-    EACH_CHILD(w, k) { shift_rects(k, dx); }
+    rc_st32(w + W_RECT + 4, rc_ld32(w + W_RECT + 4) + (uint32_t)dy);
+    EACH_CHILD(w, k) { shift_rects(k, dx, dy); }
 }
 
 /* A window and the windows in it are drawn (thiscall: the surface and the
@@ -432,53 +579,99 @@ static void shift_rects(uint32_t w, int32_t dx)
 static void tree_draw(rc_cpu *c)
 {
     uint32_t w = c->r[RC_ECX], list[32];
-    int32_t by = dialogs_by;
-    unsigned n = by && desktop_seen ? dialogs(desktop_seen, list, 32) : 0, i = 0;
+    int32_t by = dialogs_by, down = dialogs_down;
+    unsigned n = (by || down) && desktop_seen ? dialogs(desktop_seen, list, 32) : 0, i = 0;
     while (i < n && list[i] != w) {
         i++;
+    }
+    if (w == hud_part && hud_down) {
+        by = 0;
+        down = hud_down;
+        i = 0;
+        n = 1;
     }
     if (i == n) {
         rc_lookup_lifted(TREE_DRAW)(c);
         return;
     }
     rc_st32(w + W_PLACE, rc_ld32(w + W_PLACE) + (uint32_t)by);
-    shift_rects(w, by);
+    rc_st32(w + W_PLACE + 4, rc_ld32(w + W_PLACE + 4) + (uint32_t)down);
+    shift_rects(w, by, down);
     rc_lookup_lifted(TREE_DRAW)(c);
     rc_st32(w + W_PLACE, rc_ld32(w + W_PLACE) - (uint32_t)by);
-    shift_rects(w, -by);
+    rc_st32(w + W_PLACE + 4, rc_ld32(w + W_PLACE + 4) - (uint32_t)down);
+    shift_rects(w, -by, -down);
 }
 
-/* The pointer over a dialog (where it is drawn) is where the game has it. */
+/* The pointer over a dialog or the HUD (where they are drawn) is where the
+ * game has them. */
 static void pointer_map(int *x, int *y)
 {
     uint32_t list[32];
-    if (!desktop_seen || !dialogs_by) {
+    pointer_in_hud = 0;
+    if (hud_part && hud_down) {
+        int32_t l = (int32_t)rc_ld32(hud_part + W_RECT), t = (int32_t)rc_ld32(hud_part + W_RECT + 4) + hud_down;
+        int32_t r = l + (int32_t)rc_ld32(hud_part + W_RECT + 8), b = t + (int32_t)rc_ld32(hud_part + W_RECT + 12);
+        if ((rc_ld8(hud_part + W_SHOWN) & 1) && *x >= l && *x < r && *y >= t && *y < b) {
+            *y -= hud_down;
+            pointer_in_hud = 1;
+            return;
+        }
+    }
+    if (!desktop_seen || (!dialogs_by && !dialogs_down)) {
         return;
     }
     unsigned n = dialogs(desktop_seen, list, 32);
     for (unsigned i = 0; i < n; i++) {
         uint32_t d = list[i];
-        int32_t l = (int32_t)rc_ld32(d + W_RECT) + dialogs_by, t = (int32_t)rc_ld32(d + W_RECT + 4);
+        int32_t l = (int32_t)rc_ld32(d + W_RECT) + dialogs_by, t = (int32_t)rc_ld32(d + W_RECT + 4) + dialogs_down;
         int32_t r = l + (int32_t)rc_ld32(d + W_RECT + 8), b = t + (int32_t)rc_ld32(d + W_RECT + 12);
         if ((rc_ld8(d + W_SHOWN) & 1) && *x >= l && *x < r && *y >= t && *y < b) {
             *x -= dialogs_by;
+            *y -= dialogs_down;
             return;
         }
     }
 }
 
-int32_t tropico2_drawn_by(uint32_t w)
+void tropico2_drawn_by(uint32_t w, int32_t *dx, int32_t *dy)
 {
     uint32_t list[32];
-    unsigned n = dialogs_by && desktop_seen ? dialogs(desktop_seen, list, 32) : 0;
+    unsigned n = (dialogs_by || dialogs_down) && desktop_seen ? dialogs(desktop_seen, list, 32) : 0;
+    *dx = *dy = 0;
+    for (uint32_t k = w; k && hud_down; k = rc_ld32(k + W_PARENT)) {
+        if (k == hud_part) {
+            *dy = hud_down;
+            return;
+        }
+    }
     for (; w; w = rc_ld32(w + W_PARENT)) {
         for (unsigned i = 0; i < n; i++) {
             if (list[i] == w) {
-                return dialogs_by;
+                *dx = dialogs_by;
+                *dy = dialogs_down;
+                return;
             }
         }
     }
-    return 0;
+}
+
+/* The game's hit test (thiscall on a window: x and y; returns the window
+ * that gets the mouse there, or 0; the game also asks windows in the HUD,
+ * such as its bar, directly): the HUD is not where the pointer is unless
+ * it is over the HUD as drawn. */
+#define HIT_TEST 0x008df1d0u
+static void hit_test(rc_cpu *c)
+{
+    if (hud_down && !pointer_in_hud) {
+        int depth = 0;
+        for (uint32_t k = c->r[RC_ECX]; k && depth < 32; k = rc_ld32(k + W_PARENT), depth++) {
+            if (k == hud_part) {
+                RC_RETURN(c, 0, 2);
+            }
+        }
+    }
+    rc_lookup_lifted(HIT_TEST)(c);
 }
 
 /* ---- the settings' graphics page: the shape */
@@ -513,7 +706,6 @@ int32_t tropico2_drawn_by(uint32_t w)
  * arguments: the main menu's or the game's) and its method that changes
  * to a size (thiscall at vtable +0x70: the size, and whether to save it).
  * That method lays the game screen out anew only when the size changed. */
-#define SIZE_SETTING 0x00993de8u
 #define SCREEN_NOW 0x006cf0e0u
 #define SET_SIZE 0x70u
 
@@ -652,12 +844,14 @@ static void reshape(rc_cpu *c, unsigned w, unsigned h)
 {
     uint32_t slot = rc_ld32(SIZE_SETTING), mw, mh;
     rc_ddraw_mode(&mw, &mh);
-    int showing = slot < 5 && mh == stock_h[slot] && mw == widened(slot);
+    int showing = slot < 5 && mh == heightened(slot) && mw == widened(slot);
     aspect_w = w;
     aspect_h = h;
     memset(labels, 0, sizeof labels);
-    rc_log("widescreen: the game screen at %ux%u (and as wide at the other sizes)", widened(4), stock_h[4]);
-    if (!showing || mw == widened(slot)) {
+    if (slot < 5) {
+        rc_log("widescreen: the game screen at %ux%u", widened(slot), heightened(slot));
+    }
+    if (!showing || (mw == widened(slot) && mh == heightened(slot))) {
         return;
     }
     unarrange();
@@ -667,7 +861,9 @@ static void reshape(rc_cpu *c, unsigned w, unsigned h)
         rc_st32(SIZE_SETTING, slot ? 0 : 1);
         c->r[RC_ECX] = screen;
         uint32_t args[2] = {slot, 0};
+        changing_to = (int)slot;
         rc_call_guest(c, rc_ld32(rc_ld32(screen) + SET_SIZE), 2, args);
+        changing_to = -1;
         if (rc_ld32(SIZE_SETTING) != slot) {
             rc_st32(SIZE_SETTING, slot); /* (it failed: still that size) */
         }
@@ -713,7 +909,7 @@ static void watch_window(rc_cpu *c)
     last_look = now;
     unsigned w, h;
     shape_now(&w, &h);
-    if (!w || !h || (uint64_t)w * aspect_h == (uint64_t)h * aspect_w) {
+    if (!w || !h || (w == aspect_w && h == aspect_h)) {
         want_w = want_h = 0;
         return;
     }
@@ -738,7 +934,7 @@ static void mode_listed(rc_cpu *c)
 {
     uint32_t w = RC_ARG(c, 2), h = RC_ARG(c, 3);
     for (unsigned i = 0; i < 5; i++) {
-        if (h == stock_h[i] && w == widened(i) && w != stock_w[i]) {
+        if (h == heightened(i) && w == widened(i) && changed(i)) {
             RC_RETURN(c, 1, 4);
         }
     }
@@ -794,11 +990,11 @@ static void label_text(rc_cpu *c)
         while (j < n && rc_ld8(text + j) == (uint8_t)own[j]) {
             j++;
         }
-        if (j == n && widened(i) != stock_w[i]) {
+        if (j == n && changed(i)) {
             if (!labels[i]) {
                 char buf[48], shape[16];
-                aspect_name(widened(i), stock_h[i], shape, sizeof shape);
-                int len = snprintf(buf, sizeof buf, "%ux%u (%s)", widened(i), stock_h[i], shape);
+                aspect_name(widened(i), heightened(i), shape, sizeof shape);
+                int len = snprintf(buf, sizeof buf, "%ux%u (%s)", widened(i), heightened(i), shape);
                 labels[i] = rc_heap_alloc((uint32_t)len + 1, true);
                 for (int k = 0; labels[i] && k <= len; k++) {
                     rc_st8(labels[i] + (uint32_t)k, (uint8_t)buf[k]);
@@ -852,7 +1048,7 @@ static void image_draw(rc_cpu *c)
     uint32_t w = c->r[RC_ECX];
     if (the_bar && !rc_ld32(w + W_PARENT)) {
         desktop_seen = w;
-        dialogs_by = dialog_shift(w);
+        dialog_shift(w, &dialogs_by, &dialogs_down);
     }
     EACH_CHILD(w, k) { fix_place(k); }
     unsigned i = 0;
@@ -963,11 +1159,12 @@ void tropico2_patch_resolution(void)
     }
     shape_now(&aspect_w, &aspect_h);
     for (unsigned i = 0; i < 5; i++) {
-        if (widened(i) != stock_w[i]) {
-            rc_ddraw_add_mode(widened(i), stock_h[i]);
+        if (changed(i)) {
+            rc_ddraw_add_mode(widened(i), heightened(i));
         }
     }
     rc_hook(WIDTH_OF, width_of);
+    rc_hook(HEIGHT_OF, height_of);
     rc_hook(MODE_LISTED, mode_listed);
     rc_on_point(HUD_SIZE, hud_size);
     rc_on_point(WORLD_SIZE, world_size);
@@ -983,8 +1180,9 @@ void tropico2_patch_resolution(void)
     rc_add_pump_hook(pump);
     rc_set_pointer_map(pointer_map);
     rc_hook(TREE_DRAW, tree_draw);
-    if (widened(4) != stock_w[4]) {
-        rc_log("widescreen: the game screen at %ux%u (and as wide at the other sizes)%s", widened(4), stock_h[4],
-               follow ? ", following the window" : "");
+    rc_hook(HIT_TEST, hit_test);
+    if (changed(2) || changed(4)) {
+        rc_log("widescreen: the game screen at %ux%u (at the interface size 1024x768; %ux%u at 1600x1200)%s",
+               widened(2), heightened(2), widened(4), heightened(4), follow ? ", following the window" : "");
     }
 }
