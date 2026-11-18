@@ -61,6 +61,8 @@ hooks = [
     0x00503760, # textedit: a text field is edited
 ]
 points = [
+    0x0051f041, # scroll: the mouse enters a widget, whose cursor was just read
+    0x0051f0a6, # scroll: the mouse leaves a widget, whose cursor was just read
     0x00450f8f, # vtext: the rotated-text drawer calls the text renderer
     0x00530a51, # resolution: a movie widget's flags, just copied from its record
     0x00491127, # fullscreen: the options page has read the windowed flag

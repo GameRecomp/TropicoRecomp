@@ -50,6 +50,13 @@ Let go while moving, the map glides on at the drag's speed and slows down
 came from a finger (the pointer stays where a finger left it, often at an
 edge), or when the options page's box "No edge scrolling" is ticked.
 
+The edges show an arrow while the mouse is over them: a widget's cursor
+(`+0x7a`, 0 for none) is read when the mouse enters it (`0x0051f03d`, the
+widget in `esi`) and put up, and read again when it leaves (`0x0051f0a0`,
+the widget in `ecx`) to put the cursor before it back. Where edge scrolling
+is off, the map's edges read as having none (patch points just after both
+reads), on leaving only if they did on entering.
+
 That box was the reduction of "graphics shifting", a fix for hardware 3D,
 which is not offered here. Its widget (`0x1eaa`) stays on the page, moved up
 under the other check boxes; the page ticks it when the settings' byte at

@@ -267,6 +267,41 @@ static void edge_repeat(rc_cpu *c)
     rc_lookup_lifted(EDGE_REPEAT)(c);
 }
 
+/* The mouse over a widget shows the widget's cursor (+0x7a, 0 for none):
+ * the widget's handler of the mouse has just read it at CURSOR_ENTER (in
+ * ax, the widget in esi) and puts it up, and on leaving reads it again at
+ * CURSOR_LEAVE (in ax, the widget in ecx) and puts the cursor before it
+ * back. An edge of the map shows an arrow that way; where edge scrolling
+ * is off it shows none, and on leaving restores nothing it did not put up. */
+#define CURSOR_ENTER 0x0051f041u
+#define CURSOR_LEAVE 0x0051f0a6u
+
+static uint32_t no_arrow; /* the edge widget entered without its arrow */
+
+static int map_edge(uint32_t w)
+{
+    uint32_t map = rc_ld32(MAP_WIDGET);
+    return map && rc_ld16(w + EDGE_TARGET) == rc_ld16(map + W_ID);
+}
+
+static void cursor_enter(rc_cpu *c)
+{
+    uint32_t w = c->r[RC_ESI];
+    if ((c->r[RC_EAX] & 0xffffu) && map_edge(w) && edge_off()) {
+        c->r[RC_EAX] &= 0xffff0000u;
+        no_arrow = w;
+    }
+}
+
+static void cursor_leave(rc_cpu *c)
+{
+    uint32_t w = c->r[RC_ECX];
+    if (w == no_arrow) {
+        c->r[RC_EAX] &= 0xffff0000u;
+        no_arrow = 0;
+    }
+}
+
 /* ---- the check box's texts ---- */
 
 static uint32_t guest_text[TROPICO1_TEXTS][TROPICO1_LANGS];
@@ -304,6 +339,8 @@ void tropico1_patch_scroll(void)
     rc_set_input_filter(filter);
     rc_add_pump_hook(pump);
     rc_hook(EDGE_REPEAT, edge_repeat);
+    rc_on_point(CURSOR_ENTER, cursor_enter);
+    rc_on_point(CURSOR_LEAVE, cursor_leave);
     set_rate(GAME_RATE);
     rc_hook(TEXT, text);
 }
