@@ -4,7 +4,7 @@
 // browser, the worker stores the game in this origin's private storage
 // instead, and play.html runs it.
 
-import { GAMES, gameOf } from './games.js';
+import { GAMES, gameOf, showIcon } from './games.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -386,6 +386,7 @@ function checkPlayer(g) {
 /* The page for the chosen game: its texts, tab, address and stored copy. */
 function showGame() {
   document.title = `${game.name} Converter`;
+  showIcon(game);
   $('game-name').textContent = game.full || game.name;
   $('installer').textContent = game.installer;
   $('installer-size').textContent = game.installerSize;

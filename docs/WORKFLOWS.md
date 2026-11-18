@@ -106,9 +106,13 @@ system greyed out, "disabled on this site for now".
 
 `tools/version` gives the builds' version, `0.1.0+<short git revision>`; CMake
 puts the revision into the window's title, e.g. "Tropico (a695b1d)". The icons
-come from `tools/appimage/tropico.svg`: `tools/make-icons build/icons` renders
-the PNGs and packs `tropico.ico` and `tropico.icns` (CI does it once and hands
-them on). The Windows program carries the icon and version information
+come from `tools/appimage/tropico.svg` (Tropico 2's: `tropico2.svg`, the
+island at dusk with a 2 in the sun; `GAME_ICON` of `tools/game-info`):
+`tools/make-icons build/icons` renders the PNGs of each and packs
+`tropico.ico`, `tropico.icns`, `tropico2.ico` and `tropico2.icns` (CI does it
+once and hands them on); Android draws them from
+`android/res/drawable/tropico.xml` and `tropico2.xml`, and the web pages
+show the chosen game's. The Windows program carries the icon and version information
 (`games/tropico1/tropico1.rc.in`), the AppImage the icons, a desktop entry and
 AppStream metainfo (`tools/make-appimage`), and the macOS bundle the icon and
 its version in `Info.plist` (`recomp template --version --icon`).

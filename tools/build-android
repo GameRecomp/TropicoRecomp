@@ -7,9 +7,9 @@
 #
 #   tools/build-android OUT.apk [GAME]
 #
-# GAME is tropico1 (the default) or tropico2: its package name and label
-# go into the manifest and the activity's package (android/ holds them for
-# Tropico).
+# GAME is tropico1 (the default) or tropico2: its package name, label and
+# icon (android/res/drawable/<icon>.xml) go into the manifest and the
+# activity's package (android/ holds them for Tropico).
 #
 # Needs the Android SDK (ANDROID_HOME: a platform and build-tools) and NDK
 # (ANDROID_NDK_LATEST_HOME or ANDROID_NDK_HOME), a JDK, cmake and zip; CI
@@ -92,6 +92,7 @@ sed "s/^package io\.github\.gamerecomp\.tropico1recomp;/package $GAME_ANDROID_ID
     android/java/io/github/gamerecomp/tropico1recomp/TropicoActivity.java > "$work/java/$pkgdir/TropicoActivity.java"
 sed -e "s/package=\"io\.github\.gamerecomp\.tropico1recomp\"/package=\"$GAME_ANDROID_ID\"/" \
     -e "s/android:label=\"Tropico\"/android:label=\"$GAME_NAME\"/g" \
+    -e "s/@drawable\/tropico\"/@drawable\/$GAME_ICON\"/" \
     android/AndroidManifest.xml > "$work/manifest/AndroidManifest.xml"
 javac --release 11 -nowarn -encoding UTF-8 -classpath "$platform/android.jar" -d "$work/classes" \
     $(find "$work/src/sdl/android-project/app/src/main/java" "$work/java" -name '*.java')

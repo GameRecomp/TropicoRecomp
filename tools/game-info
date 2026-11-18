@@ -7,7 +7,8 @@
 # sets GAME_NAME (shown), GAME_STEM (file and folder names), GAME_APP_ID
 # (desktop and macOS), GAME_ANDROID_ID (the Android package), GAME_WEB (the
 # web shell's file name), GAME_INSTALLER (the GOG installer's file name),
-# GAME_SUMMARY, GAME_DESCRIPTION and GAME_KEYWORDS.
+# GAME_ICON (its icon: tools/appimage/<icon>.svg, <icon>.ico and .icns of
+# tools/make-icons, android/res/drawable/<icon>.xml), GAME_SUMMARY, GAME_DESCRIPTION and GAME_KEYWORDS.
 case "${1:-tropico1}" in
     tropico1)
         GAME_NAME="Tropico"
@@ -16,6 +17,7 @@ case "${1:-tropico1}" in
         GAME_ANDROID_ID=io.github.gamerecomp.tropico1recomp
         GAME_WEB=tropico
         GAME_INSTALLER=setup_tropico_2.1.0.14.exe
+        GAME_ICON=tropico
         GAME_SUMMARY="Tropico, recompiled to run natively"
         GAME_DESCRIPTION="The 2001 strategy game Tropico"
         GAME_KEYWORDS="Tropico;PopTop;strategy;"
@@ -27,6 +29,7 @@ case "${1:-tropico1}" in
         GAME_ANDROID_ID=io.github.gamerecomp.tropico2recomp
         GAME_WEB=tropico2
         GAME_INSTALLER=setup_tropico2_2.1.0.14.exe
+        GAME_ICON=tropico2
         GAME_SUMMARY="Tropico 2: Pirate Cove, recompiled to run natively"
         GAME_DESCRIPTION="The 2003 strategy game Tropico 2: Pirate Cove"
         GAME_KEYWORDS="Tropico;Pirate Cove;Frog City;strategy;"

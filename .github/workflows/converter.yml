@@ -44,7 +44,7 @@ jobs:
           echo "hosts=$hosts" >> "$GITHUB_OUTPUT"
 
   icons:
-    # The program's icons, rendered from tools/appimage/tropico.svg.
+    # The programs' icons, rendered from tools/appimage/<icon>.svg.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -192,7 +192,7 @@ jobs:
             fi
             if on macos; then
               t macos --shell "build/shells/shell-macos/$GAME_STEM" -o "build/templates/$GAME_STEM-macos.zip" \
-                --version "$(tools/version)" --icon build/shells/icons/tropico.icns
+                --version "$(tools/version)" --icon "build/shells/icons/$GAME_ICON.icns"
             fi
             if on windows; then
               t windows --shell "build/shells/shell-windows/$GAME_STEM.exe" -o "build/templates/$GAME_STEM-windows.zip"

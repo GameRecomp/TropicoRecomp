@@ -11,6 +11,7 @@ export const GAMES = {
     installerSize: 'about 820 MiB',
     size: 'about 1.3 GiB',
     web: 'tropico',
+    icon: 'tropico.svg',
   },
   tropico2: {
     id: 'tropico2',
@@ -21,8 +22,15 @@ export const GAMES = {
     installerSize: 'about 1.1 GiB',
     size: 'about 1.9 GiB',
     web: 'tropico2',
+    icon: 'tropico2.svg',
   },
 };
+
+/* The game's icon on the page: the tab's and every img.game-icon. */
+export function showIcon(game) {
+  for (const l of document.querySelectorAll('link[rel=icon]')) l.href = game.icon;
+  for (const i of document.querySelectorAll('img.game-icon')) i.src = game.icon;
+}
 
 /* The game a page is for: ?game=<id> (or #<id>), else the default. */
 export function gameOf(location) {

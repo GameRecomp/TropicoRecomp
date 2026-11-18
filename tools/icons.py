@@ -2,7 +2,9 @@
 """Pack the PNGs tools/make-icons rendered into a Windows .ico and a macOS
 .icns. Both formats hold PNG images as they are; no image library needed.
 
-    python3 tools/icons.py OUT_DIR    (reads OUT_DIR/png/<size>.png)
+    python3 tools/icons.py OUT_DIR ICON
+
+reads OUT_DIR/ICON/png/<size>.png, writes OUT_DIR/ICON.ico and ICON.icns.
 """
 import struct
 import sys
@@ -38,9 +40,9 @@ def icns(out: Path) -> bytes:
 
 
 def main() -> None:
-    out = Path(sys.argv[1])
-    (out / "tropico.ico").write_bytes(ico(out))
-    (out / "tropico.icns").write_bytes(icns(out))
+    out, name = Path(sys.argv[1]), sys.argv[2]
+    (out / f"{name}.ico").write_bytes(ico(out / name))
+    (out / f"{name}.icns").write_bytes(icns(out / name))
 
 
 if __name__ == "__main__":

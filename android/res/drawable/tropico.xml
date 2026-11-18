@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Tropico's app icon: a sun over an island (tools/appimage/tropico.svg). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="256" android:viewportHeight="256">
+    <path android:pathData="M40,0 H216 A40,40 0 0 1 256,40 V216 A40,40 0 0 1 216,256 H40 A40,40 0 0 1 0,216 V40 A40,40 0 0 1 40,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="0" android:endY="256"
+                android:startColor="#4bb6e8" android:endColor="#a8e2f7" />
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#ffc21a" android:strokeColor="#f29d0c" android:strokeWidth="3"
+        android:pathData="M140,84 a36,36 0 1,0 72,0 a36,36 0 1,0 -72,0 Z" />
+    <path android:fillColor="#1868a3"
+        android:pathData="M0,176 H256 V216 A40,40 0 0 1 216,256 H40 A40,40 0 0 1 0,216 Z" />
+    <path android:fillColor="#e8cf8f"
+        android:pathData="M28,182 a84,22 0 1,0 168,0 a84,22 0 1,0 -168,0 Z" />
+    <path android:strokeColor="#3d2412" android:strokeWidth="13" android:strokeLineCap="round"
+        android:pathData="M108,180 C110,140 116,112 124,92" />
+    <path android:strokeColor="#7a5230" android:strokeWidth="8" android:strokeLineCap="round"
+        android:pathData="M108,180 C110,140 116,112 124,92" />
+    <path android:fillColor="#1d7a36" android:strokeColor="#0d3f1c" android:strokeWidth="3" android:strokeLineJoin="round"
+        android:pathData="M124,92 C100,80 80,86 66,102 C88,94 106,96 124,92 Z" />
+    <path android:fillColor="#1d7a36" android:strokeColor="#0d3f1c" android:strokeWidth="3" android:strokeLineJoin="round"
+        android:pathData="M124,92 C140,72 164,70 182,80 C160,82 142,86 124,92 Z" />
+    <path android:fillColor="#2a9545" android:strokeColor="#0d3f1c" android:strokeWidth="3" android:strokeLineJoin="round"
+        android:pathData="M124,92 C120,70 104,56 86,54 C102,66 114,78 124,92 Z" />
+    <path android:fillColor="#2a9545" android:strokeColor="#0d3f1c" android:strokeWidth="3" android:strokeLineJoin="round"
+        android:pathData="M124,92 C146,94 162,106 170,124 C152,110 138,102 124,92 Z" />
+</vector>

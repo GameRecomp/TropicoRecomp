@@ -14,7 +14,7 @@
 
     <application
         android:label="Tropico"
-        android:icon="@drawable/icon"
+        android:icon="@drawable/tropico"
         android:allowBackup="false"
         android:extractNativeLibs="true"
         android:hardwareAccelerated="true"

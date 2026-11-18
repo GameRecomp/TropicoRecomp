@@ -24,7 +24,7 @@ mkdir -p "$site/templates"
 wasm-bindgen --target web --no-typescript --out-dir "$site" \
     recomp/target/wasm32-unknown-unknown/release/rc_web.wasm
 cp web/index.html web/app.js web/games.js web/worker.js web/style.css web/play.html web/play.js "$site/"
-cp tools/appimage/tropico.svg "$site/tropico.svg"
+cp tools/appimage/tropico.svg tools/appimage/tropico2.svg "$site/"
 cp platforms.json "$site/platforms.json"
 on() { python3 -c 'import json, sys; sys.exit(0 if json.load(open("platforms.json")).get(sys.argv[1], True) else 1)' "$1"; }
 if [ -n "$templates" ]; then

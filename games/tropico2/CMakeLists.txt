@@ -25,7 +25,7 @@ target_link_libraries(tropico2-shell PRIVATE rc_hle rc_runtime)
 # information.
 if(WIN32)
     enable_language(RC)
-    set(TROPICO2_ICON "${PROJECT_SOURCE_DIR}/build/icons/tropico.ico" CACHE FILEPATH
+    set(TROPICO2_ICON "${PROJECT_SOURCE_DIR}/build/icons/tropico2.ico" CACHE FILEPATH
         "The Windows icon (tools/make-icons); none if the file is missing")
     if(EXISTS "${TROPICO2_ICON}")
         file(TO_CMAKE_PATH "${TROPICO2_ICON}" icon)

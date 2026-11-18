@@ -18,7 +18,7 @@
 // shell (player/tropico.js, player/tropico2.js), loaded when the game
 // starts: a site built without it says so instead of failing to load the
 // page.
-import { gameOf } from './games.js';
+import { gameOf, showIcon } from './games.js';
 
 const GAME = gameOf(window.location);
 let createTropico = null;
@@ -257,6 +257,7 @@ $('convert').href = `./?game=${GAME.id}`;
 $('back').href = `./?game=${GAME.id}`;
 
 async function main() {
+  showIcon(GAME);
   $('sharp').checked = !!prefs.sharp;
   document.body.classList.toggle('sharp', !!prefs.sharp);
   $('sharp').addEventListener('change', () => {
