@@ -68,6 +68,9 @@ endif()
 
 set(TROPICO2_GENERATED "${PROJECT_SOURCE_DIR}/generated/tropico2/c" CACHE PATH
     "Directory with the C that recomp lift generated for Tropico 2")
+set(TROPICO2_GAME_DIR "${PROJECT_SOURCE_DIR}/orig/t2/app" CACHE PATH
+    "The installed game that is lifted (cmake/lift.cmake)")
+rc_lift_now(tropico2 "${TROPICO2_GAME_DIR}" "${TROPICO2_GENERATED}")
 
 # Configure again as soon as the lifted code appears (or goes), so that the
 # tropico2 target below follows `recomp lift` without a manual step. A glob,
@@ -86,6 +89,7 @@ endif()
 
 file(GLOB TROPICO2_LIFTED CONFIGURE_DEPENDS "${TROPICO2_GENERATED}/*.c")
 add_library(tropico2_lifted OBJECT ${TROPICO2_LIFTED})
+rc_lift(tropico2 "${TROPICO2_GAME_DIR}" "${TROPICO2_GENERATED}" tropico2_lifted "${TROPICO2_LIFTED}")
 target_include_directories(tropico2_lifted PRIVATE "${TROPICO2_GENERATED}")
 target_link_libraries(tropico2_lifted PRIVATE rc_runtime)
 # Lifted code is not debugged at the C level and is slow unoptimised.

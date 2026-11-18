@@ -61,6 +61,14 @@ cmake --preset release && cmake --build --preset release
 build/release/games/tropico1/tropico1 orig/t1/app [user-dir]
 ```
 
+The build lifts by itself (`cmake/lift.cmake`): when the game is in
+`orig/` and cargo is there, building `tropico1` or `tropico2` (an IDE's
+debug action too) builds `recomp` and lifts again whenever
+`games/<game>/game.toml` (its hooks and points) or the lifter changed since
+the last lift, and lifts while configuring when there is no lifted code
+yet. `recomp lift` rewrites only the files that come out different, so
+only those are compiled again. `-DRC_AUTO_LIFT=OFF` turns it off.
+
 `recomp lift --native host` (or a list of targets: `x86_64-sysv`,
 `x86_64-windows`, `arm64-apple`, `arm64-linux`) compiles to native code
 instead, and `RC_NATIVE=generated/tropico1/native/code-x86_64-sysv.bin`

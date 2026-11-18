@@ -720,22 +720,33 @@ fn lift(
         None => repo_root()?.join("generated").join(&m.game.id).join("c"),
     };
     // Replace the tree: stale files from an earlier run would be compiled.
+    // A file that comes out the same is left alone (and its time with it),
+    // so that a build recompiles only what changed.
     if out.is_dir() {
         for e in fs::read_dir(&out).map_err(|e| e.to_string())?.flatten() {
             let p = e.path();
-            if p.extension().is_some_and(|x| x == "c" || x == "h") {
+            let gone = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_none_or(|n| !tree.contains_key(n));
+            if gone && p.extension().is_some_and(|x| x == "c" || x == "h") {
                 fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
             }
         }
     }
     fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-    let mut bytes = 0;
+    let (mut bytes, mut changed) = (0, 0);
     for (name, src) in &tree {
         bytes += src.len();
-        fs::write(out.join(name), src).map_err(|e| format!("{name}: {e}"))?;
+        let path = out.join(name);
+        if fs::read(&path).is_ok_and(|old| old == src.as_bytes()) {
+            continue;
+        }
+        fs::write(&path, src).map_err(|e| format!("{name}: {e}"))?;
+        changed += 1;
     }
     eprintln!(
-        "wrote {} files, {:.1} MB of C, to generated/{}/c",
+        "wrote {} files ({changed} changed), {:.1} MB of C, to generated/{}/c",
         tree.len(),
         bytes as f64 / 1e6,
         m.game.id
