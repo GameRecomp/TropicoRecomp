@@ -152,6 +152,24 @@ static void painter(rc_cpu *c)
     rc_lookup_lifted(PAINTER)(c);
 }
 
+/* The world's painter draws the objects of the map whose place is within
+ * the screen and a margin around it: 575 pixels beside it and 880 below
+ * it at the nearest zoom, halved for each step out (it has just put them
+ * at OBJ_MARGIN_X and OBJ_MARGIN_Y, at OBJECT_MARGINS). An object's place is
+ * near the middle of its foot, and the margin was less than half of the
+ * widest buildings: a house still partly on the screen at its right edge
+ * was not drawn. The margins are doubled. */
+#define OBJECT_MARGINS 0x00526444u
+#define OBJ_MARGIN_X 0x00613b88u
+#define OBJ_MARGIN_Y 0x00614124u
+
+static void object_margins(rc_cpu *c)
+{
+    (void)c;
+    rc_st32(OBJ_MARGIN_X, rc_ld32(OBJ_MARGIN_X) * 2);
+    rc_st32(OBJ_MARGIN_Y, rc_ld32(OBJ_MARGIN_Y) * 2);
+}
+
 /* The movie in the HUD's bottom-right panel (the one widget with the
  * virtual rectangle 2572,1481 560x560) is copied 1:1 into its panel; its
  * movie is made for the stock sizes. Scale it to the panel instead. */
@@ -706,6 +724,7 @@ void tropico1_patch_resolution(void)
     rc_hook(PAINTER, painter);
     rc_on_point(MOVIE_FLAGS_SET, movie_flags);
     rc_on_point(MOVIE_PART, movie_part);
+    rc_on_point(OBJECT_MARGINS, object_margins);
     tropico1_patch_vtext((int)mode_w, (int)mode_h);
     rc_hook(APPLY_VIDEO, apply_video);
     rc_add_pump_hook(pump);

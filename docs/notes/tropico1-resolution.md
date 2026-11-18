@@ -48,6 +48,15 @@ the game finds a mode's slot by its width.
   world the screen's size, and after a change from the options page, the
   whole screen is marked every 50 ms for a second, from the message loop.
 
+- The world's painter draws the map's objects whose place is within the
+  screen and a margin around it: 575 pixels beside it and 880 below it at
+  the nearest zoom, halved for each step out, put at `0x00613b88` and
+  `0x00614124` just before `0x00526444`. An object's place is near the
+  middle of its foot, and the margin was less than half of the widest
+  buildings: a building still partly on screen at the right edge was not
+  drawn (the palace with some ten pixels of it left). A patch point there
+  doubles both margins.
+
 ## Movies
 
 - The movie blit clamps its destination to the source size (two `jl` at

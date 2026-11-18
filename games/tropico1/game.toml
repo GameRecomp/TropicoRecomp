@@ -61,6 +61,7 @@ hooks = [
     0x00503760, # textedit: a text field is edited
 ]
 points = [
+    0x00526444, # resolution: the world's painter has set how far beyond the screen it draws objects
     0x0051f041, # scroll: the mouse enters a widget, whose cursor was just read
     0x0051f0a6, # scroll: the mouse leaves a widget, whose cursor was just read
     0x00450f8f, # vtext: the rotated-text drawer calls the text renderer
