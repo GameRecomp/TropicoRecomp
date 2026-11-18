@@ -14,6 +14,7 @@
 static void k_timeGetTime(rc_cpu *c)
 {
     rc_thread_yield();
+    rc_thread_poll();
     RC_RETURN(c, (uint32_t)rc_ticks_ms(), 0);
 }
 

@@ -11,6 +11,7 @@
  * a guest interface per version it was asked for (IDirectDraw, ...2, 4, 7).
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ddraw.h"
@@ -19,6 +20,7 @@
 #include "rc/log.h"
 #include "rc/platform.h"
 #include "rc/process.h"
+#include "rc/thread.h"
 #include "rc/vm.h"
 #include "user32/user32.h"
 
@@ -370,23 +372,156 @@ static void put_pixel(const surface *s, uint32_t x, uint32_t y, uint32_t v)
 
 static unsigned frames;
 
-static void present(void)
+/* 16-bit pixels to RGB, by a table made for the surface's format. */
+static uint32_t rgb16[65536];
+static uint32_t rgb16_gmask;
+
+static void make_rgb16(const surface *s)
 {
-    if (!display.primary) {
+    if (rgb16_gmask == s->gmask + 1) {
         return;
     }
+    for (uint32_t v = 0; v < 65536; v++) {
+        rgb16[v] = to_rgb(s, NULL, v);
+    }
+    rgb16_gmask = s->gmask + 1;
+}
+
+/* What was last shown, to know a frame that shows the same again: the
+ * primary surface's bytes and palette, and when it was shown. */
+static uint8_t *shown;
+static uint32_t shown_size, shown_w, shown_h, shown_bpp;
+static uint32_t shown_palette[256];
+static uint64_t shown_at;
+
+/* A frame the same as the last one shown, shown less than this long ago,
+ * is counted but not drawn again (the game copies to the screen more than
+ * once in a loop); now and then the same frame is drawn anyway, so that a
+ * still picture stays on the window. */
+#define SAME_FRAME_MS 100
+
+static int same_as_shown(const surface *s, const palette *p)
+{
+    uint32_t size = s->pitch * s->h;
+    if (!shown || shown_size != size || shown_w != s->w || shown_h != s->h || shown_bpp != s->bpp) {
+        return 0;
+    }
+    if (s->bpp == 8 && p && memcmp(shown_palette, p->rgb, sizeof shown_palette) != 0) {
+        return 0;
+    }
+    return memcmp(shown, rc_ptr(s->pixels), size) == 0;
+}
+
+static void remember_shown(const surface *s, const palette *p)
+{
+    uint32_t size = s->pitch * s->h;
+    if (shown_size != size) {
+        free(shown);
+        shown = malloc(size);
+        shown_size = shown ? size : 0;
+    }
+    if (shown) {
+        memcpy(shown, rc_ptr(s->pixels), size);
+    }
+    shown_w = s->w;
+    shown_h = s->h;
+    shown_bpp = s->bpp;
+    if (s->bpp == 8 && p) {
+        memcpy(shown_palette, p->rgb, sizeof shown_palette);
+    }
+}
+
+/* The primary surface onto the window. */
+static void draw(void)
+{
     const surface *s = &objects[display.primary].s;
     const palette *p = s->palette ? &objects[s->palette].p : NULL;
     if ((uint64_t)s->w * s->h > sizeof frame / 4) {
         return;
     }
-    for (uint32_t y = 0; y < s->h; y++) {
-        for (uint32_t x = 0; x < s->w; x++) {
-            frame[y * s->w + x] = to_rgb(s, p, pixel_at(s, x, y));
+    uint64_t now = rc_ticks_peek_ms();
+    if (same_as_shown(s, p) && now - shown_at < SAME_FRAME_MS) {
+        return;
+    }
+    if (s->bpp == 16) {
+        make_rgb16(s);
+        for (uint32_t y = 0; y < s->h; y++) {
+            const uint16_t *row = rc_ptr(s->pixels + y * s->pitch);
+            uint32_t *out = &frame[y * s->w];
+            for (uint32_t x = 0; x < s->w; x++) {
+                out[x] = rgb16[row[x]];
+            }
+        }
+    } else if (s->bpp == 8 && p) {
+        for (uint32_t y = 0; y < s->h; y++) {
+            const uint8_t *row = rc_ptr(s->pixels + y * s->pitch);
+            uint32_t *out = &frame[y * s->w];
+            for (uint32_t x = 0; x < s->w; x++) {
+                out[x] = p->rgb[row[x]];
+            }
+        }
+    } else {
+        for (uint32_t y = 0; y < s->h; y++) {
+            for (uint32_t x = 0; x < s->w; x++) {
+                frame[y * s->w + x] = to_rgb(s, p, pixel_at(s, x, y));
+            }
         }
     }
+    remember_shown(s, p);
     rc_plat_present(frame, (int)s->w, (int)s->h, (int)s->w);
+    shown_at = now;
+}
+
+/* A copy to the primary surface counts as a frame (scripts and
+ * screenshots go by them), but it is drawn onto the window once the
+ * program has done its pass and looks for messages (or after
+ * PENDING_MS): a game copies each part of the screen it changed by
+ * itself, several times a pass, and each would be a frame of its own on
+ * the window (and a wait for the display, with vsync). */
+#define PENDING_MS 50
+static int pending;
+static uint64_t pending_since;
+
+/* At most so many frames a second (settings: fps): the pass that made a
+ * frame waits, when it looks for messages, until the frame is due, and the
+ * processor rests meanwhile; so the program also makes no more passes, and
+ * draws no more pictures, than are shown. Not on the virtual clock, whose
+ * runs are to repeat exactly. */
+static void flush(rc_cpu *c)
+{
+    (void)c;
+    if (!pending || !display.primary) {
+        return;
+    }
+    int max_fps = rc_plat_display_get().max_fps;
+    if (max_fps > 0 && !rc_clock_virtual()) {
+        uint64_t due = shown_at + 1000u / (uint32_t)max_fps, now = rc_ticks_peek_ms();
+        if (now < due && due - now <= 1000u) {
+            rc_thread_sleep((uint32_t)(due - now));
+        }
+    }
+    pending = 0;
+    draw();
+}
+
+static void present(void)
+{
+    if (!display.primary) {
+        return;
+    }
     frames++;
+    rc_thread_work();
+    uint64_t now = rc_ticks_peek_ms();
+    if (!pending) {
+        pending_since = now;
+    }
+    pending = 1;
+    if (rc_screenshot_due(frames)) {
+        pending = 0;
+        draw();
+    } else if (now - pending_since >= PENDING_MS) {
+        flush(NULL);
+    }
     rc_present_hook(frames);
 }
 
@@ -1205,8 +1340,18 @@ static void k_DDRelease(rc_cpu *c)
 
 static uint32_t the_ddraw;
 
+static void watch_pump(void)
+{
+    static int watching;
+    if (!watching) {
+        watching = 1;
+        rc_add_pump_hook(flush);
+    }
+}
+
 static void k_DirectDrawCreate(rc_cpu *c)
 {
+    watch_pump();
     uint32_t out = RC_ARG(c, 1);
     if (!the_ddraw) {
         the_ddraw = new_object(O_DDRAW);
@@ -1218,6 +1363,7 @@ static void k_DirectDrawCreate(rc_cpu *c)
 
 static void k_DirectDrawCreateEx(rc_cpu *c)
 {
+    watch_pump();
     uint32_t out = RC_ARG(c, 1);
     if (!the_ddraw) {
         the_ddraw = new_object(O_DDRAW);

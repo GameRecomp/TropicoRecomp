@@ -35,6 +35,13 @@ void rc_thread_yield(void);
 /* Sleep: the current thread waits `ms`, the others run meanwhile. */
 void rc_thread_sleep(uint32_t ms);
 
+/* The program asked for the time or for messages and had none (a poll), or
+ * drew a frame (work). Many polls without work are a loop that waits by
+ * spinning: on the real clock it then sleeps 1 ms now and then, so that the
+ * processor rests (a phone stays cool), and other threads run meanwhile. */
+void rc_thread_poll(void);
+void rc_thread_work(void);
+
 /* End the current thread with `code` (ExitThread); on the main thread, the
  * process. Does not return. */
 void rc_thread_exit(uint32_t code);

@@ -160,6 +160,12 @@ typedef struct handle {
     entry *list;
     uint32_t count, next;
     uint32_t file; /* a mapping: the file handle it maps */
+    /* A file's position when known without asking the C library (games ask
+     * for it, and set it to where it is, many times a frame; each would be
+     * a system call): set by SetFilePointer, moved by ReadFile, forgotten
+     * by WriteFile. */
+    long pos;
+    int pos_known;
 } handle;
 
 #define HANDLES 256u
@@ -299,6 +305,7 @@ static void k_ReadFile(rc_cpu *c)
         RC_RETURN(c, get(h, K_STD) != NULL, 5);
     }
     size_t r = rc_host_fread(rc_ptr(buf), n, x->f);
+    x->pos += (long)r;
     if (done) {
         rc_st32(done, (uint32_t)r);
     }
@@ -313,6 +320,7 @@ static void k_WriteFile(rc_cpu *c)
     handle *s = get(h, K_STD);
     if (x) {
         w = fwrite(rc_ptr(buf), 1, n, x->f);
+        x->pos_known = 0;
         SAVED();
     } else if (s) {
         w = fwrite(rc_ptr(buf), 1, n, s->std == 2 ? stderr : stdout);
@@ -335,15 +343,21 @@ static void k_SetFilePointer(rc_cpu *c)
         rc_last_error = ERROR_INVALID_HANDLE;
         RC_RETURN(c, 0xffffffffu, 4);
     }
-    int whence = method == 0 ? SEEK_SET : method == 1 ? SEEK_CUR : SEEK_END;
-    if (fseek(x->f, dist, whence) != 0) {
-        rc_last_error = 131; /* ERROR_NEGATIVE_SEEK */
-        RC_RETURN(c, 0xffffffffu, 4);
-    }
     if (high) {
         rc_st32(high, 0);
     }
-    RC_RETURN(c, (uint32_t)ftell(x->f), 4);
+    if (x->pos_known && ((method == 1 && dist == 0) || (method == 0 && dist == x->pos))) {
+        RC_RETURN(c, (uint32_t)x->pos, 4);
+    }
+    int whence = method == 0 ? SEEK_SET : method == 1 ? SEEK_CUR : SEEK_END;
+    if (fseek(x->f, dist, whence) != 0) {
+        x->pos_known = 0;
+        rc_last_error = 131; /* ERROR_NEGATIVE_SEEK */
+        RC_RETURN(c, 0xffffffffu, 4);
+    }
+    x->pos = ftell(x->f);
+    x->pos_known = x->pos >= 0;
+    RC_RETURN(c, (uint32_t)x->pos, 4);
 }
 
 static void k_SetEndOfFile(rc_cpu *c)

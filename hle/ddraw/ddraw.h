@@ -51,5 +51,7 @@ extern const uint32_t rc_d3d_count;
 /* Called after every presented frame, with the frame count (screenshots,
  * scripted input). */
 void rc_present_hook(unsigned frame);
+/* Whether a screenshot of this frame is asked for (RC_SCREENSHOT). */
+int rc_screenshot_due(unsigned frame);
 
 #endif

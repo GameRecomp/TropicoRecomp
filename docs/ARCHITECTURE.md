@@ -432,6 +432,17 @@ The guest address space as the runtime lays it out:
   replays as exactly as one without. Critical sections need no locking.
   This serves libraries that poll in a loop around `Sleep` (Bink); code
   that spins on a flag without calling anything would never yield.
+- **Frames.** A copy to DirectDraw's primary surface counts as a frame
+  (scripts and screenshots go by them) but is drawn onto the window when the
+  program next looks for messages: games copy each part of the screen they
+  changed by itself, several times a pass. A frame equal to the last one
+  shown is not drawn again (for 100 ms). 16-bit frames are converted through
+  a table. `fps` in `settings.ini` (`RC_FPS`; 30 on Android, else as many as
+  the screen shows) has a pass that made a frame wait for it, resting.
+- **Rest.** A program that waits by spinning (asking for the time or for
+  messages again and again, without drawing) rests 1 ms now and then on the
+  real clock (`rc_thread_poll`): five hundred such calls without a frame,
+  then one rest every fifty.
 - **Clock.** `RC_CLOCK=virtual` makes time advance by 100 µs per reading
   (`RC_CLOCK_STEP_US`) and by what `Sleep` asks for; `Sleep(0)` counts as a
   reading. Scripted runs use it. On the virtual clock streamed Miles

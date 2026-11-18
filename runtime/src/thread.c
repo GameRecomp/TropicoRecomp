@@ -263,6 +263,25 @@ void rc_thread_sleep(uint32_t ms)
     schedule();
 }
 
+/* Polls without work before a wait counts as spinning (a frame of a game
+ * polls about a hundred times), and between rests once it does. */
+#define SPIN_POLLS 500u
+#define SPIN_REST_POLLS 50u
+static uint32_t polls;
+
+void rc_thread_poll(void)
+{
+    if (rc_clock_virtual()) {
+        return;
+    }
+    if (++polls >= SPIN_POLLS) {
+        polls = SPIN_POLLS - SPIN_REST_POLLS;
+        rc_thread_sleep(1);
+    }
+}
+
+void rc_thread_work(void) { polls = 0; }
+
 /* The body of every thread but the main one. Returns only with the
  * pthread and JSPI backends, after handing on the baton. */
 static void finish(uint32_t code);

@@ -12,6 +12,17 @@
 
 #include <stdbool.h>
 
+/* At most so many frames a second unless settings.ini says otherwise: on a
+ * phone 30, which keeps it cool (drawing as many frames as it can makes it
+ * warm); elsewhere as many as the screen shows. */
+#if defined(__ANDROID__)
+#define DEFAULT_FPS 30
+#define DEFAULT_FPS_TEXT "30"
+#else
+#define DEFAULT_FPS 0
+#define DEFAULT_FPS_TEXT "max"
+#endif
+
 static const char DEFAULTS[] =
     "# How the game is shown. Change a value and start the game again.\n"
     "\n"
@@ -33,7 +44,12 @@ static const char DEFAULTS[] =
     "# following it when the window changes size; the game then always plays\n"
     "# at it.\n"
     "# off: only the game's own.\n"
-    "resolution = window\n";
+    "resolution = window\n"
+    "\n"
+    "# At most this many frames a second, so that the processor rests between\n"
+    "# frames (cooler and quieter, but less smooth): for example 30.\n"
+    "# max: as many as the screen shows.\n"
+    "fps = " DEFAULT_FPS_TEXT "\n";
 
 static void set(rc_display *d, const char *key, const char *value)
 {
@@ -46,6 +62,11 @@ static void set(rc_display *d, const char *key, const char *value)
         d->smooth = !strcmp(value, "smooth");
     } else if (!strcmp(key, "fullscreen")) {
         d->fullscreen = !strcmp(value, "yes") || !strcmp(value, "1") || !strcmp(value, "true");
+    } else if (!strcmp(key, "fps")) {
+        d->max_fps = atoi(value);
+        if (d->max_fps < 0 || d->max_fps > 1000) {
+            d->max_fps = 0;
+        }
     } else if (!strcmp(key, "resolution")) {
         int w = 0, h = 0;
         if (!strcmp(value, "window")) {
@@ -155,7 +176,8 @@ void rc_plat_display_store(void)
 
 void rc_plat_display_load(const char *user_dir)
 {
-    rc_display d = {0, false, false, 0, 0};
+    rc_display d = {0, false, false, 0, 0, 0};
+    d.max_fps = DEFAULT_FPS;
 #if !defined(__EMSCRIPTEN__)
     /* (A browser's page decides for itself. On Android the file keeps the
      * resolution too; full screen is always on there, whatever it says.) */
@@ -182,7 +204,7 @@ void rc_plat_display_load(const char *user_dir)
     (void)user_dir;
 #endif
     static const char *const env[][2] = {{"RC_SCALE", "scale"}, {"RC_PIXELS", "pixels"}, {"RC_FULLSCREEN", "fullscreen"},
-                                         {"RC_RESOLUTION", "resolution"}};
+                                         {"RC_RESOLUTION", "resolution"}, {"RC_FPS", "fps"}};
     for (size_t i = 0; i < sizeof env / sizeof env[0]; i++) {
         const char *v = getenv(env[i][0]);
         if (v && *v) {

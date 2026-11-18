@@ -69,6 +69,10 @@ typedef struct rc_display {
      * 0 x 0 for none, -1 x -1 for the size of the window (rc_plat_area)
      * divided by the scale, following it. */
     int game_w, game_h;
+    /* At most this many frames a second (the program waits, and the
+     * processor rests, for the rest of a frame's time); 0 for as many as
+     * the display shows. */
+    int max_fps;
 } rc_display;
 
 /* Apply display settings, at any time (before the window exists too). */

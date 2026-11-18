@@ -121,6 +121,25 @@ static void run_script(unsigned frame)
     }
 }
 
+int rc_screenshot_due(unsigned frame)
+{
+    const char *shots = getenv("RC_SCREENSHOT");
+    if (!shots) {
+        return 0;
+    }
+    for (const char *p = shots; *p;) {
+        if ((unsigned)strtoul(p, NULL, 10) == frame) {
+            return 1;
+        }
+        const char *comma = strchr(p, ',');
+        if (!comma) {
+            break;
+        }
+        p = comma + 1;
+    }
+    return 0;
+}
+
 void rc_present_hook(unsigned frame)
 {
     run_script(frame);

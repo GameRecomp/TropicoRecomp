@@ -741,6 +741,7 @@ static void k_PeekMessageA(rc_cpu *c)
             RC_RETURN(c, 1, 5);
         }
     }
+    rc_thread_poll();
     RC_RETURN(c, 0, 5);
 }
 

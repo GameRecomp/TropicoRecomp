@@ -188,6 +188,7 @@ static void k_QueryPerformanceFrequency(rc_cpu *c)
 static void k_QueryPerformanceCounter(rc_cpu *c)
 {
     rc_thread_yield();
+    rc_thread_poll();
     uint64_t us = rc_ticks_ms() * 1000u;
     rc_st32(RC_ARG(c, 0), (uint32_t)us);
     rc_st32(RC_ARG(c, 0) + 4, (uint32_t)(us >> 32));
@@ -324,6 +325,7 @@ static void k_InterlockedDecrement(rc_cpu *c)
 static void k_GetTickCount(rc_cpu *c)
 {
     rc_thread_yield();
+    rc_thread_poll();
     RC_RETURN(c, (uint32_t)rc_ticks_ms(), 0);
 }
 
