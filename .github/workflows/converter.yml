@@ -6,6 +6,10 @@
 # WebAssembly, and the pages,
 # published to GitHub Pages. Pages must be enabled with "GitHub Actions" as
 # its source.
+#
+# Beside the site, the converter as a program for each desktop system that
+# is on (converter-<system> artifacts: recomp and every template, so each
+# builds for all systems); release-upload.yml puts them on a release.
 name: converter
 
 # Manual runs only for now; push is off.
@@ -24,10 +28,20 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       on: ${{ steps.read.outputs.on }}
+      hosts: ${{ steps.read.outputs.hosts }}
     steps:
       - uses: actions/checkout@v4
       - id: read
-        run: echo "on=$(jq -c . platforms.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "on=$(jq -c . platforms.json)" >> "$GITHUB_OUTPUT"
+          # The desktop systems the converter program is built for: the
+          # runner and the name of the archive's architecture.
+          hosts=$(jq -c '[{linux:   {os: "ubuntu-22.04", arch: "x86_64"},
+                           windows: {os: "windows-latest", arch: "x86_64"},
+                           macos:   {os: "macos-latest", arch: "universal"}}
+                          | to_entries[] | select($p[0][.key]) | {system: .key} + .value]' \
+                  --slurpfile p platforms.json -n)
+          echo "hosts=$hosts" >> "$GITHUB_OUTPUT"
 
   icons:
     # The program's icons, rendered from tools/appimage/tropico.svg.
@@ -152,17 +166,14 @@ jobs:
           name: shell-web
           path: build/out/web
 
-  site:
-    needs: [platforms, icons, shell-linux, shell-macos, shell-windows, shell-android, shell-web]
-    # Skipped shells (systems that are off) do not hold the site back.
+  templates:
+    needs: [platforms, icons, shell-linux, shell-macos, shell-windows, shell-android]
+    # Skipped shells (systems that are off) do not hold the templates back.
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
       - uses: actions/download-artifact@v4
         with:
           path: build/shells
@@ -190,6 +201,125 @@ jobs:
               t android --shell "build/shells/shell-android/$GAME_STEM-shell.apk" -o "build/templates/$GAME_STEM-android.zip"
             fi
           done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: templates
+          path: build/templates
+
+  recomp:
+    # The recomp program for each desktop system that is on.
+    needs: platforms
+    if: needs.platforms.outputs.hosts != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.platforms.outputs.hosts) }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.system == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: build
+        env:
+          # A download: without the debug information the profile keeps.
+          CARGO_PROFILE_RELEASE_DEBUG: 'false'
+          CARGO_PROFILE_RELEASE_STRIP: 'true'
+        run: |
+          mkdir -p build/recomp
+          b() { cargo build --release --manifest-path recomp/Cargo.toml -p rc-cli "$@"; }
+          case "${{ matrix.system }}" in
+            windows)
+              # The C runtime linked in, so that no Visual C++
+              # redistributable is needed.
+              RUSTFLAGS="-C target-feature=+crt-static" b
+              cp recomp/target/release/recomp.exe build/recomp/ ;;
+            macos)
+              # One program for Apple silicon and Intel Macs.
+              b --target aarch64-apple-darwin
+              b --target x86_64-apple-darwin
+              lipo -create -output build/recomp/recomp \
+                recomp/target/aarch64-apple-darwin/release/recomp \
+                recomp/target/x86_64-apple-darwin/release/recomp ;;
+            *)
+              b
+              cp recomp/target/release/recomp build/recomp/ ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recomp-${{ matrix.system }}
+          path: build/recomp
+
+  converters:
+    # Each recomp with every template, as the archive a release offers:
+    # TropicoRecomp-converter-<system>-<arch>.zip (Windows) or .tar.gz.
+    needs: [platforms, templates, recomp]
+    if: ${{ !cancelled() && !failure() && needs.platforms.outputs.hosts != '[]' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: templates
+          path: build/templates
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: recomp-*
+          path: build/recomp
+      - name: pack
+        env:
+          HOSTS: ${{ needs.platforms.outputs.hosts }}
+        run: |
+          jq -r '.[] | "\(.system) \(.arch)"' <<< "$HOSTS" | while read -r system arch; do
+            name=TropicoRecomp-converter-$system-$arch
+            if [ "$system" = windows ]; then
+              tools/package-converter build/recomp/recomp-windows/recomp.exe build/templates "build/converters/$system/$name.zip"
+            else
+              tools/package-converter "build/recomp/recomp-$system/recomp" build/templates "build/converters/$system/$name.tar.gz"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: contains(needs.platforms.outputs.hosts, '"linux"')
+        with:
+          name: converter-linux
+          path: build/converters/linux
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: contains(needs.platforms.outputs.hosts, '"windows"')
+        with:
+          name: converter-windows
+          path: build/converters/windows
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: contains(needs.platforms.outputs.hosts, '"macos"')
+        with:
+          name: converter-macos
+          path: build/converters/macos
+          compression-level: 0
+
+  site:
+    needs: [platforms, templates, shell-web]
+    # A skipped web shell (the web off) does not hold the site back.
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - uses: actions/download-artifact@v4
+        with:
+          name: templates
+          path: build/templates
+      - uses: actions/download-artifact@v4
+        if: fromJSON(needs.platforms.outputs.on).web
+        with:
+          name: shell-web
+          path: build/shells/shell-web
       - run: tools/build-web build/site build/templates build/shells/shell-web
       - uses: actions/upload-pages-artifact@v3
         with:

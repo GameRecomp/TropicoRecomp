@@ -73,14 +73,30 @@ enum Cmd {
     /// Turn a GOG installer into a build for a system: the shell template
     /// (from CI, or `recomp template`) with the game's code compiled to
     /// native code and its files, as a zip. What the converter page does.
+    ///
+    /// `--system` takes the template for the game the installer is from a
+    /// templates folder (the one beside `recomp` in a converter download);
+    /// `--template` names one.
     Convert {
         installer: PathBuf,
+        /// The system to build for: windows, linux, macos or android.
+        #[arg(
+            long,
+            required_unless_present = "template",
+            conflicts_with = "template"
+        )]
+        system: Option<String>,
+        /// Where `--system` looks for templates (<Game>-<system>.zip);
+        /// by default the templates folder beside `recomp`.
+        #[arg(long, requires = "system")]
+        templates: Option<PathBuf>,
         /// The shell template zip for the system.
         #[arg(long)]
-        template: PathBuf,
-        /// The zip (or, for Android, the APK) to write.
-        #[arg(short, long)]
-        out: PathBuf,
+        template: Option<PathBuf>,
+        /// The zip (or, for Android, the APK) to write; with `--system`, by
+        /// default <Game>-<system>.zip (.apk) in the working directory.
+        #[arg(short, long, required_unless_present = "system")]
+        out: Option<PathBuf>,
         /// For Android: sign with this key (32 bytes, made if missing)
         /// instead of the converter's built-in one.
         #[arg(long)]
@@ -153,10 +169,19 @@ fn main() -> ExitCode {
         } => lift(&game_dir, &game, out.as_deref(), comments, &native),
         Cmd::Convert {
             installer,
+            system,
+            templates,
             template,
             out,
             apk_key,
-        } => convert(&installer, &template, &out, apk_key.as_deref()),
+        } => {
+            let pick = match (template, system) {
+                (Some(t), _) => Pick::Template(t),
+                (None, Some(s)) => Pick::System(s, templates),
+                (None, None) => unreachable!("clap requires one"),
+            };
+            convert(&installer, pick, out.as_deref(), apk_key.as_deref())
+        }
         Cmd::VerifyApk { apk } => fs::File::open(&apk)
             .map_err(|e| format!("{}: {e}", apk.display()))
             .and_then(|mut f| rc_convert::apk::verify(&mut f))
@@ -213,16 +238,36 @@ fn apk_key(path: &Path) -> Result<rc_convert::apk::ApkKey> {
     rc_convert::apk::ApkKey::from_bytes(&read(path)?)
 }
 
-fn convert(installer: &Path, template: &Path, out: &Path, key: Option<&Path>) -> Result<()> {
+/// The systems a converter makes builds for.
+const SYSTEMS: [&str; 4] = ["windows", "linux", "macos", "android"];
+
+/// How `convert` finds its shell template.
+enum Pick {
+    /// This file.
+    Template(PathBuf),
+    /// The game's template for this system, in this folder (by default the
+    /// templates folder beside the program).
+    System(String, Option<PathBuf>),
+}
+
+/// The templates folder beside the running program.
+fn templates_beside_program() -> Result<PathBuf> {
+    let exe = std::env::current_exe().map_err(|e| format!("where recomp is: {e}"))?;
+    let exe = exe.canonicalize().unwrap_or(exe);
+    Ok(exe
+        .parent()
+        .ok_or("where recomp is: no folder")?
+        .join("templates"))
+}
+
+fn convert(installer: &Path, pick: Pick, out: Option<&Path>, key: Option<&Path>) -> Result<()> {
     use std::io::Write as _;
     let t0 = std::time::Instant::now();
-    let tbytes = read(template)?;
-    let tpl = rc_convert::template(&tbytes)?;
-    let key = match (tpl.apk, key) {
-        (true, Some(k)) => Some(apk_key(k)?),
-        (true, None) => Some(rc_convert::apk::ApkKey::builtin()),
-        (false, _) => None,
-    };
+    if let Pick::System(s, _) = &pick
+        && !SYSTEMS.contains(&s.as_str())
+    {
+        return Err(format!("unknown system {s}: one of {}", SYSTEMS.join(", ")));
+    }
     let mut input =
         fs::File::open(installer).map_err(|e| format!("{}: {e}", installer.display()))?;
     let inst = rc_inno::Installer::from_reader(&mut input)
@@ -235,6 +280,38 @@ fn convert(installer: &Path, template: &Path, out: &Path, key: Option<&Path>) ->
         id.plan.files(),
         id.game_bytes as f64 / (1u64 << 20) as f64
     );
+    let stem = rc_convert::names(&id.manifest.game.id).stem;
+    let (template, default_out) = match pick {
+        Pick::Template(t) => (t, None),
+        Pick::System(system, dir) => {
+            let dir = match dir {
+                Some(d) => d,
+                None => templates_beside_program()?,
+            };
+            let t = dir.join(format!("{stem}-{system}.zip"));
+            if !t.is_file() {
+                return Err(format!(
+                    "no template for {} on {system}: {} is missing",
+                    id.manifest.game.title,
+                    t.display()
+                ));
+            }
+            let ext = if system == "android" { "apk" } else { "zip" };
+            (t, Some(PathBuf::from(format!("{stem}-{system}.{ext}"))))
+        }
+    };
+    let out = match (out, &default_out) {
+        (Some(o), _) => o,
+        (None, Some(o)) => o.as_path(),
+        (None, None) => unreachable!("clap requires --out with --template"),
+    };
+    let tbytes = read(&template)?;
+    let tpl = rc_convert::template(&tbytes)?;
+    let key = match (tpl.apk, key) {
+        (true, Some(k)) => Some(apk_key(k)?),
+        (true, None) => Some(rc_convert::apk::ApkKey::builtin()),
+        (false, _) => None,
+    };
     let lifted = rc_convert::lift(&id)?;
     eprintln!(
         "lifted {} functions ({:.1} s)",

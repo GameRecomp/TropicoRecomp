@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Pack the converter for one system to run on: the recomp program, every
+# shell template in TEMPLATE_DIR (so it builds for all of them, as the page
+# does) and a README, in a folder named after the archive.
+#
+#   tools/package-converter RECOMP TEMPLATE_DIR OUT.zip|OUT.tar.gz
+#
+# RECOMP is the built program (recomp, or recomp.exe for Windows; the name
+# in the archive follows it). A .zip suits Windows, a .tar.gz keeps the
+# program executable on Linux and macOS.
+set -euo pipefail
+recomp=$(realpath "${1:?recomp program}")
+templates=$(realpath "${2:?template directory}")
+out=${3:?output archive}
+mkdir -p "$(dirname "$out")"
+out=$(realpath "$(dirname "$out")")/$(basename "$out")
+cd "$(dirname "$0")/.."
+case "$out" in
+    *.zip) name=$(basename "$out" .zip) ;;
+    *.tar.gz) name=$(basename "$out" .tar.gz) ;;
+    *) echo "package-converter: $out: neither .zip nor .tar.gz" >&2; exit 1 ;;
+esac
+shopt -s nullglob
+zips=("$templates"/*-*.zip)
+if [ ${#zips[@]} -eq 0 ]; then
+    echo "package-converter: no templates in $templates" >&2
+    exit 1
+fi
+prog=recomp run=./recomp
+case "$recomp" in *.exe) prog=recomp.exe run=recomp.exe ;; esac
+
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+dir=$stage/$name
+mkdir -p "$dir/templates"
+cp "$recomp" "$dir/$prog"
+chmod 755 "$dir/$prog"
+cp "${zips[@]}" "$dir/templates/"
+
+# What it builds for, from the templates' names (Tropico-linux.zip).
+systems=$(for z in "${zips[@]}"; do b=${z##*/}; b=${b%.zip}; echo "${b##*-}"; done | sort -u | tr '\n' ' ')
+games=""
+for g in tropico1 tropico2; do
+    . tools/game-info "$g"
+    have=("$templates/$GAME_STEM-"*.zip)
+    if [ ${#have[@]} -gt 0 ]; then
+        games+="    $GAME_INSTALLER  ($GAME_NAME)"$'\n'
+    fi
+done
+sed 's/$/\r/' > "$dir/README.txt" <<EOF
+TropicoRecomp converter $(tools/version)
+
+Turns your GOG installer of the game into a build of it for a system,
+as the converter page does in a browser, here without a browser and
+without a network connection. The installers it takes:
+
+$games
+It builds for: ${systems% }
+
+    $run convert setup_tropico_2.1.0.14.exe --system linux
+
+writes Tropico-linux.zip (Tropico2-... for Tropico 2, an .apk for
+android) in the current folder; -o names another file. The build
+contains your copy of the game: keep it for yourself and do not share it.
+
+    $run convert --help
+
+lists the options. On macOS the program is not signed: allow it once
+with  xattr -d com.apple.quarantine recomp
+
+https://github.com/GameRecomp/TropicoRecomp
+EOF
+
+rm -f "$out"
+case "$out" in
+    *.zip) (cd "$stage" && zip -qrX "$out" "$name") ;;
+    *.tar.gz) tar -C "$stage" -czf "$out" "$name" ;;
+esac
+echo "$out"

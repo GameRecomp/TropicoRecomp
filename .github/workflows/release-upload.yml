@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MIT
+# Put the converter programs (the converter-<system> artifacts of the last
+# successful converter.yml run on a branch) on the latest release, replacing
+# files of the same name. The release must exist: make it first (a tag and
+# a release on GitHub), then run this.
+name: release upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: The branch whose last successful converter run to take
+        default: main
+        required: true
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BRANCH: ${{ inputs.branch }}
+    steps:
+      - name: the converters of the last successful converter run
+        run: |
+          run=$(gh run list --workflow converter.yml --branch "$BRANCH" --status success \
+                --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -z "$run" ]; then
+            echo "::error::no successful converter run on $BRANCH"
+            exit 1
+          fi
+          echo "converter run $run"
+          gh run download "$run" --pattern 'converter-*' --dir build/converters
+          find build/converters -type f | grep -q . || {
+            echo "::error::run $run has no converter artifacts"
+            exit 1
+          }
+      - name: onto the latest release
+        run: |
+          if ! tag=$(gh release view --json tagName --jq .tagName); then
+            echo "::error::no release yet: make one first"
+            exit 1
+          fi
+          echo "release $tag"
+          find build/converters -type f \( -name '*.zip' -o -name '*.tar.gz' \) -print0 \
+            | xargs -0 gh release upload "$tag" --clobber
+          gh release view "$tag" --json assets --jq '.assets[] | "\(.name)  \(.size)"'

@@ -292,6 +292,16 @@ recompiler, the runtime and the build scripts, never lifted code or a build
 of the game. The user's own copy is recompiled on their machine, by the
 page or by `recomp`.
 
+A release also offers the converter as a program, for each desktop system
+`platforms.json` has on: `TropicoRecomp-converter-<system>-<arch>` (a
+`.zip` for Windows, a `.tar.gz` for Linux and macOS) holds `recomp`, every
+shell template of the run, so that each builds for all systems, and a
+README. The `converter` workflow builds them (`converter-<system>`
+artifacts; `tools/package-converter RECOMP TEMPLATE_DIR OUT` packs one by
+hand), and the `release upload` workflow, run by hand once the release is
+made, takes them from the last successful converter run on a branch and
+puts them on the latest release, replacing files of the same name.
+
 Before tagging: full test ladder, `tools/audit` over the whole tree and the
 release archive, changelog.
 
@@ -347,6 +357,12 @@ signature as Android does.
 
 - `recomp convert` runs the same pipeline as the page (rc-convert); the
   page's WebAssembly build and the native command give byte-identical zips.
+  `--system linux` (windows, macos, android) instead of `--template` takes
+  the game's template (`Tropico-linux.zip`, `Tropico2-linux.zip`, by the
+  game the installer is) from the `templates/` folder beside `recomp`, as
+  in a converter download (see 10), or from `--templates DIR`, and writes
+  `<Game>-<system>.zip` (`.apk`) unless `-o` names another file:
+  `recomp convert setup_tropico2_2.1.0.14.exe --system windows --templates build/templates`.
 - The shell is the game program without lifted code. It runs the native
   code and game files in `data/` beside it (on Android: in the APK's
   `assets/data`, unpacked into the app's storage on the first start);

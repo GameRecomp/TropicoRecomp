@@ -44,7 +44,10 @@ Or use the converter page: it runs in your browser, takes your GOG
 installer and gives you a zip that runs on Windows, Linux or macOS, or an
 app (APK) for Android. The installer never leaves your machine, and the
 page serves only the tools
-(see [docs/WORKFLOWS.md](docs/WORKFLOWS.md#11a-the-converter)).
+(see [docs/WORKFLOWS.md](docs/WORKFLOWS.md#11a-the-converter)). The same
+converter comes as a program for Windows and Linux with each release
+(`TropicoRecomp-converter-*`): `recomp convert setup_tropico_2.1.0.14.exe
+--system linux`, for any of the systems, without a browser.
 
 ## How it works
 
