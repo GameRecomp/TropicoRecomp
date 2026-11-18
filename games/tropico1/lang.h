@@ -25,8 +25,9 @@ typedef enum tropico1_text {
 } tropico1_text;
 
 /* Register with the runtime (rc_config.setup): the window's title is
- * "Tropico (<revision>)", and gets the language once the game knows it. */
-void tropico1_lang_init(const char *revision);
+ * "Tropico <version> (<revision>)", and gets the language once the game
+ * knows it. */
+void tropico1_lang_init(const char *version, const char *revision);
 
 /* The language of the game's texts, as the game itself found it from them;
  * English for one this project has no texts in (and until the game has

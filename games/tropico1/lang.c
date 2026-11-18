@@ -61,7 +61,7 @@ static const char *const texts[TROPICO1_TEXTS][TROPICO1_LANGS] = {
 };
 
 static int known;            /* the game has found its language */
-static char revision_s[64]; /* for the title */
+static char build_s[64];    /* for the title: "<version> (<revision>" */
 
 tropico1_lang tropico1_lang_get(void)
 {
@@ -84,19 +84,19 @@ static void language_known(rc_cpu *c)
     char suffix[128];
     if (g < sizeof titles / sizeof titles[0]) {
         rc_log("texts: the game's texts are in %s", titles[g]);
-        snprintf(suffix, sizeof suffix, " (%s, %s)", revision_s, titles[g]);
+        snprintf(suffix, sizeof suffix, " %s, %s)", build_s, titles[g]);
     } else {
         rc_log("texts: the game's texts are in a language it does not name (%u)", g);
-        snprintf(suffix, sizeof suffix, " (%s)", revision_s);
+        snprintf(suffix, sizeof suffix, " %s)", build_s);
     }
     rc_plat_title_suffix(suffix);
 }
 
-void tropico1_lang_init(const char *revision)
+void tropico1_lang_init(const char *version, const char *revision)
 {
-    snprintf(revision_s, sizeof revision_s, "%s", revision);
+    snprintf(build_s, sizeof build_s, "%s (%s", version, revision);
     char suffix[96];
-    snprintf(suffix, sizeof suffix, " (%s)", revision_s);
+    snprintf(suffix, sizeof suffix, " %s)", build_s);
     rc_plat_title_suffix(suffix);
     rc_on_point(LANGUAGE_KNOWN, language_known);
 }

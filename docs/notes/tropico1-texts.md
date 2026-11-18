@@ -34,7 +34,7 @@ The text lookup (`0x004f1f40`, fastcall: the number in `ecx`, 0 on the
 stack) uses the same number for a few texts the executable carries itself
 (the German names of two 3D settings). Every way through the comparisons
 ends at `0x004f1e9c`, a patch point: there the window's title gets the
-language, by its own name ("Tropico (revision, Deutsch)"), and from then on
+language, by its own name ("Tropico 0.1.0 (revision, Deutsch)"), and from then on
 our texts follow it. Before that, and for a language we have no texts in,
 they are English.
 

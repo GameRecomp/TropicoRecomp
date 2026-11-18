@@ -30,6 +30,10 @@ use rc_inno::{Installer, Plan, Sink};
 use rc_manifest::Manifest;
 use rc_pe::{Image, PeFile};
 
+/// The version of the builds and the converter: the repository's VERSION
+/// file, the one place it is set (Cargo's package version is only Cargo's).
+pub const VERSION: &str = include_str!("../../../../VERSION").trim_ascii();
+
 pub use rc_emit_native;
 pub use rc_emit_wasm;
 pub use rc_inno;
@@ -650,7 +654,7 @@ const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 "#;
 
 /// What a template says about the program besides the shell: its version
-/// (`0.1.0+<revision>`, tools/version) and, for macOS, its icon (.icns).
+/// (`<VERSION>+<revision>`, tools/version) and, for macOS, its icon (.icns).
 #[derive(Debug, Default, Clone)]
 pub struct TemplateInfo<'a> {
     pub version: &'a str,
@@ -706,8 +710,9 @@ pub fn make_template(
     };
     let (exe, data, readme) = (exe.as_str(), data.as_str(), readme.as_str());
     if system == "macos" {
+        let unknown = format!("{VERSION}+unknown");
         let version = if info.version.is_empty() {
-            "0.1.0+unknown"
+            unknown.as_str()
         } else {
             info.version
         };

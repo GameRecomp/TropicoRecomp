@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# The version of the builds: VERSION+<short git revision> ("+unknown"
-# outside a git checkout). CMake, the AppImage and the macOS template use it.
+# The version of the builds: the VERSION file's (the one place it is set)
+# +<short git revision> ("+unknown" outside a git checkout). The AppImage,
+# the Android package, the macOS template and the converter download use it;
+# CMake and the recompiler read VERSION themselves.
 #
 #   tools/version          -> 0.1.0+a695b1d
+#   tools/version --short  -> 0.1.0
 #   tools/version --rev    -> a695b1d
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION=0.1.0
+VERSION=$(tr -d ' \r\n' < VERSION)
 rev=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-if [ "${1:-}" = "--rev" ]; then
-    echo "$rev"
-else
-    echo "$VERSION+$rev"
-fi
+case "${1:-}" in
+    --rev) echo "$rev" ;;
+    --short) echo "$VERSION" ;;
+    *) echo "$VERSION+$rev" ;;
+esac

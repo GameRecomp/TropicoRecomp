@@ -2,7 +2,8 @@
 <!-- SPDX-License-Identifier: MIT -->
 <!-- The Android shell: SDL's activity running libmain.so (the game program
      without lifted code), which unpacks the game data the converter puts
-     in assets/data on its first start. -->
+     in assets/data on its first start. tools/build-android puts the
+     version (VERSION) in place of versionCode and versionName. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.gamerecomp.tropico1recomp"
     android:versionCode="1"

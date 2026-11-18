@@ -136,17 +136,17 @@ static int language_of(const char *game_dir)
     return best;
 }
 
-void tropico2_lang_init(const char *game_dir, const char *revision)
+void tropico2_lang_init(const char *game_dir, const char *version, const char *revision)
 {
     int l = language_of(game_dir);
     char suffix[128];
     if (l >= 0) {
         lang = (tropico2_lang)l;
         rc_log("texts: the game's texts are in %s", titles[l]);
-        snprintf(suffix, sizeof suffix, " (%s, %s)", revision, titles[l]);
+        snprintf(suffix, sizeof suffix, " %s (%s, %s)", version, revision, titles[l]);
     } else {
         rc_log("texts: the game's texts were not found");
-        snprintf(suffix, sizeof suffix, " (%s)", revision);
+        snprintf(suffix, sizeof suffix, " %s (%s)", version, revision);
     }
     rc_plat_title_suffix(suffix);
 }

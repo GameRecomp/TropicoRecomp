@@ -104,8 +104,14 @@ system greyed out, "disabled on this site for now".
 
 ### Version, icons and metadata
 
-`tools/version` gives the builds' version, `0.1.0+<short git revision>`; CMake
-puts the revision into the window's title, e.g. "Tropico (a695b1d)". The icons
+The version is set in one place, the `VERSION` file (`0.1.0`): CMake and
+the recompiler (`rc_convert::VERSION`, `recomp --version`, the page) read
+it, and `tools/version` gives it with the git revision,
+`0.1.0+<short revision>`, to the AppImage, the Android package
+(`versionName`; `versionCode` 0.1.0 → 100), the macOS bundle, the converter
+download and the page's footer. CMake puts both into the window's title,
+e.g. "Tropico 0.1.0 (a695b1d)", and
+the Windows programs' version information. The icons
 come from `tools/appimage/tropico.svg` (Tropico 2's: `tropico2.svg`, the
 island at dusk with a 2 in the sun; `GAME_ICON` of `tools/game-info`):
 `tools/make-icons build/icons` renders the PNGs of each and packs

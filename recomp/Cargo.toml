@@ -4,6 +4,8 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
+# Cargo's own; the version of the builds is ../VERSION
+# (rc_convert::VERSION), to be kept the same.
 version = "0.1.0"
 edition = "2024"
 license = "MIT"

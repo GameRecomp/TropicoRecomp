@@ -15,7 +15,7 @@ mod report;
 #[derive(Parser, Debug)]
 #[command(
     name = "recomp",
-    version,
+    version = rc_convert::VERSION,
     about = "Static recompiler for 32-bit Windows games"
 )]
 struct Cli {
@@ -113,7 +113,7 @@ enum Cmd {
         shell: PathBuf,
         #[arg(short, long)]
         out: PathBuf,
-        /// The program's version, 0.1.0+<revision> (tools/version).
+        /// The program's version, <VERSION>+<revision> (tools/version).
         #[arg(long, default_value = "")]
         version: String,
         /// The macOS bundle's icon (.icns, tools/make-icons).

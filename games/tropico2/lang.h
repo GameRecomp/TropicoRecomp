@@ -29,8 +29,8 @@ typedef enum tropico2_text {
 } tropico2_text;
 
 /* Register with the runtime (rc_config.setup), the game in `game_dir`: the
- * window's title is "Tropico 2 (<revision>, <language>)". */
-void tropico2_lang_init(const char *game_dir, const char *revision);
+ * window's title is "Tropico 2 <version> (<revision>, <language>)". */
+void tropico2_lang_init(const char *game_dir, const char *version, const char *revision);
 
 /* The language of the game's texts; English for one this project has no
  * texts in. */

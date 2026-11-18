@@ -52,6 +52,9 @@ static bool find_up(const char *start, char *out, size_t n)  /* n >= RC_PATH_MAX
     return false;
 }
 
+#ifndef RC_VERSION
+#define RC_VERSION "0"
+#endif
 #ifndef RC_REVISION
 #define RC_REVISION "unknown"
 #endif
@@ -63,7 +66,7 @@ static void setup(void)
     if (!rc_plat_init("Tropico 2")) {
         rc_fatal("no display");
     }
-    tropico2_lang_init(game_dir, RC_REVISION);
+    tropico2_lang_init(game_dir, RC_VERSION, RC_REVISION);
     rc_hle_all();
     tropico2_patches();
 }

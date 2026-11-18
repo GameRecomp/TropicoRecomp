@@ -24,14 +24,14 @@ if(ANDROID)
     # On Android the shell is libmain.so, which SDL's activity loads and
     # starts at SDL_main.
     add_library(main SHARED main.c patches.c patch_options.c patch_resolution.c patch_art.c patch_vtext.c patch_fullscreen.c patch_textedit.c patch_preview.c patch_scroll.c lang.c shell.c)
-    set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "RC_REVISION=\"${RC_REVISION}\"")
+    set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "RC_VERSION=\"${RC_VERSION}\";RC_REVISION=\"${RC_REVISION}\"")
     target_compile_definitions(main PRIVATE main=SDL_main)
     target_link_libraries(main PRIVATE rc_hle rc_runtime tropico1_artgen)
     return()
 endif()
 add_executable(tropico1-shell main.c patches.c patch_options.c patch_resolution.c patch_art.c patch_vtext.c patch_fullscreen.c patch_textedit.c patch_preview.c patch_scroll.c lang.c shell.c)
 target_link_libraries(tropico1-shell PRIVATE rc_hle rc_runtime tropico1_artgen)
-set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "RC_REVISION=\"${RC_REVISION}\"")
+set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "RC_VERSION=\"${RC_VERSION}\";RC_REVISION=\"${RC_REVISION}\"")
 
 # The Windows programs' icon (tools/make-icons; CI makes it) and version
 # information.
@@ -45,7 +45,6 @@ if(WIN32)
     else()
         set(TROPICO1_ICON_LINE "")
     endif()
-    string(REPLACE "." "," RC_VERSION_COMMAS "${RC_VERSION}")
     configure_file(tropico1.rc.in "${CMAKE_CURRENT_BINARY_DIR}/tropico1.rc" @ONLY)
     target_sources(tropico1-shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/tropico1.rc")
 endif()

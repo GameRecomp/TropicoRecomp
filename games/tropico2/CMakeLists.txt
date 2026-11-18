@@ -6,7 +6,7 @@
 # tropico2-shell is the same program without lifted code, built always (CI
 # builds it on every system): it runs the native code and game files it
 # finds in data/ beside it, which the converter puts there.
-set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "RC_REVISION=\"${RC_REVISION}\"")
+set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "RC_VERSION=\"${RC_VERSION}\";RC_REVISION=\"${RC_REVISION}\"")
 set(TROPICO2_PATCHES lang.c patches.c patch_resolution.c patch_textedit.c patch_fullscreen.c patch_scroll.c)
 
 if(ANDROID)
@@ -33,7 +33,6 @@ if(WIN32)
     else()
         set(TROPICO2_ICON_LINE "")
     endif()
-    string(REPLACE "." "," RC_VERSION_COMMAS "${RC_VERSION}")
     configure_file(tropico2.rc.in "${CMAKE_CURRENT_BINARY_DIR}/tropico2.rc" @ONLY)
     target_sources(tropico2-shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/tropico2.rc")
 endif()

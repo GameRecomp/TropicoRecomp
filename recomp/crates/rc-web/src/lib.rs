@@ -449,5 +449,5 @@ pub fn recompile_web(file: Function, progress: Function) -> Result<Vec<u8>, JsVa
 /// The version of the converter, for the page to show.
 #[wasm_bindgen]
 pub fn version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    rc_convert::VERSION.to_string()
 }
