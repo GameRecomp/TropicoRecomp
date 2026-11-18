@@ -145,7 +145,7 @@ void rc_present_hook(unsigned frame)
     run_script(frame);
     const char *shots = getenv("RC_SCREENSHOT");
     if (shots) {
-        char buf[1024];
+        static char buf[16384];
         snprintf(buf, sizeof buf, "%s", shots);
         for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
             char *colon = strchr(tok, ':');
