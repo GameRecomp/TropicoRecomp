@@ -25,6 +25,7 @@
 #include "rc/platform.h"
 #include "rc/process.h"
 
+#include "lang.h"
 #include "patches.h"
 
 
@@ -55,14 +56,14 @@ static bool find_up(const char *start, char *out, size_t n)  /* n >= RC_PATH_MAX
 #define RC_REVISION "unknown"
 #endif
 
+static const char *game_dir; /* (for setup) */
+
 static void setup(void)
 {
     if (!rc_plat_init("Tropico 2")) {
         rc_fatal("no display");
     }
-    char suffix[96];
-    snprintf(suffix, sizeof suffix, " (%s)", RC_REVISION);
-    rc_plat_title_suffix(suffix);
+    tropico2_lang_init(game_dir, RC_REVISION);
     rc_hle_all();
     tropico2_patches();
 }
@@ -188,6 +189,7 @@ int main(int argc, char **argv)
         rc_host_mkdir(user);
     }
     rc_plat_display_load(user);
+    game_dir = game;
     rc_config cfg = {
         .id = "tropico2",
         .game_dir = game,

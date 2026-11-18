@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
 # Tropico 2: the game executable, lifted code (generated locally by
-# `recomp lift` from the user's own copy), the runtime and the HLE modules.
-# No patches yet.
+# `recomp lift` from the user's own copy), the runtime and the HLE modules,
+# and the patches (patches.c) with their texts (lang.c).
 #
 # tropico2-shell is the same program without lifted code, built always (CI
 # builds it on every system): it runs the native code and game files it
 # finds in data/ beside it, which the converter puts there.
 set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "RC_REVISION=\"${RC_REVISION}\"")
-set(TROPICO2_PATCHES patches.c patch_resolution.c)
+set(TROPICO2_PATCHES lang.c patches.c patch_resolution.c)
 
 if(ANDROID)
     # On Android the shell is libmain.so, which SDL's activity loads and

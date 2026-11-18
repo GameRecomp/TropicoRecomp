@@ -50,9 +50,15 @@ hooks = [
     0x008dffb0, # resolution: an image window draws itself
     0x008ea170, # resolution: an image draws its picture
     0x008de6e0, # resolution: a window and those in it are drawn
+    0x008b91e0, # resolution: a display mode is looked up among those listed
 ]
 points = [
     0x006a7fda, # resolution: the game screen's layout sizes the HUD's part
     0x006a80af, # resolution: and the world's
     0x006d9adc, # resolution: a slider's value text, just looked up
+    0x006d51d7, # resolution: a settings control's title, just looked up
+    0x006d656f, # resolution: a radio button's text, just looked up
+    0x006d2129, # resolution: a control's status-line text, just looked up
+    0x006d66a1, # resolution: a radio group is given its variable
+    0x006d2e52, # resolution: the settings page's handler of changes, at 'rend'
 ]

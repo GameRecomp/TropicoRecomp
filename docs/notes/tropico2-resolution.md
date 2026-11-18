@@ -37,8 +37,9 @@ left where the game puts it, and the world is seen further to the side.
 Wrapped, the width function gives the stock height times the chosen shape
 (a multiple of 4, never narrower than the stock width). DirectDraw lists the
 widened mode of every size beside its own from the start
-(`rc_ddraw_add_mode`), so that the lookup finds it; the shape is therefore
-taken once, when the program starts. At 1024x768 and 16:9 that is 1364x768,
+(`rc_ddraw_add_mode`), and the lookup is wrapped to find every widened size
+at the shape in effect (see the graphics page below), so the shape may
+change while playing. At 1024x768 and 16:9 that is 1364x768,
 at 2560x1080 (21:9) 1820x768.
 
 The game screen's root window lays out its two parts in `0x006a7ea0` (the
@@ -143,10 +144,41 @@ put them, and they are only drawn elsewhere:
 
 Its right page (`'_rpg'`) holds the 3D mode's choice (`'rend'`: hardware or
 software; here Direct3D is always drawn by DirectDraw, so it means nothing)
-between two rules (`'subt'`), and below them the resolution (`'reso'`). The
-choice and the rule below it are put far away (place -10000, as the game
-puts away what it does not show; clearing their shown flags made the page lay
-itself out anew, narrower), and the resolution takes their place.
+and below it the resolution (`'reso'`), a slider.
+
+The slider cannot take more stops: its class (vtable `0x0093af68`, made by
+`0x006d68c0`) has five pin windows (`'pin0'` to `'pin4'`) at fixed offsets
+in the object, and a click sets its value to the pin's number (`0x006d3e49`:
+(pin + `minv`) × `scal`), so it stays the interface size. The 3D mode's
+choice becomes the shape's instead: the window's (or settings.ini's WxH,
+then named by its shape) and the game's 4:3.
+
+- A radio group is made by `0x006d5eb0` (thiscall: the page's name, the
+  group's): each button's
+  text at `0x006d656a` (the button's number at `[ebp-0x18]`) and its
+  status-line text by `0x006d20e0` (`'hint'`, at `0x006d2124`; two lines
+  parted by `*`). At `0x006d66a1` the group has been given the variable it
+  shows and sets (`+0xc0`, for `'rend'` `0x009b6840`). The title shown is
+  the one the page's builder looks up after making a control (`0x006d51d2`,
+  the control's name at `[ebp-0x2c]`); the patch gives it one
+  of its own instead (0 wide, 1 4:3).
+- A chosen button sets the variable (`0x0058ecb0`) and sends `'stat'` to the
+  page, whose handler compares the control's name with `'rend'` at
+  `0x006d2e52`. The patch changes the shape there, writes settings.ini, and
+  clears the name, so the handler does nothing more.
+- The shape changes while playing: the current screen (`0x006cf0e0`, no
+  arguments) changes to a size with its method at vtable `+0x70` (the size,
+  and whether to save it), which ends in `0x006ce920`; that lays the screen
+  out anew only when the size changed, so the setting at `0x00993de8` says
+  another size until the call. The bar's arrangement is undone first (every
+  place and width it changed is kept), and the bar is arranged again at its
+  next draw for the new width.
+- The game finds a size in the modes it listed at the start through
+  `0x008b91e0` (thiscall: the list's kind, the depth, width and height);
+  wrapped, it finds every size's width at the shape in effect. DirectDraw
+  takes any mode.
+- While the shape follows the window, the window's shape is looked at from
+  the message loop every 100 ms; one kept for half a second is taken.
 
 The resolution's value under its slider is looked up among the options'
 texts (`0x0042ee50`, the slider's stop as the number; the result in `eax` at
@@ -155,16 +187,17 @@ texts (`0x0042ee50`, the slider's stop as the number; the result in `eax` at
 shape, as on Tropico's options page: `1364x768 (16:9)`. The label sizes
 itself to its text.
 
+The patch's own texts are in the language of the game's texts
+(`games/tropico2/lang.c`): the program keeps no number for it, so it is the
+language whose common short words `Data/text.{}` holds most often.
+
 ## The setting
 
 `resolution` in `settings.ini` (shared with Tropico, where it is a size):
 for Tropico 2 its shape counts. `1920x1080` gives 16:9, `2560x1080` 21:9;
-`window` takes the window's shape when the program starts (the screen's in
-full screen, the page's in a browser); `off` keeps the game's 4:3. On
-Android the screen's shape is used unless one is chosen. A shape narrower
-than 4:3 keeps 4:3. The game's own screen-size option still picks the
+`window` takes the window's shape and follows it (the screen's in full
+screen, the page's in a browser); `off` keeps the game's 4:3. The graphics
+page offers the first (or settings.ini's WxH) and 4:3, and writes the
+choice there. A shape narrower than 4:3 keeps 4:3. The game's own screen-size option still picks the
 height (and with it the size of the interface).
 
-## Not done yet
-
-- The window's shape is read only when the program starts.

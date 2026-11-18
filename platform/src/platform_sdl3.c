@@ -229,7 +229,16 @@ bool rc_plat_window(int width, int height)
 #if defined(SDL_PLATFORM_ANDROID)
         flags |= SDL_WINDOW_FULLSCREEN;
 #endif
-        if (!SDL_CreateWindowAndRenderer(full_title(), width * scale, height * scale, flags, &window, &renderer)) {
+        int win_w = width * scale, win_h = height * scale;
+#if !defined(SDL_PLATFORM_EMSCRIPTEN)
+        /* While the resolution follows the window, the window is not made
+         * for the first frame (a game's menu may have a size and shape of
+         * its own) but as large as fits, which the resolution then takes. */
+        if (display.game_w < 0 && display.scale == 0) {
+            rc_plat_area(&win_w, &win_h);
+        }
+#endif
+        if (!SDL_CreateWindowAndRenderer(full_title(), win_w, win_h, flags, &window, &renderer)) {
             SDL_Log("SDL_CreateWindowAndRenderer: %s", SDL_GetError());
             return false;
         }
