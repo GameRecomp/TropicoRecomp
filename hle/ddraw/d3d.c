@@ -449,7 +449,14 @@ static void k_PreLoad(rc_cpu *c) { RC_RETURN(c, D3D_OK, 2); }
 /* ---- the rasteriser ----
  * Colours are four 8-bit channels. A surface's pixel format is worked out
  * once per draw (where each channel is and how wide), so that a pixel is
- * taken apart and put together with shifts and small tables. */
+ * taken apart and put together with shifts and small tables.
+ *
+ * Pixel centres are at whole coordinates, as in Direct3D 7 (not at +0.5,
+ * as from Direct3D 10 on): the game puts its 2D quads at half pixels
+ * (a 256-texel tile from y 240.5 to 496.5) so that each covers whole rows
+ * (241 to 496) and samples each texel at its middle. With centres at +0.5
+ * a row lands on the edge between two tiles at v = 0, where rounding takes
+ * texel row -1, the last one by wrapping: a line across the screen. */
 
 typedef struct c8 {
     int r, g, b, a; /* 0..255 */
@@ -1010,8 +1017,8 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
     cy0 = cy0 < 0 ? 0 : cy0;
     float minx = fminf(v0->x, fminf(v1->x, v2->x)), maxx = fmaxf(v0->x, fmaxf(v1->x, v2->x));
     float miny = fminf(v0->y, fminf(v1->y, v2->y)), maxy = fmaxf(v0->y, fmaxf(v1->y, v2->y));
-    int32_t x0 = (int32_t)ceilf(minx - 0.5f), x1 = (int32_t)floorf(maxx - 0.5f);
-    int32_t y0 = (int32_t)ceilf(miny - 0.5f), y1 = (int32_t)floorf(maxy - 0.5f);
+    int32_t x0 = (int32_t)ceilf(minx), x1 = (int32_t)floorf(maxx);
+    int32_t y0 = (int32_t)ceilf(miny), y1 = (int32_t)floorf(maxy);
     x0 = x0 < cx0 ? cx0 : x0;
     y0 = y0 < cy0 ? cy0 : y0;
     x1 = x1 >= cx1 ? cx1 - 1 : x1;
@@ -1050,7 +1057,7 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
     if (copy) {
         int tw = (int)g0->w, th = (int)g0->h;
         for (int32_t y = y0; y <= y1; y++) {
-            float py = (float)y + 0.5f, px = (float)x0 + 0.5f;
+            float py = (float)y, px = (float)x0;
             float w0 = edge(v1, v2, px, py), w1 = edge(v2, v0, px, py), w2 = edge(v0, v1, px, py);
             float u = (w0 * v0->u[0] + w1 * v1->u[0] + w2 * v2->u[0]) * inv;
             float v = (w0 * v0->v[0] + w1 * v1->v[0] + w2 * v2->v[0]) * inv;
@@ -1117,7 +1124,7 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
             dcol[k] = (int32_t)(dk * 65536.0f);
         }
         for (int32_t y = y0; y <= y1; y++) {
-            float py = (float)y + 0.5f, px = (float)x0 + 0.5f;
+            float py = (float)y, px = (float)x0;
             float w0 = edge(v1, v2, px, py), w1 = edge(v2, v0, px, py), w2 = edge(v0, v1, px, py);
             float u = (w0 * v0->u[0] + w1 * v1->u[0] + w2 * v2->u[0]) * inv;
             float v = (w0 * v0->v[0] + w1 * v1->v[0] + w2 * v2->v[0]) * inv;
@@ -1189,7 +1196,7 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
         rc_log("[d3dslow] %d blend %d %d/%d at %d st0 %u:%u,%u/%u:%u,%u bpp %u a%u lin %d st1 %d aff %d same %d col %02x%02x%02x%02x", (int)(area / 2), r->blend, r->sb, r->db, r->alpha_test, g0->cop, g0->c1, g0->c2, g0->aop, g0->a1, g0->a2, g0->bpp, g0->f.c[3].bits, g0->linear, r->st[1].on, affine, same_colour, const_colour.a, const_colour.r, const_colour.g, const_colour.b);
     }
     for (int32_t y = y0; y <= y1; y++) {
-        float py = (float)y + 0.5f, px = (float)x0 + 0.5f;
+        float py = (float)y, px = (float)x0;
         float w0 = edge(v1, v2, px, py), w1 = edge(v2, v0, px, py), w2 = edge(v0, v1, px, py);
         uint8_t *row = r->tpix + (uint32_t)y * t->pitch;
         for (int32_t x = x0; x <= x1; x++, w0 += d0, w1 += d1, w2 += d2) {
