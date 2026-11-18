@@ -50,6 +50,15 @@ void rc_plat_present(const uint32_t *pixels, int width, int height, int pitch)
 
 void rc_plat_cursor_visible(bool visible) { (void)visible; }
 
+void rc_plat_text_input(bool on, int x, int y, int width, int height)
+{
+    (void)on;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+}
+
 void rc_plat_cursor_image(const uint32_t *argb, int width, int height, int hot_x, int hot_y)
 {
     (void)argb;

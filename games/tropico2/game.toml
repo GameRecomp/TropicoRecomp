@@ -51,6 +51,13 @@ hooks = [
     0x008ea170, # resolution: an image draws its picture
     0x008de6e0, # resolution: a window and those in it are drawn
     0x008b91e0, # resolution: a display mode is looked up among those listed
+    0x008eb180, # textedit: a behaviour is attached to its window
+    0x008eb670, # textedit: and detached
+    0x008d1130, # fullscreen: the game goes full screen
+    0x008d11d0, # fullscreen: the game goes into a window
+    0x006c1d20, # scroll: the world's view takes its scroll step
+    0x006cfe00, # scroll: the screen looks whether the pointer is at an edge
+    0x008b93f0, # scroll: the Direct3D device's "reduced graphics shifting" is toggled
 ]
 points = [
     0x006a7fda, # resolution: the game screen's layout sizes the HUD's part
@@ -61,4 +68,21 @@ points = [
     0x006d2129, # resolution: a control's status-line text, just looked up
     0x006d66a1, # resolution: a radio group is given its variable
     0x006d2e52, # resolution: the settings page's handler of changes, at 'rend'
+    0x008d0d0d, # fullscreen: the start-up reads the full screen preference
+    0x006d0601, # fullscreen: the graphics page reads it to tick its box
+    0x006d0608, # fullscreen: and has
+    0x006d2fb7, # fullscreen: the graphics page reads it after a click on the box
+    0x006d2fbe, # fullscreen: and has
+    0x006dbbee, # fullscreen: the menu's settings page reads it to tick its box
+    0x006dbbf5, # fullscreen: and has
+    0x006dc0de, # fullscreen: the menu's settings page reads it after a click on the box
+    0x006dc0e5, # fullscreen: and has
+    0x008b9504, # scroll: the device reads "reduced graphics shifting" (no edge scrolling)
+    0x008b950b, # scroll: and has
+    0x008b95b8, # scroll: again
+    0x008b95bf, # scroll: and has
+    0x008b9682, # scroll: again
+    0x008b9689, # scroll: and has
+    0x008b9bb3, # scroll: again
+    0x008b9bba, # scroll: and has
 ]

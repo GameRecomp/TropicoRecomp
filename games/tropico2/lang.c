@@ -75,6 +75,19 @@ static const char *const texts[TROPICO2_TEXTS][TROPICO2_LANGS] = {
          "L'interface garde la taille choisie ci-dessous.",
          "La schermata di gioco nel formato proprio del gioco, 4:3.*"
          "L'interfaccia mantiene la dimensione scelta sotto."},
+    [TROPICO2_T_NO_EDGE_SCROLL] = {"No Edge Scrolling", "Kein Rand-Scrollen", "Sin desplazamiento en bordes",
+                                   "Pas de d\xe9" "filement aux bords", "Nessuno scorrimento ai bordi"},
+    [TROPICO2_T_NO_EDGE_SCROLL_HINT] =
+        {"The map does not scroll when the mouse is at the edge of the screen.*"
+         "Dragging it always scrolls it; with a touch screen the edge is off anyway.",
+         "Die Karte scrollt nicht, wenn die Maus am Bildschirmrand ist.*"
+         "Ziehen verschiebt sie immer; mit dem Finger ist der Rand ohnehin aus.",
+         "El mapa no se desplaza con el rat\xf3n en el borde de la pantalla.*"
+         "Arrastrarlo siempre lo desplaza; en pantalla t\xe1" "ctil el borde est\xe1 desactivado.",
+         "La carte ne d\xe9" "file pas quand la souris est au bord de l'\xe9" "cran.*"
+         "La faire glisser la d\xe9" "place toujours\xa0; au doigt, le bord est d\xe9" "sactiv\xe9.",
+         "La mappa non scorre quando il mouse \xe8 sul bordo dello schermo.*"
+         "Trascinarla la sposta sempre; al tocco il bordo \xe8 comunque disattivato."},
 };
 
 static tropico2_lang lang = TROPICO2_EN;

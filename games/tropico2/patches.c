@@ -7,4 +7,10 @@
  */
 #include "patches.h"
 
-void tropico2_patches(void) { tropico2_patch_resolution(); }
+void tropico2_patches(void)
+{
+    tropico2_patch_resolution();
+    tropico2_patch_textedit();
+    tropico2_patch_fullscreen();
+    tropico2_patch_scroll();
+}

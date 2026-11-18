@@ -48,3 +48,14 @@ event is made an Enter (type 7, character 13 at +8 and +0xc), and the click
 is put back at the front of the queue. The editing ends as with Enter, and
 the dialog's own loop gets the click next: OK saves under the new name,
 Cancel cancels, as they do when no name is being edited.
+
+## The on-screen keyboard
+
+While a field is edited, the host is told where it is
+(`rc_plat_text_input`), so that it may show its on-screen keyboard (on
+Android, in a phone's browser) and keep the field in sight: the editing is
+the function at 0x503760 (thiscall, the field), wrapped. A field's place is
+in virtual units (3200 x 2400, turned into pixels by the floats at
+0x5a0ffc and 0x5a1004): its x, y, width and height (16-bit, at +0x0b)
+within its page, whose place is at +0x11 and +0x15 of the page (at +0x5a of
+the field), as the field's drawing (0x503290) adds them.

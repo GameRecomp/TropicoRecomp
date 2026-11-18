@@ -7,7 +7,7 @@
 # builds it on every system): it runs the native code and game files it
 # finds in data/ beside it, which the converter puts there.
 set_source_files_properties(main.c PROPERTIES COMPILE_DEFINITIONS "RC_REVISION=\"${RC_REVISION}\"")
-set(TROPICO2_PATCHES lang.c patches.c patch_resolution.c)
+set(TROPICO2_PATCHES lang.c patches.c patch_resolution.c patch_textedit.c patch_fullscreen.c patch_scroll.c)
 
 if(ANDROID)
     # On Android the shell is libmain.so, which SDL's activity loads and

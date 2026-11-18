@@ -552,7 +552,7 @@ static float pinch_scale = 1;  /* since the last notch */
 static float last_x, last_y;   /* the pointer, as last seen */
 
 /* Events to give before the next ones from SDL. */
-static rc_event queued[8];
+static rc_event queued[64];
 static unsigned qhead, qtail;
 
 static void queue(const rc_event *e)
@@ -568,6 +568,132 @@ static void give_held(void)
         held = false;
         pressed = true;
         queue(&held_press);
+    }
+}
+
+/* ---- typing into a field ---- */
+
+static bool text_wanted;          /* a field is being typed into */
+static int text_x, text_y, text_w, text_h; /* it, in frame pixels */
+static bool key_typed;            /* a key that types came since the last text */
+
+static void text_start(void)
+{
+    if (!window || !renderer) {
+        return;
+    }
+    float x0, y0, x1, y1;
+    SDL_RenderCoordinatesToWindow(renderer, (float)text_x, (float)text_y, &x0, &y0);
+    SDL_RenderCoordinatesToWindow(renderer, (float)(text_x + text_w), (float)(text_y + text_h), &x1, &y1);
+    SDL_Rect r = {(int)x0, (int)y0, (int)(x1 - x0), (int)(y1 - y0)};
+    SDL_SetTextInputArea(window, &r, 0);
+    if (!SDL_TextInputActive(window)) {
+        key_typed = false;
+        SDL_StartTextInput(window);
+    }
+}
+
+void rc_plat_text_input(bool on, int x, int y, int width, int height)
+{
+    text_wanted = on;
+    if (!on) {
+        if (window && SDL_TextInputActive(window)) {
+            SDL_StopTextInput(window);
+        }
+        return;
+    }
+    text_x = x;
+    text_y = y;
+    text_w = width;
+    text_h = height;
+    text_start();
+}
+
+/* A press on the field brings back a keyboard the user put away. */
+static void text_pressed(int x, int y)
+{
+    if (text_wanted && window && !SDL_TextInputActive(window) && x >= text_x && x < text_x + text_w &&
+        y >= text_y && y < text_y + text_h) {
+        text_start();
+    }
+}
+
+/* The key of a US keyboard that types `ch`, and whether with Shift. */
+static SDL_Scancode us_key(char ch, bool *shift)
+{
+    static const char shifted_digits[] = ")!@#$%^&*(";
+    static const struct {
+        char plain, shifted;
+        SDL_Scancode key;
+    } punct[] = {
+        {' ', 0, SDL_SCANCODE_SPACE},       {'-', '_', SDL_SCANCODE_MINUS},
+        {'=', '+', SDL_SCANCODE_EQUALS},    {'[', '{', SDL_SCANCODE_LEFTBRACKET},
+        {']', '}', SDL_SCANCODE_RIGHTBRACKET}, {'\\', '|', SDL_SCANCODE_BACKSLASH},
+        {';', ':', SDL_SCANCODE_SEMICOLON}, {'\'', '"', SDL_SCANCODE_APOSTROPHE},
+        {'`', '~', SDL_SCANCODE_GRAVE},     {',', '<', SDL_SCANCODE_COMMA},
+        {'.', '>', SDL_SCANCODE_PERIOD},    {'/', '?', SDL_SCANCODE_SLASH},
+    };
+    *shift = false;
+    if (ch >= 'a' && ch <= 'z') {
+        return (SDL_Scancode)(SDL_SCANCODE_A + (ch - 'a'));
+    }
+    if (ch >= 'A' && ch <= 'Z') {
+        *shift = true;
+        return (SDL_Scancode)(SDL_SCANCODE_A + (ch - 'A'));
+    }
+    if (ch >= '1' && ch <= '9') {
+        return (SDL_Scancode)(SDL_SCANCODE_1 + (ch - '1'));
+    }
+    if (ch == '0') {
+        return SDL_SCANCODE_0;
+    }
+    for (int i = 0; i < 10; i++) {
+        if (ch == shifted_digits[i]) {
+            *shift = true;
+            return i ? (SDL_Scancode)(SDL_SCANCODE_1 + i - 1) : SDL_SCANCODE_0;
+        }
+    }
+    for (size_t i = 0; i < SDL_arraysize(punct); i++) {
+        if (ch == punct[i].plain || (punct[i].shifted && ch == punct[i].shifted)) {
+            *shift = ch == punct[i].shifted;
+            return punct[i].key;
+        }
+    }
+    return SDL_SCANCODE_UNKNOWN;
+}
+
+static void queue_key(SDL_Scancode s, bool down)
+{
+    rc_event e;
+    SDL_zero(e);
+    e.type = RC_EV_KEY;
+    e.down = down;
+    key_codes(s, &e.vk, &e.scancode, &e.extended);
+    queue(&e);
+}
+
+/* Text typed without keys (an on-screen keyboard's, in a browser): its
+ * characters as key presses. Text that keys typed came with them. */
+static void text_typed(const char *text)
+{
+    if (key_typed) {
+        key_typed = false;
+        return;
+    }
+    for (; *text; text++) {
+        bool shift;
+        SDL_Scancode s = (unsigned char)*text < 0x80 ? us_key(*text, &shift) : SDL_SCANCODE_UNKNOWN;
+        if (s == SDL_SCANCODE_UNKNOWN) {
+            continue;
+        }
+        if (shift) {
+            queue_key(SDL_SCANCODE_LSHIFT, true);
+        }
+        queue_key(s, true);
+        queue_key(s, false);
+        if (shift) {
+            queue_key(SDL_SCANCODE_LSHIFT, false);
+        }
     }
 }
 
@@ -738,6 +864,9 @@ static bool poll_sdl(rc_event *e)
             e->y = (int)ev.button.y;
             e->button = ev.button.button == SDL_BUTTON_LEFT ? 1 : ev.button.button == SDL_BUTTON_RIGHT ? 2 : 3;
             e->down = ev.button.down;
+            if (e->down) {
+                text_pressed(e->x, e->y);
+            }
             if (e->source == RC_SRC_TOUCH && !touch_pointer(e)) {
                 if (qhead != qtail) {
                     return false;
@@ -771,6 +900,10 @@ static bool poll_sdl(rc_event *e)
                 continue;
             }
 #endif
+            if (ev.key.down && ev.key.key && !(ev.key.key & SDLK_SCANCODE_MASK) && ev.key.key >= 0x20 &&
+                ev.key.key != SDLK_DELETE && !(ev.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI))) {
+                key_typed = true; /* its text follows */
+            }
             key_codes(ev.key.scancode, &e->vk, &e->scancode, &e->extended);
             if (!e->vk) {
                 continue;
@@ -779,6 +912,12 @@ static bool poll_sdl(rc_event *e)
             e->down = ev.key.down;
             e->repeat = ev.key.repeat;
             return true;
+        case SDL_EVENT_TEXT_INPUT:
+            text_typed(ev.text.text);
+            if (qhead != qtail) {
+                return false;
+            }
+            continue;
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
         case SDL_EVENT_WINDOW_FOCUS_LOST:
             e->type = RC_EV_FOCUS;

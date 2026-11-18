@@ -458,13 +458,27 @@ static void pointer_map(int *x, int *y)
     unsigned n = dialogs(desktop_seen, list, 32);
     for (unsigned i = 0; i < n; i++) {
         uint32_t d = list[i];
-            int32_t l = (int32_t)rc_ld32(d + W_RECT) + dialogs_by, t = (int32_t)rc_ld32(d + W_RECT + 4);
+        int32_t l = (int32_t)rc_ld32(d + W_RECT) + dialogs_by, t = (int32_t)rc_ld32(d + W_RECT + 4);
         int32_t r = l + (int32_t)rc_ld32(d + W_RECT + 8), b = t + (int32_t)rc_ld32(d + W_RECT + 12);
         if ((rc_ld8(d + W_SHOWN) & 1) && *x >= l && *x < r && *y >= t && *y < b) {
             *x -= dialogs_by;
             return;
         }
     }
+}
+
+int32_t tropico2_drawn_by(uint32_t w)
+{
+    uint32_t list[32];
+    unsigned n = dialogs_by && desktop_seen ? dialogs(desktop_seen, list, 32) : 0;
+    for (; w; w = rc_ld32(w + W_PARENT)) {
+        for (unsigned i = 0; i < n; i++) {
+            if (list[i] == w) {
+                return dialogs_by;
+            }
+        }
+    }
+    return 0;
 }
 
 /* ---- the settings' graphics page: the shape */
@@ -524,24 +538,41 @@ static int on_render_group(rc_cpu *c) { return rc_ld32(c->r[RC_EBP] + G_NAME) ==
 
 static void aspect_name(unsigned w, unsigned h, char *out, size_t n);
 
+/* (The box that was "Reduced Graphics Shifting" is patch_scroll.c's, but
+ * its texts are looked up here too.) */
+#define REDUCED_SHIFTING NAME('r', 'e', 'd', 'u')
+
 static void group_title(rc_cpu *c)
 {
-    static uint32_t text;
-    if (rc_ld32(c->r[RC_EBP] + (uint32_t)P_NAME) == RENDER && guest_text(&text, tropico2_tr(TROPICO2_T_SHAPE))) {
+    static uint32_t text, edge;
+    uint32_t name = rc_ld32(c->r[RC_EBP] + (uint32_t)P_NAME);
+    if (name == RENDER && guest_text(&text, tropico2_tr(TROPICO2_T_SHAPE))) {
         c->r[RC_EAX] = text;
+    } else if (name == REDUCED_SHIFTING && guest_text(&edge, tropico2_tr(TROPICO2_T_NO_EDGE_SCROLL))) {
+        c->r[RC_EAX] = edge;
     }
 }
 
-/* A button's text for the status line (thiscall at 0x006d20e0: the button
- * and its data), looked up at OPTION_HINT (in eax); called by the group's
- * builder, whose frame is the caller's. */
+/* A control's text for the status line (thiscall at 0x006d20e0: the
+ * control and its data), looked up at OPTION_HINT (in eax); called by the
+ * group's builder for a button (from HINT_CALLER), and by the page's
+ * builder for its other controls (from PAGE_HINT_CALLERS); the caller's
+ * frame is the builder's. */
 #define OPTION_HINT 0x006d2129u
 #define HINT_CALLER 0x006d6609u
+static const uint32_t page_hint_callers[] = {0x006d5298u, 0x006d5360u, 0x006d5375u};
 static void option_hint(rc_cpu *c)
 {
-    static uint32_t window, custom, own;
-    uint32_t ebp = c->r[RC_EBP], caller = rc_ld32(ebp);
-    if (rc_ld32(ebp + 4) != HINT_CALLER || rc_ld32(caller + G_NAME) != RENDER) {
+    static uint32_t window, custom, own, edge;
+    uint32_t ebp = c->r[RC_EBP], caller = rc_ld32(ebp), ret = rc_ld32(ebp + 4);
+    for (unsigned i = 0; i < sizeof page_hint_callers / sizeof page_hint_callers[0]; i++) {
+        if (ret == page_hint_callers[i] && rc_ld32(caller + (uint32_t)P_NAME) == REDUCED_SHIFTING &&
+            guest_text(&edge, tropico2_tr(TROPICO2_T_NO_EDGE_SCROLL_HINT))) {
+            c->r[RC_EAX] = edge;
+            return;
+        }
+    }
+    if (ret != HINT_CALLER || rc_ld32(caller + G_NAME) != RENDER) {
         return;
     }
     uint32_t text = rc_ld32(caller + (uint32_t)G_OPTION) == 1 ? guest_text(&own, tropico2_tr(TROPICO2_T_OWN_HINT))

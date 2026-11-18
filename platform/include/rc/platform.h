@@ -111,6 +111,14 @@ void rc_plat_present(const uint32_t *pixels, int width, int height, int pitch);
 
 void rc_plat_cursor_visible(bool visible);
 
+/* Text is being typed into a field at x, y, width x height (frame pixels),
+ * or no longer (on false): the host may show its on-screen keyboard (on
+ * Android, and in a phone's browser) and place what it shows for typing
+ * beside the field. A keyboard the user put away comes back when the field
+ * is tapped. Typed text comes as keys either way: what such a keyboard
+ * types without keys of its own becomes the keys of a US keyboard. */
+void rc_plat_text_input(bool on, int x, int y, int width, int height);
+
 /* The mouse cursor over the frame: an image of 0xAARRGGBB pixels (copied)
  * with its hot spot, in frame pixels; the platform scales it with the
  * frame. */

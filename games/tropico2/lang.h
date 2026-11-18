@@ -23,6 +23,8 @@ typedef enum tropico2_text {
     TROPICO2_T_WINDOW_HINT, /* the status line's text for that button, */
     TROPICO2_T_CUSTOM_HINT, /* for it when settings.ini gives the shape, */
     TROPICO2_T_OWN_HINT,    /* and for the button for 4:3 */
+    TROPICO2_T_NO_EDGE_SCROLL,      /* the graphics page's box that was "Reduced Graphics Shifting" */
+    TROPICO2_T_NO_EDGE_SCROLL_HINT, /* its status line's text */
     TROPICO2_TEXTS
 } tropico2_text;
 
