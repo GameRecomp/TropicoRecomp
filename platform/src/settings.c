@@ -12,16 +12,11 @@
 
 #include <stdbool.h>
 
-/* At most so many frames a second unless settings.ini says otherwise: on a
- * phone 30, which keeps it cool (drawing as many frames as it can makes it
- * warm); elsewhere as many as the screen shows. */
-#if defined(__ANDROID__)
-#define DEFAULT_FPS 30
-#define DEFAULT_FPS_TEXT "30"
-#else
-#define DEFAULT_FPS 0
-#define DEFAULT_FPS_TEXT "max"
-#endif
+/* At most so many frames a second unless settings.ini says otherwise: as
+ * many as a common screen shows; a game drawing as many as it can keeps a
+ * processor busy (and a phone warm). */
+#define DEFAULT_FPS 60
+#define DEFAULT_FPS_TEXT "60"
 
 static const char DEFAULTS[] =
     "# How the game is shown. Change a value and start the game again.\n"
@@ -47,7 +42,7 @@ static const char DEFAULTS[] =
     "resolution = window\n"
     "\n"
     "# At most this many frames a second, so that the processor rests between\n"
-    "# frames (cooler and quieter, but less smooth): for example 30.\n"
+    "# frames (cooler and quieter; fewer are less smooth): for example 30.\n"
     "# max: as many as the screen shows.\n"
     "fps = " DEFAULT_FPS_TEXT "\n";
 

@@ -437,8 +437,8 @@ The guest address space as the runtime lays it out:
   program next looks for messages: games copy each part of the screen they
   changed by itself, several times a pass. A frame equal to the last one
   shown is not drawn again (for 100 ms). 16-bit frames are converted through
-  a table. `fps` in `settings.ini` (`RC_FPS`; 30 on Android, else as many as
-  the screen shows) has a pass that made a frame wait for it, resting.
+  a table. `fps` in `settings.ini` (`RC_FPS`; 60 unless set, `max` for no limit)
+  has a pass that made a frame wait for it, resting.
 - **Rest.** A program that waits by spinning (asking for the time or for
   messages again and again, without drawing) rests 1 ms now and then on the
   real clock (`rc_thread_poll`): five hundred such calls without a frame,
