@@ -35,17 +35,21 @@ typedef struct voice {
     int is_stream;
 } voice;
 
-#define VOICES 256
-static voice voices[VOICES];
+/* As many as are loaded: the game loads a sound for most clicks and
+ * unloads few of them (Miles has no limit; a fixed table here ran out, and
+ * the game's sounds went quiet). Each is allocated by itself, so that a
+ * pointer to one stays good as the table grows. */
+static voice **voices;
+static int n_voices;
 static int audio_ok;
 static uint32_t digital; /* the driver handle */
 static uint32_t file_open, file_close, file_seek, file_read;
 
 static voice *voice_of(uint32_t h)
 {
-    for (int i = 0; i < VOICES; i++) {
-        if (voices[i].used && voices[i].guest == h) {
-            return &voices[i];
+    for (int i = 0; i < n_voices; i++) {
+        if (voices[i]->used && voices[i]->guest == h) {
+            return voices[i];
         }
     }
     return NULL;
@@ -53,18 +57,30 @@ static voice *voice_of(uint32_t h)
 
 static voice *new_voice(rc_sound *s)
 {
-    for (int i = 0; i < VOICES; i++) {
-        if (!voices[i].used) {
-            voice *v = &voices[i];
-            memset(v, 0, sizeof *v);
-            v->used = 1;
-            v->sound = s;
-            v->track = rc_track_new();
-            v->guest = rc_heap_alloc(16, true);
-            return v;
-        }
+    int i = 0;
+    while (i < n_voices && voices[i]->used) {
+        i++;
     }
-    return NULL;
+    if (i == n_voices) {
+        voice **more = realloc(voices, (size_t)(n_voices + 1) * sizeof *more);
+        voice *one = calloc(1, sizeof *one);
+        if (!more || !one) {
+            free(one);
+            if (more) {
+                voices = more;
+            }
+            return NULL;
+        }
+        voices = more;
+        voices[n_voices++] = one;
+    }
+    voice *v = voices[i];
+    memset(v, 0, sizeof *v);
+    v->used = 1;
+    v->sound = s;
+    v->track = rc_track_new();
+    v->guest = rc_heap_alloc(16, true);
+    return v;
 }
 
 static void free_voice(voice *v)
@@ -129,9 +145,9 @@ static void k_quick_startup(rc_cpu *c)
 
 static void k_quick_shutdown(rc_cpu *c)
 {
-    for (int i = 0; i < VOICES; i++) {
-        if (voices[i].used) {
-            free_voice(&voices[i]);
+    for (int i = 0; i < n_voices; i++) {
+        if (voices[i]->used) {
+            free_voice(voices[i]);
         }
     }
     RC_RETURN(c, 0, 0);
@@ -157,8 +173,8 @@ static void k_quick_load_mem(rc_cpu *c)
     voice *v = s ? new_voice(s) : NULL;
     if (rc_trace("sound")) {
         int n = 0;
-        for (int i = 0; i < VOICES; i++) {
-            n += voices[i].used;
+        for (int i = 0; i < n_voices; i++) {
+            n += voices[i]->used;
         }
         rc_log("[sound] quick load (%u bytes): %s, %d loaded", size, v ? "ok" : s ? "no handle left" : "not read", n);
     }
@@ -351,8 +367,8 @@ static void k_register_stream_callback(rc_cpu *c)
 /* Streams that have ended get their callback, once, from the pump. */
 static void pump(rc_cpu *c)
 {
-    for (int i = 0; i < VOICES; i++) {
-        voice *v = &voices[i];
+    for (int i = 0; i < n_voices; i++) {
+        voice *v = voices[i];
         if (v->used && v->is_stream && v->started && v->callback && !v->ended_reported &&
             !rc_track_playing(v->track)) {
             v->ended_reported = 1;

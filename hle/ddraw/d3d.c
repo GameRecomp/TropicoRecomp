@@ -1389,7 +1389,7 @@ static void band(void *ctx, int i)
  * the frame is shown, and what is copied or written onto them later (the
  * game's 2D interface) lies over it. Nothing comes back, unless something
  * needs the pixels whole (rc_d3d_resolve). The textures are kept there,
- * made anew when their surface has changed. Differences from the
+ * made anew when their texels have changed. Differences from the
  * rasteriser are in rounding only. */
 
 /* Below this many pixels (the triangles' boxes) a queue onto a target with
@@ -1398,9 +1398,38 @@ static void band(void *ctx, int i)
 
 typedef struct gpu_texture {
     uint32_t id; /* the platform's, 0 for none */
-    uint32_t pixels, w, h, version, key;
+    uint32_t pixels, w, h, key;
     int keyed;
+    uint64_t sum;     /* of the texels it was made of */
+    uint32_t checked; /* the queue they were last found the same in */
 } gpu_texture;
+/* Queues drawn there, counted. */
+static uint32_t gpu_queues;
+
+/* A sum of a texture's texels: the game also writes into a texture it
+ * locked long before (no new version), so what the hardware has is
+ * checked against it once a queue. Four lanes, eight bytes at a time. */
+static uint64_t texel_sum(const stage *g)
+{
+    uint64_t h[4] = {0x9e3779b97f4a7c15u, 0xc2b2ae3d27d4eb4fu, 0x165667b19e3779f9u, 0x27d4eb2f165667c5u};
+    size_t row = (size_t)g->w * 2;
+    for (uint32_t y = 0; y < g->h; y++) {
+        const uint8_t *p = g->pix + (size_t)y * g->pitch;
+        size_t i = 0;
+        for (; i + 32 <= row; i += 32) {
+            for (int k = 0; k < 4; k++) {
+                uint64_t v;
+                memcpy(&v, p + i + 8 * k, 8);
+                h[k] = (h[k] ^ v) * 0x100000001b3u;
+            }
+        }
+        for (; i < row; i++) {
+            h[0] = (h[0] ^ p[i]) * 0x100000001b3u;
+        }
+        h[1] ^= y;
+    }
+    return h[0] ^ (h[1] << 1) ^ (h[2] << 2) ^ (h[3] << 3) ^ (h[3] >> 7);
+}
 /* Two for each surface object: alpha from the texture, and opaque but
  * where colour-keyed. */
 static gpu_texture *gpu_textures;
@@ -1446,9 +1475,19 @@ static uint32_t gpu_texture_of(const stage *g, bool opaque)
         gpu_ntextures = n;
     }
     gpu_texture *e = &gpu_textures[slot];
-    if (e->id && e->pixels == x->pixels && e->w == g->w && e->h == g->h && e->version == x->version &&
-        e->keyed == g->keyed && (!g->keyed || e->key == g->key)) {
-        return e->id;
+    uint64_t sum = 0;
+    if (e->id && e->pixels == x->pixels && e->w == g->w && e->h == g->h && e->keyed == g->keyed &&
+        (!g->keyed || e->key == g->key)) {
+        if (e->checked == gpu_queues) {
+            return e->id;
+        }
+        sum = texel_sum(g);
+        if (sum == e->sum) {
+            e->checked = gpu_queues;
+            return e->id;
+        }
+    } else {
+        sum = texel_sum(g);
     }
     if (e->id) {
         rc_plat_gpu_texture_free(e->id);
@@ -1476,7 +1515,8 @@ static uint32_t gpu_texture_of(const stage *g, bool opaque)
     e->pixels = x->pixels;
     e->w = g->w;
     e->h = g->h;
-    e->version = x->version;
+    e->sum = sum;
+    e->checked = gpu_queues;
     e->keyed = g->keyed;
     e->key = g->key;
     return e->id;
@@ -1603,6 +1643,7 @@ static bool gpu_can(int32_t *top_row, int32_t *end_row)
 static bool gpu_flush(void)
 {
     rc_dd_surface *t = draws[0].r.t;
+    gpu_queues++;
     if (!t->picture) {
         t->picture = rc_plat_gpu_picture((int)t->w, (int)t->h);
         if (!t->picture) {
@@ -1742,6 +1783,11 @@ void rc_d3d_flush(void)
             rc_d3d_resolve(draws[i].r.t); /* drawn here, onto its whole pixels */
         }
         cpu_flush();
+        for (uint32_t i = 0; i < n_draws; i++) {
+            if (i == 0 || draws[i].r.t != draws[i - 1].r.t) {
+                rc_dd_changed(draws[i].r.t); /* no longer as filled, nor as its world left it */
+            }
+        }
     }
     n_draws = 0;
     n_tris = 0;

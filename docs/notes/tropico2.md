@@ -76,9 +76,11 @@ island generator never finished.
   frame is shown as the picture with the pixels here over it where they
   are not the key. Nothing comes back from the hardware, except where the
   pixels are needed whole: a copy of part of such a surface, a DC, a flip,
-  another drawing onto it after it was written on, a screenshot. The
-  textures are kept there, made anew when their surface has changed (a
-  version, new with every lock, copy and DC). It differs from the
+  another drawing onto it after it was written on (a lock, a copy, or a
+  queue drawn here: when new textures are made, after a zoom, a queue can
+  hold one the hardware cannot draw), a screenshot. The textures are kept
+  there, checked against a sum of their texels once a queue and made anew
+  when it differs. It differs from the
   rasteriser in single pixels at tiles' edges. At 1920x1080 (in a virtual
   machine, virgl) a pass takes about 27 ms (28 ms of the processor)
   instead of 45 (208 ms). Not known: whether the game ever reads its back
