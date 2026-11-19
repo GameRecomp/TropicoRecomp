@@ -176,8 +176,9 @@ typedef struct rc_gpu_vertex {
     float u, v;
 } rc_gpu_vertex;
 
-/* Whether there is graphics hardware to draw with: only when RC_GPU=1
- * asks for it, never on the null platform. */
+/* Whether there is graphics hardware to draw with: a renderer not in
+ * software, not offscreen (scripted runs); RC_GPU=1 or 0 decides instead.
+ * Never on the null platform. */
 bool rc_plat_gpu_ready(void);
 
 /* A texture of 32-bit 0xAARRGGBB pixels (`pitch` in pixels), sampled by
@@ -185,9 +186,17 @@ bool rc_plat_gpu_ready(void);
 uint32_t rc_plat_gpu_texture(const uint32_t *argb, int width, int height, int pitch);
 void rc_plat_gpu_texture_free(uint32_t texture);
 
-/* Start drawing into a picture of this size: rows y0 up to y1 of `xrgb`
- * (`pitch` in pixels) are what is drawn over. False if it cannot. */
-bool rc_plat_gpu_begin(const uint32_t *xrgb, int width, int height, int pitch, int y0, int y1);
+/* A picture kept on the hardware, to draw into (freed with
+ * rc_plat_gpu_texture_free): its number, 0 if it could not be made. */
+uint32_t rc_plat_gpu_picture(int width, int height);
+
+/* Start drawing into a picture: rows y0 up to y1 of `xrgb` (`pitch` in
+ * pixels) go there first (none when y0 >= y1: it is drawn on as it is).
+ * False if it cannot. */
+bool rc_plat_gpu_begin(uint32_t picture, const uint32_t *xrgb, int pitch, int y0, int y1);
+
+/* The whole picture in one colour (0x00RRGGBB), after rc_plat_gpu_begin. */
+void rc_plat_gpu_clear(uint32_t xrgb);
 
 /* Triangles (three vertices each) with a texture, blended by its alpha
  * times the vertices' (0 for none: plain colour), wrapped or clamped in
@@ -195,10 +204,20 @@ bool rc_plat_gpu_begin(const uint32_t *xrgb, int width, int height, int pitch, i
 void rc_plat_gpu_draw(uint32_t texture, bool wrap_u, bool wrap_v, int clip_x, int clip_y, int clip_w, int clip_h,
                       const rc_gpu_vertex *v, int n);
 
-/* Finish: rows y0 up to y1 of the picture drawn are written back to
- * `xrgb`. False if they could not be read (the picture is then as it
- * was). */
-bool rc_plat_gpu_end(uint32_t *xrgb, int pitch);
+/* Finish drawing; the picture stays there. */
+void rc_plat_gpu_done(void);
+
+/* One picture copied onto another of the same size. */
+bool rc_plat_gpu_copy(uint32_t from, uint32_t to);
+
+/* A picture read back into `xrgb` (`pitch` in pixels). False if it could
+ * not be. */
+bool rc_plat_gpu_read(uint32_t picture, uint32_t *xrgb, int pitch);
+
+/* Show a frame of 32-bit 0xAARRGGBB pixels over a picture of its size:
+ * where their alpha is 0 the picture shows. False (nothing shown) if it
+ * cannot be. */
+bool rc_plat_present_over(uint32_t picture, const uint32_t *argb, int width, int height, int pitch);
 
 /* Show an error to the user in a message box (nothing on the null
  * platform). */

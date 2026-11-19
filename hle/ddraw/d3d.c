@@ -812,7 +812,8 @@ static void setup(rctx *r, const device *d, rc_dd_surface *t, rc_dd_surface *z)
         g->c2 = d->tss[s][3];
         g->a1 = d->tss[s][5];
         g->a2 = d->tss[s][6];
-        const rc_dd_surface *x = rc_dd_surf(d->texture[s]);
+        rc_dd_surface *x = rc_dd_surf(d->texture[s]);
+        rc_d3d_resolve(x);
         if (x && x->w && x->h && x->pixels) {
             g->obj = d->texture[s];
             g->pix = rc_ptr(x->pixels);
@@ -1380,15 +1381,19 @@ static void band(void *ctx, int i)
 
 /* ---- drawing with the graphics hardware ----
  *
- * A queue the graphics hardware can draw as the rasteriser here would (one
+ * With RC_GPU=1 a queue the hardware can draw as the rasteriser would (one
  * texture, sampled by points, wrapped or clamped, times the vertex colour
  * or not, blended by alpha or not, into RGB565, with the same vertices) is
- * drawn by it: the rows it covers go up, the triangles are drawn, the rows
- * come back. Its textures are kept there, made anew when their surface has
- * changed. Differences are in rounding only. */
+ * drawn there, into the target's picture on the hardware, and stays there:
+ * the target's pixels become RC_DD_WORLD_KEY, which show that picture when
+ * the frame is shown, and what is copied or written onto them later (the
+ * game's 2D interface) lies over it. Nothing comes back, unless something
+ * needs the pixels whole (rc_d3d_resolve). The textures are kept there,
+ * made anew when their surface has changed. Differences from the
+ * rasteriser are in rounding only. */
 
-/* Below this many pixels (the triangles' boxes) the way there and back
- * costs more than it saves. */
+/* Below this many pixels (the triangles' boxes) a queue onto a target with
+ * no world on the hardware is drawn here (a menu's few quads). */
 #define GPU_PIXELS 200000
 
 typedef struct gpu_texture {
@@ -1504,7 +1509,7 @@ static bool gpu_drawable(const rctx *r)
 typedef struct {
     rc_dd_surface *t;
     int32_t y0, y1;
-    bool up; /* RGB565 to 32-bit, or back */
+    enum { TO_32, TO_KEY, FROM_32 } how; /* RGB565 to 32-bit; all the key; the key's pixels from 32-bit */
 } gpu_rows;
 
 static void gpu_convert(void *ctx, int i)
@@ -1516,16 +1521,22 @@ static void gpu_convert(void *ctx, int i)
     for (int32_t y = from; y < to; y++) {
         uint16_t *row = rc_ptr(t->pixels + (uint32_t)y * t->pitch);
         uint32_t *out = gpu_argb + (size_t)y * t->w;
-        if (g->up) {
+        if (g->how == TO_32) {
             for (uint32_t x = 0; x < t->w; x++) {
                 uint32_t p = row[x];
                 out[x] = 0xff000000u | (uint32_t)expand[5][p >> 11] << 16 | (uint32_t)expand[6][(p >> 5) & 63] << 8 |
                          expand[5][p & 31];
             }
+        } else if (g->how == TO_KEY) {
+            for (uint32_t x = 0; x < t->w; x++) {
+                row[x] = RC_DD_WORLD_KEY;
+            }
         } else {
             for (uint32_t x = 0; x < t->w; x++) {
-                uint32_t p = out[x];
-                row[x] = (uint16_t)((p >> 19 & 31) << 11 | (p >> 10 & 63) << 5 | (p >> 3 & 31));
+                if (row[x] == RC_DD_WORLD_KEY) {
+                    uint32_t p = out[x];
+                    row[x] = (uint16_t)((p >> 19 & 31) << 11 | (p >> 10 & 63) << 5 | (p >> 3 & 31));
+                }
             }
         }
     }
@@ -1560,10 +1571,10 @@ static bool draw_shows(const queued *q)
  * draw draws nothing): then the rows it covers. */
 static bool gpu_can(int32_t *top_row, int32_t *end_row)
 {
-    if (queued_pixels < GPU_PIXELS || !rc_plat_gpu_ready()) {
+    rc_dd_surface *t = draws[0].r.t;
+    if ((queued_pixels < GPU_PIXELS && !t->world) || !rc_plat_gpu_ready()) {
         return false;
     }
-    rc_dd_surface *t = draws[0].r.t;
     float top = (float)t->h, bottom = 0;
     for (uint32_t i = 0; i < n_draws; i++) {
         const queued *q = &draws[i];
@@ -1589,13 +1600,36 @@ static bool gpu_can(int32_t *top_row, int32_t *end_row)
 
 /* The queue drawn by the graphics hardware, rows y0 up to y1; false
  * (nothing drawn) if it could not be. */
-static bool gpu_flush(int32_t y0, int32_t y1)
+static bool gpu_flush(void)
 {
     rc_dd_surface *t = draws[0].r.t;
-    gpu_rows rows = {t, y0, y1, true};
-    rc_plat_parallel(16, gpu_convert, &rows);
-    if (!rc_plat_gpu_begin(gpu_argb, (int)t->w, (int)t->h, (int)t->w, y0, y1)) {
-        return false;
+    if (!t->picture) {
+        t->picture = rc_plat_gpu_picture((int)t->w, (int)t->h);
+        if (!t->picture) {
+            return false;
+        }
+    }
+    gpu_rows rows = {t, 0, (int32_t)t->h, TO_32};
+    bool keep = t->world && t->version == t->world_version;
+    if (!keep) {
+        rc_d3d_resolve(t); /* written on since its world was drawn */
+    }
+    if (keep) {
+        if (!rc_plat_gpu_begin(t->picture, NULL, 0, 0, 0)) {
+            return false;
+        }
+    } else if (t->version == t->fill_version) {
+        if (!rc_plat_gpu_begin(t->picture, NULL, 0, 0, 0)) {
+            return false;
+        }
+        uint32_t f = t->fill_colour;
+        rc_plat_gpu_clear((uint32_t)expand[5][(f >> 11) & 31] << 16 | (uint32_t)expand[6][(f >> 5) & 63] << 8 |
+                          expand[5][f & 31]);
+    } else {
+        rc_plat_parallel(16, gpu_convert, &rows);
+        if (!rc_plat_gpu_begin(t->picture, gpu_argb, (int)t->w, 0, (int)t->h)) {
+            return false;
+        }
     }
     for (uint32_t i = 0; i < n_draws; i++) {
         const queued *q = &draws[i];
@@ -1651,36 +1685,30 @@ static bool gpu_flush(int32_t y0, int32_t y1)
             rc_plat_gpu_draw(tex, g0->au != 3, g0->av != 3, cx0, cy0, cx1 - cx0, cy1 - cy0, gpu_verts, n);
         }
     }
-    if (!rc_plat_gpu_end(gpu_argb, (int)t->w)) {
-        return false;
+    rc_plat_gpu_done();
+    if (!keep) {
+        rows.how = TO_KEY;
+        rc_plat_parallel(16, gpu_convert, &rows);
     }
-    rows.up = false;
-    rc_plat_parallel(16, gpu_convert, &rows);
     rc_dd_changed(t);
+    t->world = 1;
+    t->world_version = t->version;
     return true;
 }
 
-static double now_ms(void)
+void rc_d3d_resolve(rc_dd_surface *s)
 {
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
+    if (!s || !s->world) {
+        return;
+    }
+    s->world = 0;
+    if (!gpu_buffer((size_t)s->w * s->h) || !rc_plat_gpu_read(s->picture, gpu_argb, (int)s->w)) {
+        return;
+    }
+    gpu_rows rows = {s, 0, (int32_t)s->h, FROM_32};
+    rc_plat_parallel(16, gpu_convert, &rows);
+    rc_dd_changed(s);
 }
-
-/* Which way a queue the graphics hardware can draw is drawn: both ways are
- * timed, for queues of about the same size (by the pixels of the
- * triangles' boxes), the faster taken and the other tried again now and
- * then. There, most of the time can be the wait for the picture to come
- * back (in a virtual machine, longer than drawing it here). Milliseconds,
- * < 0 while not yet known; the hardware's first queues, which make its
- * textures, are not counted. */
-#define GPU_SIZES 4
-static double cpu_ms[GPU_SIZES] = {-1, -1, -1, -1}, gpu_ms[GPU_SIZES] = {-1, -1, -1, -1};
-static uint32_t gpu_choices[GPU_SIZES], gpu_runs;
-#define GPU_RETRY 128
-#define GPU_WARMING 8
-
-static int size_of(double mpx) { return mpx < 1 ? 0 : mpx < 4 ? 1 : mpx < 16 ? 2 : 3; }
 
 static void cpu_flush(void)
 {
@@ -1703,40 +1731,16 @@ static void cpu_flush(void)
     }
 }
 
-static void learn(double *estimate, double value)
-{
-    *estimate = *estimate < 0 ? value : *estimate * 0.75 + value * 0.25;
-}
-
 void rc_d3d_flush(void)
 {
     if (!n_draws) {
         return;
     }
     int32_t y0, y1;
-    if (gpu_can(&y0, &y1)) {
-        int k = size_of(queued_pixels / 1e6);
-        bool gpu;
-        if (cpu_ms[k] < 0) {
-            gpu = false;
-        } else if (gpu_ms[k] < 0) {
-            gpu = true;
-        } else {
-            gpu = gpu_ms[k] < cpu_ms[k];
-            if (++gpu_choices[k] % GPU_RETRY == 0) {
-                gpu = !gpu;
-            }
+    if (!gpu_can(&y0, &y1) || !gpu_flush()) {
+        for (uint32_t i = 0; i < n_draws; i++) {
+            rc_d3d_resolve(draws[i].r.t); /* drawn here, onto its whole pixels */
         }
-        double t0 = now_ms();
-        if (gpu && gpu_flush(y0, y1)) {
-            if (++gpu_runs > GPU_WARMING) {
-                learn(&gpu_ms[k], now_ms() - t0);
-            }
-        } else {
-            cpu_flush();
-            learn(&cpu_ms[k], now_ms() - t0);
-        }
-    } else {
         cpu_flush();
     }
     n_draws = 0;

@@ -446,6 +446,25 @@ static void draw(void)
         return;
     }
     uint64_t now = rc_ticks_peek_ms();
+    if (s->world && rc_screenshot_due(frames)) {
+        rc_d3d_resolve(&objects[display.primary].s); /* the screenshot is taken of the frame shown */
+    }
+    if (s->world && s->bpp == 16) {
+        /* Over its world on the hardware. */
+        make_rgb16(s);
+        for (uint32_t y = 0; y < s->h; y++) {
+            const uint16_t *row = rc_ptr(s->pixels + y * s->pitch);
+            uint32_t *out = &frame[y * s->w];
+            for (uint32_t x = 0; x < s->w; x++) {
+                out[x] = row[x] == RC_DD_WORLD_KEY ? 0 : 0xff000000u | rgb16[row[x]];
+            }
+        }
+        if (rc_plat_present_over(s->picture, frame, (int)s->w, (int)s->h, (int)s->w)) {
+            shown_at = now;
+            return;
+        }
+        rc_d3d_resolve(&objects[display.primary].s);
+    }
     if (same_as_shown(s, p) && now - shown_at < SAME_FRAME_MS) {
         return;
     }
@@ -627,7 +646,9 @@ static void k_Release(rc_cpu *c)
     object *x = &objects[o];
     if (x->refs > 0 && --x->refs == 0) {
         if (x->kind == O_SURFACE) {
+            rc_plat_gpu_texture_free(x->s.picture);
             if (x->s.back) {
+                rc_plat_gpu_texture_free(objects[x->s.back].s.picture);
                 rc_heap_free(objects[x->s.back].s.pixels);
                 objects[x->s.back].kind = O_FREE;
             }
@@ -734,6 +755,8 @@ static void k_Flip(rc_cpu *c)
     surface *s = &x->s;
     if (s->back) {
         surface *b = &objects[s->back].s;
+        rc_d3d_resolve(s);
+        rc_d3d_resolve(b);
         uint32_t t = s->pixels;
         s->pixels = b->pixels;
         b->pixels = t;
@@ -1038,8 +1061,14 @@ static void k_Blt(rc_cpu *c)
     surface *d = &x->s;
     rect dr = get_rect(drp, d);
     rc_dd_changed(d);
+    bool whole = dr.l == 0 && dr.t == 0 && dr.r == (int32_t)d->w && dr.b == (int32_t)d->h;
     if (flags & DDBLT_COLORFILL) {
         fill(d, dr, rc_ld32(fx + 80));
+        if (whole) {
+            d->world = 0;
+            d->fill_version = d->version;
+            d->fill_colour = rc_ld32(fx + 80);
+        }
     } else {
         surface *s = surface_of(src);
         if (!s) {
@@ -1049,6 +1078,28 @@ static void k_Blt(rc_cpu *c)
         uint32_t key = (flags & DDBLT_KEYSRCOVERRIDE) ? rc_ld32(fx + 100) : s->ckey;
         keyed = keyed && (s->has_ckey || (flags & DDBLT_KEYSRCOVERRIDE));
         rect sr = get_rect(srp, s);
+        /* A copy of a whole surface whose world is on the hardware onto
+         * one of its size takes the world along there; any other copy
+         * from it needs its pixels whole. */
+        bool along = false;
+        if (s->world) {
+            along = whole && s != d && !keyed && !stretch_w && !widen_w && s->w == d->w && s->h == d->h &&
+                    s->bpp == d->bpp && sr.l == 0 && sr.t == 0 && sr.r == (int32_t)s->w && sr.b == (int32_t)s->h;
+            if (along && !d->picture) {
+                d->picture = rc_plat_gpu_picture((int)d->w, (int)d->h);
+            }
+            along = along && rc_plat_gpu_copy(s->picture, d->picture);
+            if (!along) {
+                rc_d3d_resolve(s);
+            }
+        }
+        if (whole && !keyed && !along) {
+            d->world = 0;
+        }
+        if (along) {
+            d->world = 1;
+            d->world_version = d->version;
+        }
         if (stretch_w && sr.r - sr.l == 1) {
             sr.l = typical_column(s, sr, keyed, key, stretch_range);
             sr.r = sr.l + 1;
@@ -1078,6 +1129,7 @@ static void k_BltFast(rc_cpu *c)
     if (!s) {
         RC_RETURN(c, DDERR_INVALIDPARAMS, 6);
     }
+    rc_d3d_resolve(s);
     rect sr = get_rect(srp, s);
     rect dr = {dx, dy, dx + (sr.r - sr.l), dy + (sr.b - sr.t)};
     rc_dd_changed(&x->s);
@@ -1092,6 +1144,7 @@ static void k_GetDC(rc_cpu *c)
 {
     rc_d3d_flush();
     object *x = self(c, O_SURFACE);
+    rc_d3d_resolve(&x->s);
     rc_dd_changed(&x->s);
     const surface *s = &x->s;
     const palette *p = s->palette ? &objects[s->palette].p : NULL;

@@ -62,17 +62,28 @@ island generator never finished.
   triangle are found first (one run, as each edge function steps one way),
   then coloured without the edge tests. In game, at 1920x1080 on 8 cores,
   the world is a queue of about 3,400 quads covering the screen two to
-  three times, and the game shows about 19 pictures a second. With `RC_GPU=1` the graphics hardware draws a queue that it
+  three times, and the game shows about 19 pictures a second. With a hardware renderer (not offscreen; `RC_GPU`) the graphics hardware
+  draws a queue that it
   can draw as the rasteriser would (one texture by points, wrapped or
   clamped, times the vertex colour or not, blended by alpha or not; draws
-  that show nothing are left out): the rows it covers go up as 32-bit
-  pixels, its textures are kept there and made anew when their surface has
-  changed (a version, new with every lock, copy and DC), the rows come back.
-  It differs from the rasteriser in single pixels at tiles' edges. Each
-  way is timed for queues of each size, the faster taken and the other
-  tried again every 128 queues; in a virtual machine (virgl) the big queue
-  takes about 30 ms there, mostly the wait for the rows to come back,
-  against about 25 ms on the cores, so it is not the default.
+  that show nothing are left out) into the target's picture there, which
+  stays there: the target's pixels become a key colour (`RC_DD_WORLD_KEY`)
+  that shows it. A frame is made of the world there (filled in the colour
+  the whole surface was filled with, then the world drawn), then the 2D
+  interface copied and written onto the pixels here (about 40 copies and
+  13 locks, which only write a few small spots); the copy of the whole back
+  buffer onto the primary surface copies the picture there too, and the
+  frame is shown as the picture with the pixels here over it where they
+  are not the key. Nothing comes back from the hardware, except where the
+  pixels are needed whole: a copy of part of such a surface, a DC, a flip,
+  another drawing onto it after it was written on, a screenshot. The
+  textures are kept there, made anew when their surface has changed (a
+  version, new with every lock, copy and DC). It differs from the
+  rasteriser in single pixels at tiles' edges. At 1920x1080 (in a virtual
+  machine, virgl) a pass takes about 27 ms (28 ms of the processor)
+  instead of 45 (208 ms). Not known: whether the game ever reads its back
+  buffer through a lock (it locks it through one function, `0x008b5085`,
+  without saying); it would read the key colour.
 
 ## What has been seen working
 

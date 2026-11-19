@@ -114,16 +114,24 @@ uint32_t rc_plat_gpu_texture(const uint32_t *argb, int width, int height, int pi
 
 void rc_plat_gpu_texture_free(uint32_t texture) { (void)texture; }
 
-bool rc_plat_gpu_begin(const uint32_t *xrgb, int width, int height, int pitch, int y0, int y1)
+uint32_t rc_plat_gpu_picture(int width, int height)
 {
-    (void)xrgb;
     (void)width;
     (void)height;
+    return 0;
+}
+
+bool rc_plat_gpu_begin(uint32_t picture, const uint32_t *xrgb, int pitch, int y0, int y1)
+{
+    (void)picture;
+    (void)xrgb;
     (void)pitch;
     (void)y0;
     (void)y1;
     return false;
 }
+
+void rc_plat_gpu_clear(uint32_t xrgb) { (void)xrgb; }
 
 void rc_plat_gpu_draw(uint32_t texture, bool wrap_u, bool wrap_v, int clip_x, int clip_y, int clip_w, int clip_h,
                       const rc_gpu_vertex *v, int n)
@@ -139,9 +147,29 @@ void rc_plat_gpu_draw(uint32_t texture, bool wrap_u, bool wrap_v, int clip_x, in
     (void)n;
 }
 
-bool rc_plat_gpu_end(uint32_t *xrgb, int pitch)
+void rc_plat_gpu_done(void) {}
+
+bool rc_plat_gpu_copy(uint32_t from, uint32_t to)
 {
+    (void)from;
+    (void)to;
+    return false;
+}
+
+bool rc_plat_gpu_read(uint32_t picture, uint32_t *xrgb, int pitch)
+{
+    (void)picture;
     (void)xrgb;
+    (void)pitch;
+    return false;
+}
+
+bool rc_plat_present_over(uint32_t picture, const uint32_t *argb, int width, int height, int pitch)
+{
+    (void)picture;
+    (void)argb;
+    (void)width;
+    (void)height;
     (void)pitch;
     return false;
 }

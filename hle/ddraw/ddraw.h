@@ -28,7 +28,24 @@ typedef struct rc_dd_surface {
     int has_ckey;
     int locked;
     uint32_t version; /* new whenever its pixels may have changed */
+    /* Filled whole in one colour (raw), when the version was fill_version. */
+    uint32_t fill_version, fill_colour;
+    /* Its picture on the graphics hardware (RC_GPU=1), 0 for none. With
+     * `world`, what Direct3D drew is there, under the pixels of the colour
+     * RC_DD_WORLD_KEY, which show it; drawn on there while the version is
+     * still world_version. */
+    uint32_t picture;
+    int world;
+    uint32_t world_version;
 } rc_dd_surface;
+
+/* The colour (RGB565) of pixels that show the picture on the hardware: a
+ * purple nothing in the game is drawn in. */
+#define RC_DD_WORLD_KEY 0x8010u
+
+/* d3d.c: a surface's pixels made whole again from its picture on the
+ * hardware (nothing if it has none). */
+void rc_d3d_resolve(rc_dd_surface *s);
 
 /* Mark a surface's pixels as (maybe) changed: a new version. */
 void rc_dd_changed(rc_dd_surface *s);

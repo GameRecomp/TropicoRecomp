@@ -101,11 +101,12 @@ screen, in landscape either way round. Pinching zooms (it turns the wheel,
 which both games zoom with), and the wheel counts whole notches, so a
 smooth wheel's fractions (Wayland) add up to them.
 
-`RC_GPU=1` has the graphics hardware draw Tropico 2's 3D world (through
-SDL's renderer), where it is faster than drawing it on the cores: both ways
-are timed as the game runs and the faster taken. It is off by default: on
-the machine it was made on, a virtual machine, getting the picture back
-from the hardware takes as long as drawing it on the cores.
+The graphics hardware draws Tropico 2's world (through SDL's renderer): it
+stays there and the game's 2D interface is laid over it when the frame is
+shown. At 1920x1080 a pass of the game then takes about 27 ms instead of
+45, and the cores are free. It is used where the renderer is not in
+software and not offscreen (scripted runs draw on the cores, as their
+references were); `RC_GPU=0` or `RC_GPU=1` decides instead.
 
 ### Systems that are on and off
 
