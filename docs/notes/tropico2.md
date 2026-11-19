@@ -58,9 +58,21 @@ island generator never finished.
   was made in, and the queue is drawn when anything needs the pixels (a
   surface is locked, copied, shown or released, the target cleared), in
   bands of rows on all cores; each band draws every triangle in its order,
-  so the picture is the same as drawn on one core. In game a frame takes
-  about 17 ms at 1024x768 and 47 ms at 1920x1080 (8 cores), against 81
-  and 243 ms before.
+  so the picture is the same as drawn on one core. A row's pixels inside a
+  triangle are found first (one run, as each edge function steps one way),
+  then coloured without the edge tests. In game, at 1920x1080 on 8 cores,
+  the world is a queue of about 3,400 quads covering the screen two to
+  three times, and the game shows about 19 pictures a second. With `RC_GPU=1` the graphics hardware draws a queue that it
+  can draw as the rasteriser would (one texture by points, wrapped or
+  clamped, times the vertex colour or not, blended by alpha or not; draws
+  that show nothing are left out): the rows it covers go up as 32-bit
+  pixels, its textures are kept there and made anew when their surface has
+  changed (a version, new with every lock, copy and DC), the rows come back.
+  It differs from the rasteriser in single pixels at tiles' edges. Each
+  way is timed for queues of each size, the faster taken and the other
+  tried again every 128 queues; in a virtual machine (virgl) the big queue
+  takes about 30 ms there, mostly the wait for the rows to come back,
+  against about 25 ms on the cores, so it is not the default.
 
 ## What has been seen working
 

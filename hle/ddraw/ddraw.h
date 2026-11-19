@@ -27,7 +27,11 @@ typedef struct rc_dd_surface {
     uint32_t ckey;
     int has_ckey;
     int locked;
+    uint32_t version; /* new whenever its pixels may have changed */
 } rc_dd_surface;
+
+/* Mark a surface's pixels as (maybe) changed: a new version. */
+void rc_dd_changed(rc_dd_surface *s);
 
 /* Object kinds of Direct3D 7, in DirectDraw's table. */
 enum { RC_DD_D3D = 5, RC_DD_DEVICE = 6, RC_DD_VB = 7 };

@@ -79,6 +79,12 @@ enum kind {
 
 typedef rc_dd_surface surface;
 
+void rc_dd_changed(rc_dd_surface *s)
+{
+    static uint32_t versions;
+    s->version = ++versions;
+}
+
 typedef struct palette {
     uint32_t rgb[256]; /* 0x00RRGGBB */
     uint32_t caps;
@@ -542,6 +548,7 @@ static uint32_t make_surface(uint32_t w, uint32_t h, uint32_t bpp, uint32_t caps
         objects[o].kind = O_FREE;
         return 0;
     }
+    rc_dd_changed(s);
     return o;
 }
 
@@ -690,6 +697,7 @@ static void k_Lock(rc_cpu *c)
     }
     put_desc(d, s, lp);
     s->locked++;
+    rc_dd_changed(s);
     RC_RETURN(c, DD_OK, 5);
 }
 
@@ -699,6 +707,7 @@ static void k_Unlock(rc_cpu *c)
     if (x->s.locked) {
         x->s.locked--;
     }
+    rc_dd_changed(&x->s);
     if ((uint32_t)(x - objects) == display.primary) {
         present();
     }
@@ -1028,6 +1037,7 @@ static void k_Blt(rc_cpu *c)
     uint32_t drp = RC_ARG(c, 1), src = RC_ARG(c, 2), srp = RC_ARG(c, 3), flags = RC_ARG(c, 4), fx = RC_ARG(c, 5);
     surface *d = &x->s;
     rect dr = get_rect(drp, d);
+    rc_dd_changed(d);
     if (flags & DDBLT_COLORFILL) {
         fill(d, dr, rc_ld32(fx + 80));
     } else {
@@ -1070,6 +1080,7 @@ static void k_BltFast(rc_cpu *c)
     }
     rect sr = get_rect(srp, s);
     rect dr = {dx, dy, dx + (sr.r - sr.l), dy + (sr.b - sr.t)};
+    rc_dd_changed(&x->s);
     blit(&x->s, dr, s, sr, (trans & DDBLTFAST_SRCCOLORKEY) && s->has_ckey, s->ckey);
     if ((uint32_t)(x - objects) == display.primary) {
         present();
@@ -1081,6 +1092,7 @@ static void k_GetDC(rc_cpu *c)
 {
     rc_d3d_flush();
     object *x = self(c, O_SURFACE);
+    rc_dd_changed(&x->s);
     const surface *s = &x->s;
     const palette *p = s->palette ? &objects[s->palette].p : NULL;
     rc_st32(RC_ARG(c, 1), rc_gdi_surface_dc(s->pixels, s->w, s->h, s->pitch, s->bpp, s->rmask, s->gmask,
@@ -1092,6 +1104,7 @@ static void k_ReleaseDC(rc_cpu *c)
 {
     object *x = self(c, O_SURFACE);
     rc_gdi_release_surface_dc(RC_ARG(c, 1));
+    rc_dd_changed(&x->s);
     if ((uint32_t)(x - objects) == display.primary) {
         present();
     }

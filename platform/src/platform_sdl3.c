@@ -17,6 +17,7 @@
  * In a browser the window is the page's canvas at the frame's own size,
  * and the page scales it (web/play.js).
  */
+#include <stddef.h>
 #include <stdlib.h>
 
 #include <SDL3/SDL.h>
@@ -1240,3 +1241,131 @@ void rc_plat_parallel(int count, void (*fn)(void *ctx, int i), void *ctx)
     }
 }
 #endif
+
+/* ---- drawing with the graphics hardware ---- */
+
+/* rc_gpu_vertex is laid out as SDL_Vertex. */
+SDL_COMPILE_TIME_ASSERT(gpu_vertex, sizeof(rc_gpu_vertex) == sizeof(SDL_Vertex) &&
+                                        offsetof(rc_gpu_vertex, r) == offsetof(SDL_Vertex, color) &&
+                                        offsetof(rc_gpu_vertex, u) == offsetof(SDL_Vertex, tex_coord));
+
+static int gpu_state = -1; /* -1 not yet known, 0 none, 1 drawing with it */
+static SDL_Texture **gpu_textures;
+static uint32_t gpu_ntextures;
+static SDL_Texture *gpu_target;
+static int gpu_w, gpu_h, gpu_y0, gpu_y1;
+
+bool rc_plat_gpu_ready(void)
+{
+    if (!renderer) {
+        return false;
+    }
+    if (gpu_state < 0) {
+        /* Asked for (RC_GPU=1) only, for now: where getting the picture
+         * back is slow, as through a virtual machine's graphics, drawing
+         * here is as fast, and drawing there slows down the cores. */
+        const char *want = SDL_getenv("RC_GPU");
+        const char *name = SDL_GetRendererName(renderer);
+        gpu_state = want && *want == '1';
+        if (gpu_state) {
+            SDL_Log("gpu: Direct3D is drawn by the renderer %s", name ? name : "?");
+        }
+    }
+    return gpu_state > 0;
+}
+
+uint32_t rc_plat_gpu_texture(const uint32_t *argb, int width, int height, int pitch)
+{
+    uint32_t slot = 0;
+    while (slot < gpu_ntextures && gpu_textures[slot]) {
+        slot++;
+    }
+    if (slot == gpu_ntextures) {
+        uint32_t n = gpu_ntextures ? gpu_ntextures * 2 : 256;
+        SDL_Texture **more = SDL_realloc(gpu_textures, n * sizeof *more);
+        if (!more) {
+            return 0;
+        }
+        SDL_memset(more + gpu_ntextures, 0, (n - gpu_ntextures) * sizeof *more);
+        gpu_textures = more;
+        gpu_ntextures = n;
+    }
+    SDL_Texture *t = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, width, height);
+    if (!t) {
+        return 0;
+    }
+    SDL_UpdateTexture(t, NULL, argb, pitch * 4);
+    SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+    gpu_textures[slot] = t;
+    return slot + 1;
+}
+
+void rc_plat_gpu_texture_free(uint32_t id)
+{
+    if (id && id <= gpu_ntextures && gpu_textures[id - 1]) {
+        SDL_DestroyTexture(gpu_textures[id - 1]);
+        gpu_textures[id - 1] = NULL;
+    }
+}
+
+bool rc_plat_gpu_begin(const uint32_t *xrgb, int width, int height, int pitch, int y0, int y1)
+{
+    if (!rc_plat_gpu_ready() || y0 >= y1) {
+        return false;
+    }
+    if (!gpu_target || width != gpu_w || height != gpu_h) {
+        if (gpu_target) {
+            SDL_DestroyTexture(gpu_target);
+        }
+        gpu_target = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, width, height);
+        if (!gpu_target) {
+            gpu_state = 0;
+            SDL_Log("gpu: no picture to draw into (%s), drawing without", SDL_GetError());
+            return false;
+        }
+        gpu_w = width;
+        gpu_h = height;
+    }
+    SDL_Rect rows = {0, y0, width, y1 - y0};
+    if (!SDL_UpdateTexture(gpu_target, &rows, xrgb + (size_t)y0 * (size_t)pitch, pitch * 4) ||
+        !SDL_SetRenderTarget(renderer, gpu_target)) {
+        return false;
+    }
+    gpu_y0 = y0;
+    gpu_y1 = y1;
+    return true;
+}
+
+void rc_plat_gpu_draw(uint32_t id, bool wrap_u, bool wrap_v, int clip_x, int clip_y, int clip_w, int clip_h,
+                      const rc_gpu_vertex *v, int n)
+{
+    SDL_Texture *t = id && id <= gpu_ntextures ? gpu_textures[id - 1] : NULL;
+    SDL_Rect clip = {clip_x, clip_y, clip_w, clip_h};
+    SDL_SetRenderClipRect(renderer, &clip);
+    SDL_SetRenderTextureAddressMode(renderer, wrap_u ? SDL_TEXTURE_ADDRESS_WRAP : SDL_TEXTURE_ADDRESS_CLAMP,
+                                    wrap_v ? SDL_TEXTURE_ADDRESS_WRAP : SDL_TEXTURE_ADDRESS_CLAMP);
+    SDL_RenderGeometry(renderer, t, (const SDL_Vertex *)v, n, NULL, 0);
+}
+
+bool rc_plat_gpu_end(uint32_t *xrgb, int pitch)
+{
+    SDL_Rect rows = {0, gpu_y0, gpu_w, gpu_y1 - gpu_y0};
+    SDL_Surface *s = SDL_RenderReadPixels(renderer, &rows);
+    SDL_SetRenderClipRect(renderer, NULL);
+    SDL_SetRenderTarget(renderer, NULL);
+    if (s && s->format != SDL_PIXELFORMAT_ARGB8888 && s->format != SDL_PIXELFORMAT_XRGB8888) {
+        SDL_Surface *c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_ARGB8888);
+        SDL_DestroySurface(s);
+        s = c;
+    }
+    if (!s) {
+        return false;
+    }
+    for (int y = 0; y < s->h && y < rows.h; y++) {
+        SDL_memcpy(xrgb + (size_t)(gpu_y0 + y) * (size_t)pitch, (const uint8_t *)s->pixels + (size_t)y * (size_t)s->pitch,
+                   (size_t)gpu_w * 4);
+    }
+    SDL_DestroySurface(s);
+    return true;
+}

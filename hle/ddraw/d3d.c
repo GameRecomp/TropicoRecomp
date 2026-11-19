@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "ddraw.h"
 #include "rc/hle.h"
@@ -752,6 +753,7 @@ typedef struct stage {
     uint32_t key;
     int linear;
     const uint32_t *texels; /* a 16-bit texture's channels (texel_table), or NULL */
+    uint32_t obj;           /* the texture's surface object */
     uint32_t au, av; /* address modes */
     uint32_t cop, aop, c1, c2, a1, a2;
 } stage;
@@ -812,6 +814,7 @@ static void setup(rctx *r, const device *d, rc_dd_surface *t, rc_dd_surface *z)
         g->a2 = d->tss[s][6];
         const rc_dd_surface *x = rc_dd_surf(d->texture[s]);
         if (x && x->w && x->h && x->pixels) {
+            g->obj = d->texture[s];
             g->pix = rc_ptr(x->pixels);
             g->w = x->w;
             g->h = x->h;
@@ -1015,6 +1018,35 @@ static inline void pixel(const rctx *r, uint8_t *row, int x, int y, float depth,
     raw_put(row, r->tf.bpp, (uint32_t)x, pack(&r->tf, c));
 }
 
+/* How the first stage makes a fragment of the texture and the vertex
+ * colour, in the cases drawn faster. Colour: 0 texture alone, 1 texture
+ * times colour. Alpha: 0 texture, 1 colour, 2 both, 3 opaque. -1 for
+ * others. */
+static void modes(const stage *g0, int *cmode, int *amode)
+{
+    uint32_t ca1 = g0->c1 & 0x3f, ca2 = g0->c2 & 0x3f, aa1 = g0->a1 & 0x3f, aa2 = g0->a2 & 0x3f;
+    *cmode = -1;
+    *amode = -1;
+    if (g0->cop == 2 && ca1 == 2) {
+        *cmode = 0;
+    } else if (g0->cop == 4 && ((ca1 == 2 && ca2 <= 1) || (ca2 == 2 && ca1 <= 1))) {
+        *cmode = 1;
+    }
+    if ((g0->aop == 2 && aa1 == 2) || (g0->aop == 3 && aa2 == 2)) {
+        *amode = 0;
+    } else if ((g0->aop == 2 && aa1 <= 1) || (g0->aop == 3 && aa2 <= 1)) {
+        *amode = 1;
+    } else if (g0->aop == 4 && ((aa1 == 2 && aa2 <= 1) || (aa2 == 2 && aa1 <= 1))) {
+        *amode = 2;
+    } else if (g0->aop == 1) {
+        *amode = 1; /* DISABLE: the colour's */
+    }
+}
+
+/* Whether a pixel with these edge functions is inside the triangle. */
+#define INSIDE(w0, w1, w2)                                                                                             \
+    (!((w0) < 0 || (w1) < 0 || (w2) < 0 || ((w0) == 0 && !own0) || ((w1) == 0 && !own1) || ((w2) == 0 && !own2)))
+
 static float edge(const vtx *a, const vtx *b, float x, float y) { return (b->x - a->x) * (y - a->y) - (b->y - a->y) * (x - a->x); }
 
 /* Whether a pixel exactly on edge a->b belongs to the triangle (top-left
@@ -1151,29 +1183,16 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2,
      * almost everything with. The colour steps across a row in 16.16. */
     bool rgb565 = r->tf.bpp == 16 && r->tf.c[0].shift == 11 && r->tf.c[0].bits == 5 && r->tf.c[1].bits == 6 &&
                   r->tf.c[2].bits == 5 && !r->tf.c[3].bits;
-    uint32_t ca1 = g0->c1 & 0x3f, ca2 = g0->c2 & 0x3f, aa1 = g0->a1 & 0x3f, aa2 = g0->a2 & 0x3f;
-    /* Colour: 0 texture alone, 1 texture times colour. Alpha: 0 texture,
-     * 1 colour, 2 both, 3 opaque. */
-    int cmode = -1, amode = -1;
-    if (g0->cop == 2 && ca1 == 2) {
-        cmode = 0;
-    } else if (g0->cop == 4 && ((ca1 == 2 && ca2 <= 1) || (ca2 == 2 && ca1 <= 1))) {
-        cmode = 1;
-    }
-    if ((g0->aop == 2 && aa1 == 2) || (g0->aop == 3 && aa2 == 2)) {
-        amode = 0;
-    } else if ((g0->aop == 2 && aa1 <= 1) || (g0->aop == 3 && aa2 <= 1)) {
-        amode = 1;
-    } else if (g0->aop == 4 && ((aa1 == 2 && aa2 <= 1) || (aa2 == 2 && aa1 <= 1))) {
-        amode = 2;
-    } else if (g0->aop == 1) {
-        amode = 1; /* DISABLE: the colour's */
-    }
+    int cmode, amode;
+    modes(g0, &cmode, &amode);
     bool fast = affine && rgb565 && g0->pix && g0->texels && !g0->linear && !r->st[1].on && !r->alpha_test &&
                 !r->ztest && g0->bpp == 16 && cmode >= 0 && amode >= 0 && (!r->blend || (r->sb == 5 && r->db == 6));
     if (fast) {
         int tw = (int)g0->w, th = (int)g0->h;
         const uint32_t *texels = g0->texels;
+        const bool wrap = g0->au <= 1 && g0->av <= 1 && (tw & (tw - 1)) == 0 && (th & (th - 1)) == 0;
+        const bool keyed = g0->keyed, blend = r->blend;
+        const uint32_t key = g0->key;
         /* Colour steps per pixel to the right, 16.16. */
         int32_t dcol[4];
         for (int k = 0; k < 4; k++) {
@@ -1208,32 +1227,46 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2,
             for (int c = 0; c < 4; c++) {
                 col[c] += dcol[c] * (lo - x0);
             }
-            for (int32_t x = lo; x <= hi; x++, w0 += d0, w1 += d1, w2 += d2, u += du[0], v += dv[0],
-                         col[0] += dcol[0], col[1] += dcol[1], col[2] += dcol[2], col[3] += dcol[3]) {
-                if (w0 < 0 || w1 < 0 || w2 < 0 || (w0 == 0 && !own0) || (w1 == 0 && !own1) || (w2 == 0 && !own2)) {
-                    continue;
+            /* The pixels of the row inside: one run (each edge function
+             * steps one way, so each test, once passed or failed, stays
+             * so), found first; the rest steps only the coordinates. */
+            int32_t a = lo, b;
+            while (a <= hi && !INSIDE(w0, w1, w2)) {
+                a++, w0 += d0, w1 += d1, w2 += d2;
+            }
+            for (b = a; b <= hi && INSIDE(w0, w1, w2); b++) {
+                w0 += d0, w1 += d1, w2 += d2;
+            }
+            for (int32_t x = lo; x < a; x++) {
+                u += du[0], v += dv[0];
+                col[0] += dcol[0], col[1] += dcol[1], col[2] += dcol[2], col[3] += dcol[3];
+            }
+            for (int32_t x = a; x < b; x++, u += du[0], v += dv[0], col[0] += dcol[0], col[1] += dcol[1],
+                         col[2] += dcol[2], col[3] += dcol[3]) {
+                int tx = ifloor(u * (float)tw), ty = ifloor(v * (float)th);
+                if (wrap) {
+                    tx &= tw - 1;
+                    ty &= th - 1;
+                } else {
+                    tx = addr(tx, tw, g0->au);
+                    ty = addr(ty, th, g0->av);
                 }
-                int tx = addr(ifloor(u * (float)tw), tw, g0->au), ty = addr(ifloor(v * (float)th), th, g0->av);
                 const uint8_t *tp = g0->pix + (uint32_t)ty * g0->pitch + 2u * (uint32_t)tx;
                 uint32_t raw = (uint32_t)(tp[0] | tp[1] << 8);
-                if (g0->keyed && raw == g0->key) {
-                    if (!r->blend) {
-                        continue; /* colour-keyed texel */
-                    }
-                    continue; /* blended: alpha 0, no change */
+                if (keyed && raw == key) {
+                    continue; /* colour-keyed texel: none drawn, nor blended */
                 }
-                int dr = clamp8(col[0] >> 16), dg = clamp8(col[1] >> 16), db = clamp8(col[2] >> 16),
-                    da = clamp8(col[3] >> 16);
                 uint32_t tx8 = texels[raw];
                 int sr = (int)(tx8 & 255), sg = (int)((tx8 >> 8) & 255), sb = (int)((tx8 >> 16) & 255);
                 int ta = (int)(tx8 >> 24);
                 if (cmode == 1) {
-                    sr = mul8(sr, dr);
-                    sg = mul8(sg, dg);
-                    sb = mul8(sb, db);
+                    sr = mul8(sr, clamp8(col[0] >> 16));
+                    sg = mul8(sg, clamp8(col[1] >> 16));
+                    sb = mul8(sb, clamp8(col[2] >> 16));
                 }
-                int sa = amode == 0 ? ta : amode == 1 ? da : amode == 2 ? mul8(ta, da) : 255;
-                if (r->blend) {
+                if (blend) {
+                    int da = clamp8(col[3] >> 16);
+                    int sa = amode == 0 ? ta : amode == 1 ? da : amode == 2 ? mul8(ta, da) : 255;
                     if (sa == 0) {
                         continue;
                     }
@@ -1345,11 +1378,312 @@ static void band(void *ctx, int i)
     draw_band(i * b->rows, (i + 1) * b->rows);
 }
 
-void rc_d3d_flush(void)
+/* ---- drawing with the graphics hardware ----
+ *
+ * A queue the graphics hardware can draw as the rasteriser here would (one
+ * texture, sampled by points, wrapped or clamped, times the vertex colour
+ * or not, blended by alpha or not, into RGB565, with the same vertices) is
+ * drawn by it: the rows it covers go up, the triangles are drawn, the rows
+ * come back. Its textures are kept there, made anew when their surface has
+ * changed. Differences are in rounding only. */
+
+/* Below this many pixels (the triangles' boxes) the way there and back
+ * costs more than it saves. */
+#define GPU_PIXELS 200000
+
+typedef struct gpu_texture {
+    uint32_t id; /* the platform's, 0 for none */
+    uint32_t pixels, w, h, version, key;
+    int keyed;
+} gpu_texture;
+/* Two for each surface object: alpha from the texture, and opaque but
+ * where colour-keyed. */
+static gpu_texture *gpu_textures;
+static uint32_t gpu_ntextures;
+static uint32_t *gpu_argb;
+static size_t gpu_argb_size;
+static rc_gpu_vertex *gpu_verts;
+static uint32_t gpu_nverts_cap;
+
+static uint32_t *gpu_buffer(size_t pixels)
 {
-    if (!n_draws) {
-        return;
+    if (pixels > gpu_argb_size) {
+        uint32_t *more = realloc(gpu_argb, pixels * 4);
+        if (!more) {
+            return NULL;
+        }
+        gpu_argb = more;
+        gpu_argb_size = pixels;
     }
+    return gpu_argb;
+}
+
+/* The texture of a stage on the graphics hardware (alpha from the texels,
+ * or only where colour-keyed): 0 if there is none. */
+static uint32_t gpu_texture_of(const stage *g, bool opaque)
+{
+    const rc_dd_surface *x = rc_dd_surf(g->obj);
+    if (!x || !g->texels) {
+        return 0;
+    }
+    uint32_t slot = g->obj * 2 + (opaque ? 1 : 0);
+    if (slot >= gpu_ntextures) {
+        uint32_t n = gpu_ntextures ? gpu_ntextures : 256;
+        while (n <= slot) {
+            n *= 2;
+        }
+        gpu_texture *more = realloc(gpu_textures, n * sizeof *more);
+        if (!more) {
+            return 0;
+        }
+        memset(more + gpu_ntextures, 0, (n - gpu_ntextures) * sizeof *more);
+        gpu_textures = more;
+        gpu_ntextures = n;
+    }
+    gpu_texture *e = &gpu_textures[slot];
+    if (e->id && e->pixels == x->pixels && e->w == g->w && e->h == g->h && e->version == x->version &&
+        e->keyed == g->keyed && (!g->keyed || e->key == g->key)) {
+        return e->id;
+    }
+    if (e->id) {
+        rc_plat_gpu_texture_free(e->id);
+        e->id = 0;
+    }
+    uint32_t *argb = malloc((size_t)g->w * g->h * 4);
+    if (!argb) {
+        return 0;
+    }
+    for (uint32_t y = 0; y < g->h; y++) {
+        const uint8_t *row = g->pix + y * g->pitch;
+        for (uint32_t i = 0; i < g->w; i++) {
+            uint32_t raw = (uint32_t)(row[2 * i] | row[2 * i + 1] << 8);
+            uint32_t t = g->texels[raw];
+            uint32_t a = opaque ? 255 : t >> 24;
+            if (g->keyed && raw == g->key) {
+                argb[y * g->w + i] = 0;
+                continue;
+            }
+            argb[y * g->w + i] = a << 24 | (t & 255) << 16 | ((t >> 8) & 255) << 8 | ((t >> 16) & 255);
+        }
+    }
+    e->id = rc_plat_gpu_texture(argb, (int)g->w, (int)g->h, (int)g->w);
+    free(argb);
+    e->pixels = x->pixels;
+    e->w = g->w;
+    e->h = g->h;
+    e->version = x->version;
+    e->keyed = g->keyed;
+    e->key = g->key;
+    return e->id;
+}
+
+/* Whether a draw is one the graphics hardware draws as here. */
+static bool gpu_drawable(const rctx *r)
+{
+    const stage *g0 = &r->st[0];
+    bool rgb565 = r->tf.bpp == 16 && r->tf.c[0].shift == 11 && r->tf.c[0].bits == 5 && r->tf.c[1].bits == 6 &&
+                  r->tf.c[2].bits == 5 && !r->tf.c[3].bits;
+    if (!rgb565 || r->ztest || r->alpha_test || !g0->on || r->st[1].on || !g0->pix || !g0->texels || g0->linear) {
+        return false;
+    }
+    int cmode, amode;
+    modes(g0, &cmode, &amode);
+    if (cmode < 0 || (r->blend && (amode < 0 || r->sb != 5 || r->db != 6))) {
+        return false;
+    }
+    bool pow2 = (g0->w & (g0->w - 1)) == 0 && (g0->h & (g0->h - 1)) == 0;
+    for (int k = 0; k < 2; k++) {
+        uint32_t mode = k ? g0->av : g0->au;
+        if (!(mode == 3 || (mode <= 1 && pow2))) {
+            return false; /* mirrored, bordered, or wrapped and not a power of two */
+        }
+    }
+    return true;
+}
+
+typedef struct {
+    rc_dd_surface *t;
+    int32_t y0, y1;
+    bool up; /* RGB565 to 32-bit, or back */
+} gpu_rows;
+
+static void gpu_convert(void *ctx, int i)
+{
+    const gpu_rows *g = ctx;
+    int32_t per = (g->y1 - g->y0 + 15) / 16;
+    int32_t from = g->y0 + i * per, to = from + per > g->y1 ? g->y1 : from + per;
+    rc_dd_surface *t = g->t;
+    for (int32_t y = from; y < to; y++) {
+        uint16_t *row = rc_ptr(t->pixels + (uint32_t)y * t->pitch);
+        uint32_t *out = gpu_argb + (size_t)y * t->w;
+        if (g->up) {
+            for (uint32_t x = 0; x < t->w; x++) {
+                uint32_t p = row[x];
+                out[x] = 0xff000000u | (uint32_t)expand[5][p >> 11] << 16 | (uint32_t)expand[6][(p >> 5) & 63] << 8 |
+                         expand[5][p & 31];
+            }
+        } else {
+            for (uint32_t x = 0; x < t->w; x++) {
+                uint32_t p = out[x];
+                row[x] = (uint16_t)((p >> 19 & 31) << 11 | (p >> 10 & 63) << 5 | (p >> 3 & 31));
+            }
+        }
+    }
+}
+
+/* The rectangle a draw is clipped to (its viewport in its target). */
+static void clip_of(const rctx *r, int32_t *x0, int32_t *y0, int32_t *x1, int32_t *y1)
+{
+    *x0 = r->vx < 0 ? 0 : r->vx;
+    *y0 = r->vy < 0 ? 0 : r->vy;
+    *x1 = r->vx + r->vw > (int32_t)r->t->w ? (int32_t)r->t->w : r->vx + r->vw;
+    *y1 = r->vy + r->vh > (int32_t)r->t->h ? (int32_t)r->t->h : r->vy + r->vh;
+}
+
+/* Whether any of a draw's triangles reaches into its clip rectangle. */
+static bool draw_shows(const queued *q)
+{
+    int32_t cx0, cy0, cx1, cy1;
+    clip_of(&q->r, &cx0, &cy0, &cx1, &cy1);
+    for (uint32_t k = q->first; k < q->first + q->n; k++) {
+        const vtx *v = &tris[3 * k];
+        float minx = fminf(v[0].x, fminf(v[1].x, v[2].x)), maxx = fmaxf(v[0].x, fmaxf(v[1].x, v[2].x));
+        float miny = fminf(v[0].y, fminf(v[1].y, v[2].y)), maxy = fmaxf(v[0].y, fmaxf(v[1].y, v[2].y));
+        if (maxx >= (float)cx0 && minx < (float)cx1 && maxy >= (float)cy0 && miny < (float)cy1) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Whether the queue can be drawn by the graphics hardware (what it cannot
+ * draw draws nothing): then the rows it covers. */
+static bool gpu_can(int32_t *top_row, int32_t *end_row)
+{
+    if (queued_pixels < GPU_PIXELS || !rc_plat_gpu_ready()) {
+        return false;
+    }
+    rc_dd_surface *t = draws[0].r.t;
+    float top = (float)t->h, bottom = 0;
+    for (uint32_t i = 0; i < n_draws; i++) {
+        const queued *q = &draws[i];
+        if (q->r.t != t || (!gpu_drawable(&q->r) && draw_shows(q))) {
+            return false;
+        }
+        for (uint32_t k = 3 * q->first; k < 3 * (q->first + q->n); k++) {
+            top = tris[k].y < top ? tris[k].y : top;
+            bottom = tris[k].y > bottom ? tris[k].y : bottom;
+        }
+        for (uint32_t k = q->first; k < q->first + q->n; k++) {
+            const vtx *v = &tris[3 * k];
+            if (v[0].rhw != v[1].rhw || v[0].rhw != v[2].rhw) {
+                return false; /* in perspective */
+            }
+        }
+    }
+    int32_t y0 = (int32_t)floorf(top), y1 = (int32_t)ceilf(bottom) + 1;
+    *top_row = y0 < 0 ? 0 : y0;
+    *end_row = y1 > (int32_t)t->h ? (int32_t)t->h : y1;
+    return *top_row < *end_row && t->pixels && gpu_buffer((size_t)t->w * t->h);
+}
+
+/* The queue drawn by the graphics hardware, rows y0 up to y1; false
+ * (nothing drawn) if it could not be. */
+static bool gpu_flush(int32_t y0, int32_t y1)
+{
+    rc_dd_surface *t = draws[0].r.t;
+    gpu_rows rows = {t, y0, y1, true};
+    rc_plat_parallel(16, gpu_convert, &rows);
+    if (!rc_plat_gpu_begin(gpu_argb, (int)t->w, (int)t->h, (int)t->w, y0, y1)) {
+        return false;
+    }
+    for (uint32_t i = 0; i < n_draws; i++) {
+        const queued *q = &draws[i];
+        const rctx *r = &q->r;
+        const stage *g0 = &r->st[0];
+        if (!gpu_drawable(r)) {
+            continue; /* shows nothing */
+        }
+        int cmode, amode;
+        modes(g0, &cmode, &amode);
+        /* Opaque but where keyed: unblended, or blended by the colour's
+         * alpha alone (or none). */
+        bool opaque = !r->blend || amode == 1 || amode == 3;
+        bool colour_alpha = r->blend && (amode == 1 || amode == 2);
+        uint32_t tex = gpu_texture_of(g0, opaque);
+        if (!tex) {
+            continue;
+        }
+        if (q->n * 3 > gpu_nverts_cap) {
+            uint32_t cap = q->n * 3 * 2;
+            rc_gpu_vertex *more = realloc(gpu_verts, cap * sizeof *more);
+            if (!more) {
+                continue;
+            }
+            gpu_verts = more;
+            gpu_nverts_cap = cap;
+        }
+        int n = 0;
+        for (uint32_t k = q->first; k < q->first + q->n; k++) {
+            const vtx *v = &tris[3 * k];
+            float area = edge(&v[0], &v[1], v[2].x, v[2].y);
+            if (area == 0.0f || (r->cull == 2 && area > 0) || (r->cull == 3 && area < 0)) {
+                continue;
+            }
+            for (int j = 0; j < 3; j++) {
+                const vtx *c = r->flat ? &v[0] : &v[j];
+                rc_gpu_vertex *o = &gpu_verts[n++];
+                /* Pixel centres are at whole coordinates in Direct3D 7,
+                 * at halves on the hardware. */
+                o->x = v[j].x + 0.5f;
+                o->y = v[j].y + 0.5f;
+                o->r = cmode == 1 ? c->diffuse[0] / 255.0f : 1.0f;
+                o->g = cmode == 1 ? c->diffuse[1] / 255.0f : 1.0f;
+                o->b = cmode == 1 ? c->diffuse[2] / 255.0f : 1.0f;
+                o->a = colour_alpha ? c->diffuse[3] / 255.0f : 1.0f;
+                o->u = v[j].u[0];
+                o->v = v[j].v[0];
+            }
+        }
+        int32_t cx0, cy0, cx1, cy1;
+        clip_of(r, &cx0, &cy0, &cx1, &cy1);
+        if (n && cx1 > cx0 && cy1 > cy0) {
+            rc_plat_gpu_draw(tex, g0->au != 3, g0->av != 3, cx0, cy0, cx1 - cx0, cy1 - cy0, gpu_verts, n);
+        }
+    }
+    if (!rc_plat_gpu_end(gpu_argb, (int)t->w)) {
+        return false;
+    }
+    rows.up = false;
+    rc_plat_parallel(16, gpu_convert, &rows);
+    rc_dd_changed(t);
+    return true;
+}
+
+static double now_ms(void)
+{
+    struct timespec ts;
+    timespec_get(&ts, TIME_UTC);
+    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
+}
+
+/* Which way a queue the graphics hardware can draw is drawn: both ways are
+ * timed, for queues of about the same size (by the pixels of the
+ * triangles' boxes), the faster taken and the other tried again now and
+ * then. There, most of the time can be the wait for the picture to come
+ * back (in a virtual machine, longer than drawing it here). Milliseconds,
+ * < 0 while not yet known; the hardware's first queues, which make its
+ * textures, are not counted. */
+#define GPU_SIZES 4
+static double cpu_ms[GPU_SIZES] = {-1, -1, -1, -1}, gpu_ms[GPU_SIZES] = {-1, -1, -1, -1};
+static uint32_t gpu_choices[GPU_SIZES], gpu_runs;
+#define GPU_RETRY 128
+#define GPU_WARMING 8
+
+static int size_of(double mpx) { return mpx < 1 ? 0 : mpx < 4 ? 1 : mpx < 16 ? 2 : 3; }
+
+static void cpu_flush(void)
+{
     int cores = rc_plat_workers();
     int32_t rows = 0;
     for (uint32_t i = 0; i < n_draws; i++) {
@@ -1366,6 +1700,44 @@ void rc_d3d_flush(void)
         rc_plat_parallel((rows + b.rows - 1) / b.rows, band, &b);
     } else {
         draw_band(0, INT32_MAX);
+    }
+}
+
+static void learn(double *estimate, double value)
+{
+    *estimate = *estimate < 0 ? value : *estimate * 0.75 + value * 0.25;
+}
+
+void rc_d3d_flush(void)
+{
+    if (!n_draws) {
+        return;
+    }
+    int32_t y0, y1;
+    if (gpu_can(&y0, &y1)) {
+        int k = size_of(queued_pixels / 1e6);
+        bool gpu;
+        if (cpu_ms[k] < 0) {
+            gpu = false;
+        } else if (gpu_ms[k] < 0) {
+            gpu = true;
+        } else {
+            gpu = gpu_ms[k] < cpu_ms[k];
+            if (++gpu_choices[k] % GPU_RETRY == 0) {
+                gpu = !gpu;
+            }
+        }
+        double t0 = now_ms();
+        if (gpu && gpu_flush(y0, y1)) {
+            if (++gpu_runs > GPU_WARMING) {
+                learn(&gpu_ms[k], now_ms() - t0);
+            }
+        } else {
+            cpu_flush();
+            learn(&cpu_ms[k], now_ms() - t0);
+        }
+    } else {
+        cpu_flush();
     }
     n_draws = 0;
     n_tris = 0;

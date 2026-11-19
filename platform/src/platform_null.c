@@ -100,3 +100,48 @@ void rc_plat_parallel(int count, void (*fn)(void *ctx, int i), void *ctx)
 }
 
 int rc_plat_workers(void) { return 1; }
+
+bool rc_plat_gpu_ready(void) { return false; }
+
+uint32_t rc_plat_gpu_texture(const uint32_t *argb, int width, int height, int pitch)
+{
+    (void)argb;
+    (void)width;
+    (void)height;
+    (void)pitch;
+    return 0;
+}
+
+void rc_plat_gpu_texture_free(uint32_t texture) { (void)texture; }
+
+bool rc_plat_gpu_begin(const uint32_t *xrgb, int width, int height, int pitch, int y0, int y1)
+{
+    (void)xrgb;
+    (void)width;
+    (void)height;
+    (void)pitch;
+    (void)y0;
+    (void)y1;
+    return false;
+}
+
+void rc_plat_gpu_draw(uint32_t texture, bool wrap_u, bool wrap_v, int clip_x, int clip_y, int clip_w, int clip_h,
+                      const rc_gpu_vertex *v, int n)
+{
+    (void)texture;
+    (void)wrap_u;
+    (void)wrap_v;
+    (void)clip_x;
+    (void)clip_y;
+    (void)clip_w;
+    (void)clip_h;
+    (void)v;
+    (void)n;
+}
+
+bool rc_plat_gpu_end(uint32_t *xrgb, int pitch)
+{
+    (void)xrgb;
+    (void)pitch;
+    return false;
+}

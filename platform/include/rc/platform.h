@@ -167,6 +167,39 @@ void rc_plat_parallel(int count, void (*fn)(void *ctx, int i), void *ctx);
 /* How many runs rc_plat_parallel makes at once (1 where serial). */
 int rc_plat_workers(void);
 
+/* Drawing with the graphics hardware: textured triangles into a picture
+ * of 32-bit 0x00RRGGBB pixels, for Direct3D. A vertex is laid out as SDL's
+ * (position, colour 0..1, texture coordinates). */
+typedef struct rc_gpu_vertex {
+    float x, y;
+    float r, g, b, a;
+    float u, v;
+} rc_gpu_vertex;
+
+/* Whether there is graphics hardware to draw with: only when RC_GPU=1
+ * asks for it, never on the null platform. */
+bool rc_plat_gpu_ready(void);
+
+/* A texture of 32-bit 0xAARRGGBB pixels (`pitch` in pixels), sampled by
+ * points: its number, 0 if it could not be made. */
+uint32_t rc_plat_gpu_texture(const uint32_t *argb, int width, int height, int pitch);
+void rc_plat_gpu_texture_free(uint32_t texture);
+
+/* Start drawing into a picture of this size: rows y0 up to y1 of `xrgb`
+ * (`pitch` in pixels) are what is drawn over. False if it cannot. */
+bool rc_plat_gpu_begin(const uint32_t *xrgb, int width, int height, int pitch, int y0, int y1);
+
+/* Triangles (three vertices each) with a texture, blended by its alpha
+ * times the vertices' (0 for none: plain colour), wrapped or clamped in
+ * each direction, inside a rectangle. */
+void rc_plat_gpu_draw(uint32_t texture, bool wrap_u, bool wrap_v, int clip_x, int clip_y, int clip_w, int clip_h,
+                      const rc_gpu_vertex *v, int n);
+
+/* Finish: rows y0 up to y1 of the picture drawn are written back to
+ * `xrgb`. False if they could not be read (the picture is then as it
+ * was). */
+bool rc_plat_gpu_end(uint32_t *xrgb, int pitch);
+
 /* Show an error to the user in a message box (nothing on the null
  * platform). */
 void rc_plat_error(const char *title, const char *message);
