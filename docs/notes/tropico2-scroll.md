@@ -26,6 +26,15 @@ edge scrolling only where it helps, as for Tropico
   (`+0x40`, `+0x44` its size, `+0xc4` the edge's width, `+0xc8` the edges
   in effect) and starts or stops scrolling.
 
+## Easing in and out
+
+The step moves the view every frame by the time since the last one, at
+full speed from the first frame to the last. Wrapped, its speed grows from
+nothing to full over 150 ms when it starts (easing out of the start), and
+when it stops (the key let go, the pointer off the edge) the view glides
+on at its last speed and slows down, as after a drag. The glide moves with
+the step, every frame, from when the step last moved the view.
+
 ## Which window gets the mouse
 
 `0x008df1d0` (thiscall on a window: x and y) is the game's hit test: in a

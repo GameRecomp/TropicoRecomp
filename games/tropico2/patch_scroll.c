@@ -96,12 +96,68 @@ static uint32_t the_map(void)
 
 /* (The step runs for every map view, the island's and others that are not
  * shown.) */
+/* The game's own scrolling (the arrow keys, the edge) eases in and glides
+ * out: the step's speed (at V_SPEED, pixels a second) grows to the full one
+ * over EASE_MS from when it starts, and when it stops the view glides on
+ * at its last speed and slows down (as after a drag). The direction is at
+ * V_DIRS (bits, which the table DIR_OF turns into one of eight directions,
+ * -1 for none), moving by DIR_X and DIR_Y (of 200) for each pixel. */
+#define V_DIRS 0x16cu
+#define V_SPEED 0x170u
+#define DIR_OF 0x0093a3d0u
+#define EASE_MS 150.0f
+static const int dir_x[8] = {0, 179, 200, 179, 0, -179, -200, -179};
+static const int dir_y[8] = {-200, -179, 0, 179, 200, 179, 0, -179};
+static uint64_t keys_since; /* the game's scrolling started then (0: not scrolling) */
+static uint64_t keys_last;  /* and last moved the view then */
+static float keys_vx, keys_vy; /* and moves the view this fast (pixels a millisecond) */
+static int gliding;
+static float vel_x, vel_y;
+static uint64_t last_ms;
+static float move_x, move_y; /* to scroll by, at the next chance */
+static void glide(rc_cpu *c);
+
 static void map_step(rc_cpu *c)
 {
     uint32_t v = c->r[RC_ECX];
-    if (rc_ld8(v + W_SHOWN) & 1) {
-        map = v;
-        map_seen = rc_ticks_peek_ms();
+    if (!(rc_ld8(v + W_SHOWN) & 1)) {
+        rc_lookup_lifted(MAP_STEP)(c);
+        return;
+    }
+    map = v;
+    map_seen = rc_ticks_peek_ms();
+    uint32_t bits = rc_ld32(v + V_DIRS), speed = rc_ld32(v + V_SPEED);
+    int32_t dir = bits < 16 ? (int32_t)rc_ld32(DIR_OF + 4 * bits) : -1;
+    if (bits && speed && dir >= 0 && dir < 8) {
+        uint64_t now = rc_ticks_peek_ms();
+        if (!keys_since) {
+            keys_since = now;
+            gliding = 0;
+        }
+        float k = (float)(now - keys_since) / EASE_MS;
+        k = k > 1.0f ? 1.0f : k;
+        k = k * (2.0f - k); /* easing out of the start */
+        uint32_t eased = (uint32_t)((float)speed * (k > 0.05f ? k : 0.05f));
+        keys_vx = (float)speed * k / 1000.0f * (float)dir_x[dir] / 200.0f;
+        keys_vy = (float)speed * k / 1000.0f * (float)dir_y[dir] / 200.0f;
+        rc_st32(v + V_SPEED, eased);
+        keys_last = now;
+        rc_lookup_lifted(MAP_STEP)(c);
+        if (rc_ld32(v + V_SPEED) == eased) {
+            rc_st32(v + V_SPEED, speed);
+        }
+        return;
+    }
+    if (keys_since) {
+        /* It stopped: glide on, from when it last moved the view. */
+        keys_since = 0;
+        vel_x = keys_vx;
+        vel_y = keys_vy;
+        gliding = fabsf(vel_x) + fabsf(vel_y) > 0.05f;
+        last_ms = keys_last;
+    }
+    if (gliding) {
+        glide(c); /* with the game's step, every frame */
     }
     rc_lookup_lifted(MAP_STEP)(c);
 }
@@ -162,10 +218,6 @@ static rc_event held;        /* the press, held back */
 static int last_x, last_y;   /* the pointer, as last seen */
 static int pump_seen;        /* the game has looked for messages since */
 static uint64_t held_ms;     /* when */
-static float move_x, move_y; /* to scroll by, at the next chance */
-static float vel_x, vel_y;   /* pixels per millisecond, for gliding */
-static uint64_t last_ms;     /* of the last drag step or glide */
-static int gliding;
 
 static int slop(void) { return held.source == RC_SRC_TOUCH ? SLOP_TOUCH : SLOP_MOUSE; }
 
@@ -270,25 +322,10 @@ static void scroll(rc_cpu *c, int dx, int dy)
     *c = saved;
 }
 
-static void pump(rc_cpu *c)
+/* Moves the view by the glide since it last moved, and what a drag
+ * left. */
+static void glide(rc_cpu *c)
 {
-    if (state == PRESSED) {
-        int dx = last_x - held.x, dy = last_y - held.y;
-        if (pump_seen && dx * dx + dy * dy > slop() * slop()) {
-            state = DRAGGING;
-            move_x = (float)-dx;
-            move_y = (float)-dy;
-            vel_x = vel_y = 0;
-            last_ms = rc_ticks_peek_ms();
-        } else if (rc_ticks_peek_ms() - held_ms >= HOLD_MS) {
-            state = PASSING;
-            rc_input_deliver(&held);
-            if (last_x != held.x || last_y != held.y) {
-                deliver_move(last_x, last_y, held.source);
-            }
-        }
-        pump_seen = 1;
-    }
     if (gliding) {
         uint64_t now = rc_ticks_peek_ms();
         float dt = (float)(now - last_ms);
@@ -310,6 +347,28 @@ static void pump(rc_cpu *c)
         move_y -= (float)iy;
         scroll(c, ix, iy);
     }
+}
+
+static void pump(rc_cpu *c)
+{
+    if (state == PRESSED) {
+        int dx = last_x - held.x, dy = last_y - held.y;
+        if (pump_seen && dx * dx + dy * dy > slop() * slop()) {
+            state = DRAGGING;
+            move_x = (float)-dx;
+            move_y = (float)-dy;
+            vel_x = vel_y = 0;
+            last_ms = rc_ticks_peek_ms();
+        } else if (rc_ticks_peek_ms() - held_ms >= HOLD_MS) {
+            state = PASSING;
+            rc_input_deliver(&held);
+            if (last_x != held.x || last_y != held.y) {
+                deliver_move(last_x, last_y, held.source);
+            }
+        }
+        pump_seen = 1;
+    }
+    glide(c);
 }
 
 /* ---- the edge ---- */
