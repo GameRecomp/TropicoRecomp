@@ -54,4 +54,8 @@ void rc_present_hook(unsigned frame);
 /* Whether a screenshot of this frame is asked for (RC_SCREENSHOT). */
 int rc_screenshot_due(unsigned frame);
 
+/* Draw what Direct3D has queued (d3d.c): before anything reads, writes or
+ * frees a surface's pixels. */
+void rc_d3d_flush(void);
+
 #endif

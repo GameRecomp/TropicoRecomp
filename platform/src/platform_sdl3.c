@@ -1137,3 +1137,106 @@ bool rc_plat_bundled_data(char *out, size_t n)
     return false;
 #endif
 }
+
+/* ---- running work on all cores ---- */
+
+#if defined(SDL_PLATFORM_EMSCRIPTEN)
+void rc_plat_parallel(int count, void (*fn)(void *ctx, int i), void *ctx)
+{
+    for (int i = 0; i < count; i++) {
+        fn(ctx, i);
+    }
+}
+
+int rc_plat_workers(void) { return 1; }
+#else
+/* Worker threads wait for a job; the caller works on it too. Each run
+ * takes the next index until none is left. */
+#define WORKERS_MAX 16
+static int workers = -1; /* besides the caller; 0 when serial */
+static SDL_Semaphore *job_start, *job_done;
+static struct {
+    void (*fn)(void *ctx, int i);
+    void *ctx;
+    int count;
+    SDL_AtomicInt next;
+} job;
+
+static void job_run(void)
+{
+    for (;;) {
+        int i = SDL_AddAtomicInt(&job.next, 1);
+        if (i >= job.count) {
+            return;
+        }
+        job.fn(job.ctx, i);
+    }
+}
+
+static int SDLCALL worker(void *unused)
+{
+    (void)unused;
+    for (;;) {
+        SDL_WaitSemaphore(job_start);
+        job_run();
+        SDL_SignalSemaphore(job_done);
+    }
+    return 0;
+}
+
+static void workers_start(void)
+{
+    int cores = SDL_GetNumLogicalCPUCores();
+    workers = 0;
+    if (cores < 2) {
+        return;
+    }
+    job_start = SDL_CreateSemaphore(0);
+    job_done = SDL_CreateSemaphore(0);
+    if (!job_start || !job_done) {
+        return;
+    }
+    int want = cores - 1 > WORKERS_MAX ? WORKERS_MAX : cores - 1;
+    for (int k = 0; k < want; k++) {
+        SDL_Thread *t = SDL_CreateThread(worker, "rc-worker", NULL);
+        if (!t) {
+            break;
+        }
+        SDL_DetachThread(t);
+        workers++;
+    }
+}
+
+int rc_plat_workers(void)
+{
+    if (workers < 0) {
+        workers_start();
+    }
+    return workers + 1;
+}
+
+void rc_plat_parallel(int count, void (*fn)(void *ctx, int i), void *ctx)
+{
+    if (workers < 0) {
+        workers_start();
+    }
+    int helpers = workers < count - 1 ? workers : count - 1;
+    if (helpers <= 0) {
+        for (int i = 0; i < count; i++) {
+            fn(ctx, i);
+        }
+        return;
+    }
+    job.fn = fn;
+    job.ctx = ctx;
+    job.count = count;
+    SDL_SetAtomicInt(&job.next, 0);
+    for (int k = 0; k < helpers; k++) {
+        SDL_SignalSemaphore(job_start);
+    }
+    job_run();
+    for (int k = 0; k < helpers; k++) {
+        SDL_WaitSemaphore(job_done);
+    }
+}
+#endif

@@ -53,7 +53,14 @@ island generator never finished.
   (`hle/ddraw/d3d.c`). The game draws its world as pre-transformed, textured
   triangle strips; two fast paths take nearly every pixel (a texel copied,
   and a 16-bit texture times an interpolated colour, blended by source
-  alpha). In game it runs at about 20 frames a second on the virtual clock.
+  alpha, its texels' channels from a table made once per format).
+  Drawing is deferred: each draw's triangles are queued with the state it
+  was made in, and the queue is drawn when anything needs the pixels (a
+  surface is locked, copied, shown or released, the target cleared), in
+  bands of rows on all cores; each band draws every triangle in its order,
+  so the picture is the same as drawn on one core. In game a frame takes
+  about 17 ms at 1024x768 and 47 ms at 1920x1080 (8 cores), against 81
+  and 243 ms before.
 
 ## What has been seen working
 

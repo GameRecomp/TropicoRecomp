@@ -615,6 +615,7 @@ static void k_AddRef(rc_cpu *c)
 
 static void k_Release(rc_cpu *c)
 {
+    rc_d3d_flush();
     uint32_t o = rc_ld32(RC_ARG(c, 0) + 4);
     object *x = &objects[o];
     if (x->refs > 0 && --x->refs == 0) {
@@ -679,6 +680,7 @@ static void k_GetAttachedSurface(rc_cpu *c)
 
 static void k_Lock(rc_cpu *c)
 {
+    rc_d3d_flush();
     object *x = self(c, O_SURFACE);
     uint32_t rect = RC_ARG(c, 1), d = RC_ARG(c, 2);
     surface *s = &x->s;
@@ -711,12 +713,14 @@ static void k_IsLost(rc_cpu *c)
 
 static void k_Restore(rc_cpu *c)
 {
+    rc_d3d_flush();
     self(c, O_SURFACE);
     RC_RETURN(c, DD_OK, 1);
 }
 
 static void k_Flip(rc_cpu *c)
 {
+    rc_d3d_flush();
     object *x = self(c, O_SURFACE);
     surface *s = &x->s;
     if (s->back) {
@@ -810,6 +814,19 @@ static void blit(surface *d, rect dr, const surface *s, rect sr, int keyed, uint
             uint32_t bytes = s->bpp / 8;
             memmove(rc_ptr(d->pixels + (uint32_t)dy * d->pitch + (uint32_t)dr.l * bytes),
                     rc_ptr(s->pixels + (uint32_t)sy * s->pitch + (uint32_t)sr.l * bytes), (size_t)dw * bytes);
+            continue;
+        }
+        if (same && keyed && s->bpp == 16 && dw == sw && sr.l >= 0 && sr.r <= (int32_t)s->w) {
+            /* A keyed 16-bit row at its own size: the pixels not the key. */
+            const uint16_t *sp = (const uint16_t *)rc_ptr(s->pixels + (uint32_t)sy * s->pitch) + sr.l;
+            uint16_t *dp = (uint16_t *)rc_ptr(d->pixels + (uint32_t)dy * d->pitch);
+            int32_t x0 = dr.l < 0 ? -dr.l : 0, x1 = dr.r > (int32_t)d->w ? (int32_t)d->w - dr.l : dw;
+            uint16_t k = (uint16_t)key;
+            for (int32_t x = x0; x < x1; x++) {
+                if (sp[x] != k) {
+                    dp[dr.l + x] = sp[x];
+                }
+            }
             continue;
         }
         for (int32_t x = 0; x < dw; x++) {
@@ -968,9 +985,32 @@ static void widen_blit(surface *d, rect dr, const surface *s, rect sr, int keyed
 
 static void fill(surface *d, rect r, uint32_t color)
 {
+    int32_t l = r.l < 0 ? 0 : r.l, rr = r.r < (int32_t)d->w ? r.r : (int32_t)d->w;
     for (int32_t y = r.t < 0 ? 0 : r.t; y < r.b && y < (int32_t)d->h; y++) {
-        for (int32_t x = r.l < 0 ? 0 : r.l; x < r.r && x < (int32_t)d->w; x++) {
-            put_pixel(d, (uint32_t)x, (uint32_t)y, color);
+        if (l >= rr) {
+            break;
+        }
+        uint8_t *row = rc_ptr(d->pixels + (uint32_t)y * d->pitch);
+        switch (d->bpp) {
+        case 8: memset(row + l, (int)(color & 0xff), (size_t)(rr - l)); break;
+        case 16: {
+            uint16_t *p = (uint16_t *)(void *)row, v = (uint16_t)color;
+            for (int32_t x = l; x < rr; x++) {
+                p[x] = v;
+            }
+            break;
+        }
+        case 32: {
+            uint32_t *p = (uint32_t *)(void *)row;
+            for (int32_t x = l; x < rr; x++) {
+                p[x] = color;
+            }
+            break;
+        }
+        default:
+            for (int32_t x = l; x < rr; x++) {
+                put_pixel(d, (uint32_t)x, (uint32_t)y, color);
+            }
         }
     }
 }
@@ -983,6 +1023,7 @@ static surface *surface_of(uint32_t g)
 
 static void k_Blt(rc_cpu *c)
 {
+    rc_d3d_flush();
     object *x = self(c, O_SURFACE);
     uint32_t drp = RC_ARG(c, 1), src = RC_ARG(c, 2), srp = RC_ARG(c, 3), flags = RC_ARG(c, 4), fx = RC_ARG(c, 5);
     surface *d = &x->s;
@@ -1019,6 +1060,7 @@ static void k_Blt(rc_cpu *c)
 
 static void k_BltFast(rc_cpu *c)
 {
+    rc_d3d_flush();
     object *x = self(c, O_SURFACE);
     int32_t dx = (int32_t)RC_ARG(c, 1), dy = (int32_t)RC_ARG(c, 2);
     uint32_t src = RC_ARG(c, 3), srp = RC_ARG(c, 4), trans = RC_ARG(c, 5);
@@ -1037,6 +1079,7 @@ static void k_BltFast(rc_cpu *c)
 
 static void k_GetDC(rc_cpu *c)
 {
+    rc_d3d_flush();
     object *x = self(c, O_SURFACE);
     const surface *s = &x->s;
     const palette *p = s->palette ? &objects[s->palette].p : NULL;
@@ -1208,6 +1251,7 @@ static void k_SetDisplayMode1(rc_cpu *c)
 
 static void k_SetDisplayMode(rc_cpu *c)
 {
+    rc_d3d_flush();
     self(c, O_DDRAW);
     set_mode(RC_ARG(c, 1), RC_ARG(c, 2), RC_ARG(c, 3));
     RC_RETURN(c, DD_OK, 6);

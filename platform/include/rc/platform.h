@@ -159,6 +159,14 @@ const char *rc_plat_user_dir(const char *org, const char *app);
  * none. */
 bool rc_plat_bundled_data(char *out, size_t n);
 
+/* Run fn(ctx, i) for every i below `count`, on as many of the host's cores
+ * as it has (in no particular order; returns when all are done). Serial
+ * where there are no threads (the null platform, a browser). */
+void rc_plat_parallel(int count, void (*fn)(void *ctx, int i), void *ctx);
+
+/* How many runs rc_plat_parallel makes at once (1 where serial). */
+int rc_plat_workers(void);
+
 /* Show an error to the user in a message box (nothing on the null
  * platform). */
 void rc_plat_error(const char *title, const char *message);

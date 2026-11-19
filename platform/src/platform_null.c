@@ -91,3 +91,12 @@ bool rc_plat_bundled_data(char *out, size_t n)
     (void)n;
     return false;
 }
+
+void rc_plat_parallel(int count, void (*fn)(void *ctx, int i), void *ctx)
+{
+    for (int i = 0; i < count; i++) {
+        fn(ctx, i);
+    }
+}
+
+int rc_plat_workers(void) { return 1; }

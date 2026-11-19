@@ -8,12 +8,15 @@
  * The device offers itself as the one hardware device ("Direct3D HAL").
  */
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ddraw.h"
 #include "rc/hle.h"
 #include "rc/log.h"
+#include "rc/platform.h"
 #include "rc/process.h"
 #include "rc/vm.h"
 
@@ -64,6 +67,7 @@ static device *dev_of(rc_cpu *c)
 /* A device released for the last time gives its slot back. */
 static void k_DevRelease(rc_cpu *c)
 {
+    rc_d3d_flush();
     uint32_t o = rc_ld32(RC_ARG(c, 0) + 4);
     uint32_t *r = rc_dd_refs(o);
     if (*r > 0 && --*r == 0) {
@@ -531,6 +535,40 @@ static inline int get_chan(uint32_t v, chan c)
     return c.bits ? expand[c.bits][(v >> c.shift) & ((1u << c.bits) - 1)] : 255;
 }
 
+/* For a 16-bit format, every texel's channels at once (r, g, b, a from the
+ * low byte up): made when a draw is set up (on one core), a few formats at
+ * most. */
+#define TEXEL_TABLES 8
+static struct {
+    fmt f;
+    uint32_t *t;
+} texel_tables[TEXEL_TABLES];
+
+static const uint32_t *texel_table(const fmt *f)
+{
+    for (int i = 0; i < TEXEL_TABLES; i++) {
+        if (texel_tables[i].t && !memcmp(&texel_tables[i].f, f, sizeof *f)) {
+            return texel_tables[i].t;
+        }
+    }
+    for (int i = 0; i < TEXEL_TABLES; i++) {
+        if (!texel_tables[i].t) {
+            uint32_t *t = malloc(65536 * sizeof *t);
+            if (!t) {
+                return NULL;
+            }
+            for (uint32_t v = 0; v < 65536; v++) {
+                t[v] = (uint32_t)get_chan(v, f->c[0]) | (uint32_t)get_chan(v, f->c[1]) << 8 |
+                       (uint32_t)get_chan(v, f->c[2]) << 16 | (uint32_t)get_chan(v, f->c[3]) << 24;
+            }
+            texel_tables[i].f = *f;
+            texel_tables[i].t = t;
+            return t;
+        }
+    }
+    return NULL;
+}
+
 static inline c8 unpack(const fmt *f, uint32_t v)
 {
     return (c8){get_chan(v, f->c[0]), get_chan(v, f->c[1]), get_chan(v, f->c[2]), get_chan(v, f->c[3])};
@@ -713,12 +751,15 @@ typedef struct stage {
     int keyed;
     uint32_t key;
     int linear;
+    const uint32_t *texels; /* a 16-bit texture's channels (texel_table), or NULL */
     uint32_t au, av; /* address modes */
     uint32_t cop, aop, c1, c2, a1, a2;
 } stage;
 
 typedef struct rctx {
     const device *d;
+    uint32_t cull;               /* the device's state when the draw was made */
+    int32_t vx, vy, vw, vh;      /* (its viewport) */
     rc_dd_surface *t;
     fmt tf;
     uint8_t *tpix;
@@ -733,6 +774,11 @@ static void setup(rctx *r, const device *d, rc_dd_surface *t, rc_dd_surface *z)
     init_expand();
     memset(r, 0, sizeof *r);
     r->d = d;
+    r->cull = d->rs[22];
+    r->vx = (int32_t)d->vp.x;
+    r->vy = (int32_t)d->vp.y;
+    r->vw = (int32_t)d->vp.w;
+    r->vh = (int32_t)d->vp.h;
     r->t = t;
     r->tf = fmt_of(t);
     r->tpix = rc_ptr(t->pixels);
@@ -775,11 +821,20 @@ static void setup(rctx *r, const device *d, rc_dd_surface *t, rc_dd_surface *z)
             g->keyed = d->rs[41] && x->has_ckey; /* COLORKEYENABLE */
             g->key = x->ckey;
             g->linear = d->tss[s][16] == 2 || d->tss[s][17] == 2;
+            g->texels = g->bpp == 16 ? texel_table(&g->f) : NULL;
             g->au = d->tss[s][13] ? d->tss[s][13] : d->tss[s][12];
             g->av = d->tss[s][14] ? d->tss[s][14] : d->tss[s][12];
         }
     }
     r->keyed_discard = d->rs[41] && r->st[0].pix && !r->blend;
+}
+
+/* floorf as an integer, without a library call (the same for the values
+ * a texture coordinate times a size takes). */
+static inline int ifloor(float x)
+{
+    int i = (int)x;
+    return i - (x < (float)i);
 }
 
 /* A texel coordinate by the address mode. */
@@ -813,13 +868,13 @@ static inline c8 texel(const stage *g, int x, int y)
 static c8 sample(const stage *g, float u, float v)
 {
     if (!g->linear) {
-        int x = (int)floorf(u * (float)g->w), y = (int)floorf(v * (float)g->h);
+        int x = ifloor(u * (float)g->w), y = ifloor(v * (float)g->h);
         return texel(g, addr(x, (int)g->w, g->au), addr(y, (int)g->h, g->av));
     }
     /* Bilinear, colours weighted by alpha so that keyed texels do not
      * bleed their colour. */
     float fu = u * (float)g->w - 0.5f, fv = v * (float)g->h - 0.5f;
-    int x0 = (int)floorf(fu), y0 = (int)floorf(fv);
+    int x0 = ifloor(fu), y0 = ifloor(fv);
     int ax = (int)((fu - (float)x0) * 256.0f), ay = (int)((fv - (float)y0) * 256.0f);
     int r = 0, gg = 0, b = 0, a = 0;
     for (int k = 0; k < 4; k++) {
@@ -991,14 +1046,15 @@ static bool row_span(float w0, float w1, float w2, float d0, float d1, float d2,
     return *lo <= *hi;
 }
 
-static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
+/* A triangle, its rows from by0 up to by1 only (a band: bands drawn on
+ * several cores at once come out as the whole drawn on one). */
+static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2, int32_t by0, int32_t by1)
 {
-    const device *d = r->d;
     float area = edge(v0, v1, v2->x, v2->y);
     if (area == 0.0f) {
         return;
     }
-    uint32_t cull = d->rs[22];
+    uint32_t cull = r->cull;
     if ((cull == 2 && area > 0) || (cull == 3 && area < 0)) {
         return; /* D3DCULL_CW, D3DCULL_CCW (y down: clockwise has positive area) */
     }
@@ -1009,8 +1065,8 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
         area = -area;
     }
     rc_dd_surface *t = r->t;
-    int32_t cx0 = (int32_t)d->vp.x, cy0 = (int32_t)d->vp.y;
-    int32_t cx1 = cx0 + (int32_t)d->vp.w, cy1 = cy0 + (int32_t)d->vp.h;
+    int32_t cx0 = r->vx, cy0 = r->vy;
+    int32_t cx1 = cx0 + r->vw, cy1 = cy0 + r->vh;
     cx1 = cx1 > (int32_t)t->w ? (int32_t)t->w : cx1;
     cy1 = cy1 > (int32_t)t->h ? (int32_t)t->h : cy1;
     cx0 = cx0 < 0 ? 0 : cx0;
@@ -1023,6 +1079,8 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
     y0 = y0 < cy0 ? cy0 : y0;
     x1 = x1 >= cx1 ? cx1 - 1 : x1;
     y1 = y1 >= cy1 ? cy1 - 1 : y1;
+    y0 = y0 < by0 ? by0 : y0;
+    y1 = y1 >= by1 ? by1 - 1 : y1;
     if (x0 > x1 || y0 > y1) {
         return;
     }
@@ -1076,7 +1134,7 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
                 if (w0 < 0 || w1 < 0 || w2 < 0 || (w0 == 0 && !own0) || (w1 == 0 && !own1) || (w2 == 0 && !own2)) {
                     continue;
                 }
-                int tx = addr((int)floorf(u * (float)tw), tw, g0->au), ty = addr((int)floorf(v * (float)th), th, g0->av);
+                int tx = addr(ifloor(u * (float)tw), tw, g0->au), ty = addr(ifloor(v * (float)th), th, g0->av);
                 const uint8_t *tp = g0->pix + (uint32_t)ty * g0->pitch + 2u * (uint32_t)tx;
                 uint16_t raw = (uint16_t)(tp[0] | tp[1] << 8);
                 if (g0->keyed && raw == g0->key) {
@@ -1111,12 +1169,11 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
     } else if (g0->aop == 1) {
         amode = 1; /* DISABLE: the colour's */
     }
-    bool fast = affine && rgb565 && g0->pix && !g0->linear && !r->st[1].on && !r->alpha_test && !r->ztest &&
-                g0->bpp == 16 && cmode >= 0 && amode >= 0 && (!r->blend || (r->sb == 5 && r->db == 6));
+    bool fast = affine && rgb565 && g0->pix && g0->texels && !g0->linear && !r->st[1].on && !r->alpha_test &&
+                !r->ztest && g0->bpp == 16 && cmode >= 0 && amode >= 0 && (!r->blend || (r->sb == 5 && r->db == 6));
     if (fast) {
         int tw = (int)g0->w, th = (int)g0->h;
-        const fmt *tf = &g0->f;
-        bool tex_alpha = tf->c[3].bits != 0;
+        const uint32_t *texels = g0->texels;
         /* Colour steps per pixel to the right, 16.16. */
         int32_t dcol[4];
         for (int k = 0; k < 4; k++) {
@@ -1156,7 +1213,7 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
                 if (w0 < 0 || w1 < 0 || w2 < 0 || (w0 == 0 && !own0) || (w1 == 0 && !own1) || (w2 == 0 && !own2)) {
                     continue;
                 }
-                int tx = addr((int)floorf(u * (float)tw), tw, g0->au), ty = addr((int)floorf(v * (float)th), th, g0->av);
+                int tx = addr(ifloor(u * (float)tw), tw, g0->au), ty = addr(ifloor(v * (float)th), th, g0->av);
                 const uint8_t *tp = g0->pix + (uint32_t)ty * g0->pitch + 2u * (uint32_t)tx;
                 uint32_t raw = (uint32_t)(tp[0] | tp[1] << 8);
                 if (g0->keyed && raw == g0->key) {
@@ -1167,8 +1224,9 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
                 }
                 int dr = clamp8(col[0] >> 16), dg = clamp8(col[1] >> 16), db = clamp8(col[2] >> 16),
                     da = clamp8(col[3] >> 16);
-                int sr = get_chan(raw, tf->c[0]), sg = get_chan(raw, tf->c[1]), sb = get_chan(raw, tf->c[2]);
-                int ta = tex_alpha ? get_chan(raw, tf->c[3]) : 255;
+                uint32_t tx8 = texels[raw];
+                int sr = (int)(tx8 & 255), sg = (int)((tx8 >> 8) & 255), sb = (int)((tx8 >> 16) & 255);
+                int ta = (int)(tx8 >> 24);
                 if (cmode == 1) {
                     sr = mul8(sr, dr);
                     sg = mul8(sg, dg);
@@ -1242,14 +1300,122 @@ static void triangle(const rctx *r, const vtx *v0, const vtx *v1, const vtx *v2)
     }
 }
 
+/* Drawing is deferred: each draw's triangles (their vertices transformed)
+ * are queued with the state it was made in, until anything needs the
+ * pixels (a surface is locked, copied, shown or released, the target
+ * cleared: rc_d3d_flush). Then the whole queue is drawn in bands of rows
+ * on all cores when there are enough pixels: each band draws every
+ * triangle in its order, so every pixel comes out as drawn on one core,
+ * one draw after the other. */
+typedef struct queued {
+    rctx r;
+    uint32_t first, n; /* its triangles in the queue's */
+} queued;
+static queued *draws;
+static uint32_t n_draws, cap_draws;
+static vtx *tris;
+static uint32_t n_tris, cap_tris;
+static float queued_pixels;
+
+/* Beyond these the queue is drawn before more is added. */
+#define QUEUE_DRAWS 8192
+#define QUEUE_TRIS 262144
+/* Below this many pixels (the triangles' boxes) the queue is drawn on one
+ * core. */
+#define PARALLEL_PIXELS 20000
+
+typedef struct {
+    int32_t rows; /* each band's */
+} bands;
+
+static void draw_band(int32_t from, int32_t to)
+{
+    for (uint32_t i = 0; i < n_draws; i++) {
+        const queued *q = &draws[i];
+        for (uint32_t k = q->first; k < q->first + q->n; k++) {
+            const vtx *t = &tris[3 * k];
+            triangle(&q->r, &t[0], &t[1], &t[2], from, to);
+        }
+    }
+}
+
+static void band(void *ctx, int i)
+{
+    const bands *b = ctx;
+    draw_band(i * b->rows, (i + 1) * b->rows);
+}
+
+void rc_d3d_flush(void)
+{
+    if (!n_draws) {
+        return;
+    }
+    int cores = rc_plat_workers();
+    int32_t rows = 0;
+    for (uint32_t i = 0; i < n_draws; i++) {
+        int32_t h = (int32_t)draws[i].r.t->h;
+        rows = h > rows ? h : rows;
+    }
+    if (cores > 1 && queued_pixels >= PARALLEL_PIXELS && rows > 0 && !rc_trace("d3dslow")) {
+        /* Several bands per core, so that a core done early takes another. */
+        int32_t nb = cores * 4;
+        bands b = {(rows + nb - 1) / nb};
+        if (b.rows < 8) {
+            b.rows = 8;
+        }
+        rc_plat_parallel((rows + b.rows - 1) / b.rows, band, &b);
+    } else {
+        draw_band(0, INT32_MAX);
+    }
+    n_draws = 0;
+    n_tris = 0;
+    queued_pixels = 0;
+}
+
+/* Room for one more draw and triangle in the queue; false if there is no
+ * memory. */
+static bool queue_room(void)
+{
+    if (n_draws == cap_draws) {
+        uint32_t cap = cap_draws ? cap_draws * 2 : 64;
+        queued *more = realloc(draws, (size_t)cap * sizeof *draws);
+        if (!more) {
+            return false;
+        }
+        draws = more;
+        cap_draws = cap;
+    }
+    if (n_tris == cap_tris) {
+        uint32_t cap = cap_tris ? cap_tris * 2 : 1024;
+        vtx *more = realloc(tris, (size_t)cap * 3 * sizeof *tris);
+        if (!more) {
+            return false;
+        }
+        tris = more;
+        cap_tris = cap;
+    }
+    return true;
+}
+
 static void draw(device *d, uint32_t type, uint32_t fvf, uint32_t verts, uint32_t n, uint32_t idx, uint32_t nidx)
 {
     rc_dd_surface *t = rc_dd_surf(d->target);
     if (!t || !t->pixels) {
         return;
     }
-    rctx r;
-    setup(&r, d, t, rc_dd_surf(t->zbuffer));
+    if (n_draws >= QUEUE_DRAWS || n_tris >= QUEUE_TRIS) {
+        rc_d3d_flush();
+    }
+    if (!queue_room()) {
+        rc_d3d_flush();
+        if (!queue_room()) {
+            return;
+        }
+    }
+    queued *q = &draws[n_draws];
+    setup(&q->r, d, t, rc_dd_surf(t->zbuffer));
+    q->first = n_tris;
+    q->n = 0;
     layout l = layout_of(fvf);
     float wv[16], wvp[16];
     matmul(d->world, d->view, wv);
@@ -1289,11 +1455,23 @@ static void draw(device *d, uint32_t type, uint32_t fvf, uint32_t verts, uint32_
         for (int j = 0; j < 3; j++) {
             ok[j] = ids[j] < n || !idx ? load_vertex(d, &l, wvp, verts, ids[j], &tri[j]) : false;
         }
-        if (ok[0] && ok[1] && ok[2]) {
-            triangle(&r, &tri[0], &tri[1], &tri[2]);
+        if (!(ok[0] && ok[1] && ok[2])) {
+            continue;
         }
+        if (n_tris == cap_tris && !queue_room()) {
+            break;
+        }
+        memcpy(&tris[3 * n_tris], tri, sizeof tri);
+        n_tris++;
+        q->n++;
+        float w = fmaxf(tri[0].x, fmaxf(tri[1].x, tri[2].x)) - fminf(tri[0].x, fminf(tri[1].x, tri[2].x));
+        float h = fmaxf(tri[0].y, fmaxf(tri[1].y, tri[2].y)) - fminf(tri[0].y, fminf(tri[1].y, tri[2].y));
+        queued_pixels += w * h;
     }
 #undef INDEX
+    if (q->n) {
+        n_draws++;
+    }
 }
 
 /* ---- drawing ---- */
@@ -1302,6 +1480,7 @@ static void k_Clear(rc_cpu *c)
 {
     device *d = dev_of(c);
     uint32_t count = RC_ARG(c, 1), rects = RC_ARG(c, 2), flags = RC_ARG(c, 3), color = RC_ARG(c, 4);
+    rc_d3d_flush();
     rc_dd_surface *s = rc_dd_surf(d->target);
     if (s && (flags & 1)) { /* D3DCLEAR_TARGET */
         clear_target(s, count, rects, color);
