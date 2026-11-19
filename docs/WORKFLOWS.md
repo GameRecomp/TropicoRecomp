@@ -112,7 +112,7 @@ system greyed out, "disabled on this site for now".
 
 ### Version, icons and metadata
 
-The version is set in one place, the `VERSION` file (`0.1.0`): CMake and
+The version is set in one place, the `VERSION` file (`0.1.1`): CMake and
 the recompiler (`rc_convert::VERSION`, `recomp --version`, the page) read
 it, and `tools/version` gives it with the git revision,
 `0.1.0+<short revision>`, to the AppImage, the Android package
