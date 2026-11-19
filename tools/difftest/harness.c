@@ -12,6 +12,7 @@
  * WebAssembly modules from rc-emit-wasm, instantiated here against the
  * harness's memory and function table as the web shell does.
  */
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +28,11 @@ typedef struct rc_program {
     const rc_fn_entry *table;
     uint32_t count;
 } rc_program;
+
+/* The clock the runtime's rdtsc asks about (runtime/src/clock.c, not linked
+ * here): never virtual in these runs. */
+bool rc_clock_virtual(void) { return false; }
+uint64_t rc_ticks_peek_ms(void) { return 0; }
 
 #if defined(RC_NATIVE_HARNESS) && defined(__EMSCRIPTEN__)
 #include <emscripten.h>

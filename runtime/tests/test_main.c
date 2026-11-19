@@ -1,7 +1,14 @@
 /* SPDX-License-Identifier: MIT */
 #include "test.h"
 
+#include "rc/dispatch.h"
+
 int rc_test_failures;
+
+/* What the generated code of a program provides: none here. */
+const rc_fn_entry rc_lifted_table[1];
+const uint32_t rc_lifted_count = 0;
+const char *const rc_lifted_modules[] = {NULL};
 
 int main(void)
 {
