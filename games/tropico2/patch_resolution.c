@@ -473,6 +473,14 @@ static void fix_place(uint32_t w)
     }
 }
 
+/* The places of the windows in what is drawn moved (tree_draw), while it is
+ * drawn. */
+struct placed {
+    uint32_t window, x, y;
+};
+static struct placed *drawn_places;
+static unsigned n_drawn_places;
+
 /* Nothing kept of the bar (it is laid out again when next drawn). */
 static void forget_bar(void)
 {
@@ -549,6 +557,11 @@ static void window_gone(rc_cpu *c)
     if (desktop_seen && w == desktop_seen) {
         desktop_seen = 0;
         dialogs_by = dialogs_down = 0;
+    }
+    for (unsigned i = 0; i < n_drawn_places; i++) {
+        if (drawn_places[i].window == w) {
+            drawn_places[i].window = 0;
+        }
     }
     rc_lookup_lifted(WINDOW_GONE)(c);
 }
@@ -637,8 +650,34 @@ static void shift_rects(uint32_t w, int32_t dx, int32_t dy)
 }
 
 /* A window and the windows in it are drawn (thiscall: the surface and the
- * clip; a window clips with its rectangle). A dialog is drawn moved. */
+ * clip; a window clips with its rectangle). A dialog is drawn moved, and so
+ * is the HUD's part (hud_down).
+ *
+ * The game may place a window while it is drawn: a gauge in the HUD that
+ * changes height keeps its foot where the stock layout has it, in screen
+ * coordinates, and is placed by that less its parent's rectangle, which is
+ * moved then (after a change of size it happens in the first draw). Such a
+ * place is moved back by as much afterwards; else the gauge stays too high
+ * until it changes again. */
 #define TREE_DRAW 0x008de6e0u
+
+/* The windows in w (not w) and their places, up to max; returns how many. */
+static unsigned places(uint32_t w, struct placed *out, unsigned n, unsigned max, int depth)
+{
+    EACH_CHILD(w, k)
+    {
+        if (n < max) {
+            out[n].window = k;
+            out[n].x = rc_ld32(k + W_PLACE);
+            out[n].y = rc_ld32(k + W_PLACE + 4);
+            n++;
+        }
+        if (depth < 6) {
+            n = places(k, out, n, max, depth + 1);
+        }
+    }
+    return n;
+}
 
 static void tree_draw(rc_cpu *c)
 {
@@ -661,10 +700,30 @@ static void tree_draw(rc_cpu *c)
     rc_st32(w + W_PLACE, rc_ld32(w + W_PLACE) + (uint32_t)by);
     rc_st32(w + W_PLACE + 4, rc_ld32(w + W_PLACE + 4) + (uint32_t)down);
     shift_rects(w, by, down);
+    struct placed before[1024]; /* the HUD's part holds about 500 */
+    unsigned m = places(w, before, 0, 1024, 0);
+    struct placed *outer = drawn_places;
+    unsigned n_outer = n_drawn_places;
+    drawn_places = before;
+    n_drawn_places = m;
     rc_lookup_lifted(TREE_DRAW)(c);
+    drawn_places = outer;
+    n_drawn_places = n_outer;
     rc_st32(w + W_PLACE, rc_ld32(w + W_PLACE) - (uint32_t)by);
     rc_st32(w + W_PLACE + 4, rc_ld32(w + W_PLACE + 4) - (uint32_t)down);
     shift_rects(w, -by, -down);
+    for (unsigned j = 0; j < m; j++) {
+        uint32_t k = before[j].window;
+        if (!k) {
+            continue;
+        }
+        uint32_t x = rc_ld32(k + W_PLACE), y = rc_ld32(k + W_PLACE + 4);
+        if ((x != before[j].x || y != before[j].y) && x != (uint32_t)-10000) { /* not one hidden */
+            rc_st32(k + W_PLACE, x == before[j].x ? x : x + (uint32_t)by);
+            rc_st32(k + W_PLACE + 4, y == before[j].y ? y : y + (uint32_t)down);
+            place(k);
+        }
+    }
 }
 
 /* The rectangle a window and the windows shown in it cover (a dialog's
