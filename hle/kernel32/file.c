@@ -770,7 +770,7 @@ static void k_MapViewOfFile(rc_cpu *c)
         RC_RETURN(c, 0, 5);
     }
     fseek(x->f, (long)offset, SEEK_SET);
-    size_t got = fread(rc_ptr(addr), 1, n, x->f);
+    size_t got = rc_host_fread(rc_ptr(addr), n, x->f); /* in a browser, from the blocks it fetches */
     (void)got;
     fseek(x->f, at, SEEK_SET);
     views[slot] = (struct view){addr, n, offset, m->file, (access & FILE_MAP_WRITE) != 0};
