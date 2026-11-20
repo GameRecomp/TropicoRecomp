@@ -473,6 +473,17 @@ static void fix_place(uint32_t w)
     }
 }
 
+/* Nothing kept of the bar (it is laid out again when next drawn). */
+static void forget_bar(void)
+{
+    n_undo = n_tiles = n_kept = n_kept_x = 0;
+    balustrade = 0;
+    the_bar = 0;
+    moved_right = 0;
+    desktop_seen = 0;
+    dialogs_by = dialogs_down = 0;
+}
+
 /* The bar as the game laid it out, for a screen of another width. */
 static void unarrange(void)
 {
@@ -484,12 +495,62 @@ static void unarrange(void)
         rc_st32(undo[i].window + W_RECT + 8, undo[i].width);
     }
     place(the_bar);
-    n_undo = n_tiles = n_kept = n_kept_x = 0;
-    balustrade = 0;
-    the_bar = 0;
-    moved_right = 0;
-    desktop_seen = 0;
-    dialogs_by = dialogs_down = 0;
+    forget_bar();
+}
+
+/* A window is destroyed (thiscall: the window; every window's destructor
+ * ends in this one, also for windows that are members of another, such as
+ * the HUD's part in the root). What is kept of it, or of the windows in it,
+ * is forgotten: on starting a game the game screen goes, and its memory is
+ * reused. */
+#define WINDOW_GONE 0x008dce40u
+
+/* w is a or one of the windows a is in. */
+static int is_or_holds(uint32_t w, uint32_t a)
+{
+    for (int depth = 0; a && depth < 16; depth++, a = rc_ld32(a + W_PARENT)) {
+        if (a == w) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+#define PRUNE(list, n, w)                                                                                              \
+    do {                                                                                                               \
+        unsigned kept_n_ = 0;                                                                                          \
+        for (unsigned i_ = 0; i_ < (n); i_++) {                                                                        \
+            if ((list)[i_].window != (w)) {                                                                            \
+                (list)[kept_n_++] = (list)[i_];                                                                        \
+            }                                                                                                          \
+        }                                                                                                              \
+        (n) = kept_n_;                                                                                                 \
+    } while (0)
+
+static void window_gone(rc_cpu *c)
+{
+    uint32_t w = c->r[RC_ECX];
+    if (the_bar && is_or_holds(w, the_bar)) {
+        forget_bar();
+    } else if (the_bar) {
+        PRUNE(undo, n_undo, w);
+        PRUNE(tiles, n_tiles, w);
+        PRUNE(kept, n_kept, w);
+        PRUNE(kept_x, n_kept_x, w);
+        if (w == balustrade) {
+            balustrade = 0;
+        }
+    }
+    if (hud_part && is_or_holds(w, hud_part)) {
+        hud_part = 0;
+        hud_down = 0;
+        pointer_in_hud = 0;
+    }
+    if (desktop_seen && w == desktop_seen) {
+        desktop_seen = 0;
+        dialogs_by = dialogs_down = 0;
+    }
+    rc_lookup_lifted(WINDOW_GONE)(c);
 }
 
 static void bar_draw(rc_cpu *c)
@@ -1403,6 +1464,7 @@ void tropico2_patch_resolution(void)
     rc_set_pointer_map(pointer_map);
     rc_hook(TREE_DRAW, tree_draw);
     rc_hook(HIT_TEST, hit_test);
+    rc_hook(WINDOW_GONE, window_gone);
     if (changed(2) || changed(4)) {
         rc_log("widescreen: the game screen at %ux%u (at the interface size 1024x768; %ux%u at 1600x1200)%s",
                widened(2), heightened(2), widened(4), heightened(4), follow ? ", following the window" : "");
