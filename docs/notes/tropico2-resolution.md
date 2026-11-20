@@ -169,18 +169,38 @@ put them, and they are only drawn elsewhere:
   pointer event; a scripted click stays where the script last moved the
   pointer, as a device's would).
 
-## The settings' graphics page
+## The settings' pages: the scale and its filter
 
-Its right page (`'_rpg'`) holds the 3D mode's choice (`'rend'`: hardware or
-software; here Direct3D is always drawn by DirectDraw, so it means nothing)
-and below it the resolution (`'reso'`), a slider.
+The graphics page's right page (`'_rpg'`) holds the 3D mode's choice
+(`'rend'`: hardware or software; here Direct3D is always drawn by
+DirectDraw, so it means nothing) and below it the resolution (`'reso'`), a
+slider of the interface size. They become the filter's choice (nearest or
+linear) and the scale's slider: the game screen is the window's size (or
+settings.ini's WxH) divided by 1x, 1.5x, 2x, 2.5x, 3x, 4x or 5x, those that
+leave at least 640x480, shown as large as fits; the interface takes the
+largest of the game's sizes that fits that screen.
 
 The slider cannot take more stops: its class (vtable `0x0093af68`, made by
 `0x006d68c0`) has five pin windows (`'pin0'` to `'pin4'`) at fixed offsets
-in the object, and a click sets its value to the pin's number (`0x006d3e49`:
-(pin + `minv`) × `scal`), so it stays the interface size. The 3D mode's
-choice becomes the shape's instead: the window's (or settings.ini's WxH,
-then named by its shape) and the game's 4:3.
+in the object, its track is drawn with five notches, and a click sets its
+value to the pin's number (`0x006d3e49`: (pin + `minv`) × `scal`). So it
+offers at most five scales (dropping 1.5x, then 2.5x, when more fit),
+spread over the stops (three at 0, 2 and 4); a stop between them takes the
+nearest scale.
+
+The page keeps the slider's value, which the game takes for the interface
+size: the graphics page at `+0x89c` (set from the size setting at
+`0x006d0623`; taken in the page's handler of changes at `0x006d2c60`, which
+for `'reso'` has the current screen change to that size, its method at
+vtable `+0x70`, then keeps the size in effect there and shows that stop,
+`'pin0'` + the value), the main menu's settings page at `+0x2b8` (set at
+`0x006dbbd8`, taken at `0x006dbf8e`). The patch gives the slider the stop of
+the scale in effect; where the game takes it, it changes to the scale
+itself (the game screen and its interface size) and leaves the game the
+size in effect, so that the game changes nothing more; then it puts the
+stop back for the game to show. Outside the game screen (the menus) the
+size setting is kept at the interface size for the scale, from the message
+loop.
 
 - A radio group is made by `0x006d5eb0` (thiscall: the page's name, the
   group's): each button's
@@ -189,13 +209,13 @@ then named by its shape) and the game's 4:3.
   parted by `*`). At `0x006d66a1` the group has been given the variable it
   shows and sets (`+0xc0`, for `'rend'` `0x009b6840`). The title shown is
   the one the page's builder looks up after making a control (`0x006d51d2`,
-  the control's name at `[ebp-0x2c]`); the patch gives it one
-  of its own instead (0 wide, 1 4:3).
+  the control's name at `[ebp-0x2c]`); the patch gives the group and the
+  slider titles of their own.
 - A chosen button sets the variable (`0x0058ecb0`) and sends `'stat'` to the
   page, whose handler compares the control's name with `'rend'` at
-  `0x006d2e52`. The patch changes the shape there, writes settings.ini, and
-  clears the name, so the handler does nothing more.
-- The shape changes while playing: the current screen (`0x006cf0e0`, no
+  `0x006d2e52`. The patch sets the filter there (settings.ini's `pixels`),
+  and clears the name, so the handler does nothing more.
+- The size changes while playing: the current screen (`0x006cf0e0`, no
   arguments) changes to a size with its method at vtable `+0x70` (the size,
   and whether to save it), which ends in `0x006ce920`; that lays the screen
   out anew only when the size changed, so the setting at `0x00993de8` says
@@ -206,15 +226,16 @@ then named by its shape) and the game's 4:3.
   `0x008b91e0` (thiscall: the list's kind, the depth, width and height);
   wrapped, it finds every size's width at the shape in effect. DirectDraw
   takes any mode.
-- While the shape follows the window, the window's shape is looked at from
-  the message loop every 100 ms; one kept for half a second is taken.
+- While the game screen follows the window, the window's size is looked at
+  from the message loop every 100 ms; one kept for half a second is taken
+  (with the interface size for it, and a smaller scale if the chosen one
+  no longer fits).
 
-The resolution's value under its slider is looked up among the options'
-texts (`0x0042ee50`, the slider's stop as the number; the result in `eax` at
+The slider's value under it is looked up among the options' texts
+(`0x0042ee50`, the slider's stop as the number; the result in `eax` at
 `0x006d9adc`). The game's own texts, `640x480` to `1600x1200` (in
-`Data/text.{}`), become the size the game screen has at that stop, with its
-shape, as on Tropico's options page: `1364x768 (16:9)`. The label sizes
-itself to its text.
+`Data/text.{}`), become the scale at that stop and the game screen's size
+at it: `1.5x (1280x720)`. The label sizes itself to its text.
 
 The patch's own texts are in the language of the game's texts
 (`games/tropico2/lang.c`): the program keeps no number for it, so it is the
@@ -223,10 +244,8 @@ language whose common short words `Data/text.{}` holds most often.
 ## The setting
 
 `resolution` in `settings.ini` (shared with Tropico, where it is a size):
-for Tropico 2 its shape counts. `1920x1080` gives 16:9, `2560x1080` 21:9;
-`window` takes the window's shape and follows it (the screen's in full
-screen, the page's in a browser); `off` keeps the game's 4:3. The graphics
-page offers the first (or settings.ini's WxH) and 4:3, and writes the
-choice there. A shape narrower than 4:3 keeps 4:3. The game's own screen-size option still picks the
-height (and with it the size of the interface).
-
+for Tropico 2 the size the game screen is a scale of. `window` takes the
+window's (the screen's in full screen, the page's in a browser) and follows
+it; WxH takes that; `off` keeps the game's own sizes and 4:3 (the slider
+then picks the interface size, as in the game). `game_scale` is the scale,
+`pixels` (`sharp` or `smooth`) the filter; the graphics page writes both.

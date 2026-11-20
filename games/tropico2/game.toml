@@ -70,6 +70,12 @@ points = [
     0x006d2129, # resolution: a control's status-line text, just looked up
     0x006d66a1, # resolution: a radio group is given its variable
     0x006d2e52, # resolution: the settings page's handler of changes, at 'rend'
+    0x006d0629, # resolution: the graphics page has set its slider's value from the size in effect
+    0x006d2c98, # resolution: the graphics page takes its slider's value
+    0x006d2cd5, # resolution: and has changed to it
+    0x006dbbde, # resolution: the menu's settings page has set its slider's value
+    0x006dbfa4, # resolution: the menu's settings page takes its slider's value
+    0x006dbfd2, # resolution: and has changed to it
     0x008d0d0d, # fullscreen: the start-up reads the full screen preference
     0x006d0601, # fullscreen: the graphics page reads it to tick its box
     0x006d0608, # fullscreen: and has

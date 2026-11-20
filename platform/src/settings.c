@@ -44,7 +44,11 @@ static const char DEFAULTS[] =
     "# At most this many frames a second, so that the processor rests between\n"
     "# frames (cooler and quieter; fewer are less smooth): for example 30.\n"
     "# max: as many as the screen shows.\n"
-    "fps = " DEFAULT_FPS_TEXT "\n";
+    "fps = " DEFAULT_FPS_TEXT "\n"
+    "\n"
+    "# Tropico 2: the game screen is the window's size divided by this (1, 1.5,\n"
+    "# 2, 2.5, 3, 4 or 5); its graphics page offers those that fit.\n"
+    "game_scale = 1\n";
 
 static void set(rc_display *d, const char *key, const char *value)
 {
@@ -62,6 +66,9 @@ static void set(rc_display *d, const char *key, const char *value)
         if (d->max_fps < 0 || d->max_fps > 1000) {
             d->max_fps = 0;
         }
+    } else if (!strcmp(key, "game_scale")) {
+        double v = atof(value);
+        d->game_scale = v >= 1.0 && v <= 8.0 ? (int)(v * 10.0 + 0.5) : 0;
     } else if (!strcmp(key, "resolution")) {
         int w = 0, h = 0;
         if (!strcmp(value, "window")) {
@@ -108,8 +115,8 @@ void rc_plat_display_store(void)
         return;
     }
     /* The file as it is, with the lines of the settings that change while
-     * playing (full screen, and the resolution on the options page)
-     * replaced. */
+     * playing (full screen; the resolution, the filter and the scale on the
+     * options pages) replaced. */
     char text[8192] = "";
     size_t n = 0;
     FILE *f = fopen(settings_path, "r");
@@ -119,8 +126,15 @@ void rc_plat_display_store(void)
     }
     text[n] = 0;
     rc_display d = rc_plat_display_get();
-    char lines[2][64];
+    char lines[4][64];
     snprintf(lines[0], sizeof lines[0], "fullscreen = %s\n", d.fullscreen ? "yes" : "no");
+    snprintf(lines[2], sizeof lines[2], "pixels = %s\n", d.smooth ? "smooth" : "sharp");
+    int gs = d.game_scale > 0 ? d.game_scale : 10;
+    if (gs % 10) {
+        snprintf(lines[3], sizeof lines[3], "game_scale = %d.%d\n", gs / 10, gs % 10);
+    } else {
+        snprintf(lines[3], sizeof lines[3], "game_scale = %d\n", gs / 10);
+    }
     if (d.game_w < 0) {
         snprintf(lines[1], sizeof lines[1], "resolution = window\n");
     } else if (d.game_w > 0 && d.game_h > 0) {
@@ -128,8 +142,8 @@ void rc_plat_display_store(void)
     } else {
         snprintf(lines[1], sizeof lines[1], "resolution = off\n");
     }
-    static const char *const keys[2] = {"fullscreen", "resolution"};
-    bool done[2] = {false, false};
+    static const char *const keys[4] = {"fullscreen", "resolution", "pixels", "game_scale"};
+    bool done[4] = {false, false, false, false};
     char out[8400] = "";
     size_t o = 0;
     for (char *line = text; *line;) {
@@ -142,7 +156,7 @@ void rc_plat_display_store(void)
         const char *eq = strchr(p, '=');
         const char *put = line;
         size_t put_len = len;
-        for (int k = 0; k < 2; k++) {
+        for (int k = 0; k < 4; k++) {
             if (!strncmp(p, keys[k], strlen(keys[k])) && eq && (size_t)(eq - line) < len) {
                 put = lines[k];
                 put_len = strlen(put);
@@ -156,7 +170,7 @@ void rc_plat_display_store(void)
         }
         line += len;
     }
-    for (int k = 0; k < 2; k++) {
+    for (int k = 0; k < 4; k++) {
         size_t len = strlen(lines[k]);
         if (!done[k] && o + len < sizeof out) {
             memcpy(out + o, lines[k], len + 1);
@@ -171,7 +185,7 @@ void rc_plat_display_store(void)
 
 void rc_plat_display_load(const char *user_dir)
 {
-    rc_display d = {0, false, false, 0, 0, 0};
+    rc_display d = {0, false, false, 0, 0, 0, 0};
     d.max_fps = DEFAULT_FPS;
 #if !defined(__EMSCRIPTEN__)
     /* (A browser's page decides for itself. On Android the file keeps the

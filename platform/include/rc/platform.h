@@ -73,6 +73,10 @@ typedef struct rc_display {
      * processor rests, for the rest of a frame's time); 0 for as many as
      * the display shows. */
     int max_fps;
+    /* A game project's own scale of its screen against the window, in
+     * tenths (15 for 1.5x; 0 for none): Tropico 2's game screen is the
+     * window's size divided by it, shown as large as fits. */
+    int game_scale;
 } rc_display;
 
 /* Apply display settings, at any time (before the window exists too). */

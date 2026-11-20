@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 /*
  * Widescreen and the window's size: the game screen as large as the window
- * (or the chosen resolution), the interface at the size chosen in the game.
+ * (or the chosen resolution) divided by a scale, the interface at the
+ * largest of the game's sizes that fits it.
  *
  * The game offers five screen sizes (640x480 to 1600x1200) and has its
  * interface drawn for each: the art of a size and where every piece goes
@@ -29,13 +30,15 @@
  *   part stays where the layout puts it and is drawn lower (hud_size).
  * - The bar is arranged for the whole width when it is drawn (see arrange).
  * - Dialogs are drawn in the middle (and the pointer over them is where the
- *   game has them); on the settings' graphics page the 3D mode's choice
- *   becomes the shape's (the window's or 4:3), and the resolution shows the
- *   screen's size with its shape.
+ *   game has them); on the settings' pages the resolution's slider becomes
+ *   a scale (the game screen is the size wanted divided by it, and the
+ *   interface the largest size that fits), and the 3D mode's choice the
+ *   filter's (nearest or linear).
  *
- * settings.ini's `resolution` gives the size: WxH, `window` the window's,
- * following it (the screen's in full screen, the page's in a browser),
- * `off` the game's own; the graphics page writes it. What the game does at
+ * settings.ini's `resolution` gives the size wanted: WxH, `window` the
+ * window's, following it (the screen's in full screen, the page's in a
+ * browser), `off` the game's own; `game_scale` the scale and `pixels` the
+ * filter, which the graphics page writes. What the game does at
  * each place is in docs/notes/tropico2-resolution.md.
  */
 #include <stdio.h>
@@ -674,21 +677,40 @@ static void hit_test(rc_cpu *c)
     rc_lookup_lifted(HIT_TEST)(c);
 }
 
-/* ---- the settings' graphics page: the shape */
-
-/* Its right page holds the 3D mode's choice ('rend': hardware or software,
- * which here means nothing: Direct3D is drawn by DirectDraw), a group of
- * two radio buttons made by 0x006d5eb0 (thiscall: the page's name and the
- * group's). It becomes the shape's choice: the window's (or settings.ini's
- * WxH) or the game's own 4:3. The page's builder has just looked up a
- * control's title at GROUP_TITLE (in eax, the control's name at
- * [ebp-0x2c]); the group's builder each button's text at OPTION_TEXT (in
- * eax, the button's number at [ebp-0x18]); at GROUP_BOUND the group ([ebp-0x14]) has been
- * given the variable it shows and sets (+0xc0), here VAR_SHAPE (0 wide, 1
- * 4:3) instead of the 3D mode's. When a button is chosen, the page's
- * handler of changes compares the control's name ([ebp-0x6c]) with 'rend'
- * at GROUP_CHANGED; the shape changes there, and the name is cleared so
- * that the handler does nothing more. */
+/* ---- the settings' pages: the scale and its filter
+ *
+ * The game screen is the window's size (or settings.ini's WxH) divided by
+ * a scale: 1x, 1.5x, 2x, 2.5x, 3x, 4x or 5x, those that leave at least
+ * 640x480, shown as large as fits. The interface takes the largest of the
+ * game's sizes that fits that screen. The resolution's slider becomes the
+ * scale's, the 3D mode's choice the filter's (nearest or linear).
+ *
+ * The slider has five stops (pin windows at fixed places, its track drawn
+ * with five notches); it offers at most five scales (dropping 1.5x, then
+ * 2.5x, when more fit), spread over them, and a stop between them takes
+ * the nearest scale. The page keeps the slider's
+ * value, which the game takes for the interface size: the graphics page
+ * at +0x89c (set from the size in effect at GAME_PAGE_SET, the page in
+ * eax; taken at GAME_PAGE_TAKE, the page at [ebp-0x1e8], where the game
+ * changes to that size and then keeps the size in effect there, and shows
+ * the stop at GAME_PAGE_TAKEN), the main menu's settings page at +0x2b8
+ * (MENU_PAGE_*, the page at [ebp-0x6c]). The patch gives the slider the stop
+ * of the scale in effect, and where the game takes it, changes to the
+ * scale itself and leaves the game the size in effect, so that it changes
+ * nothing more; then the stop is shown again.
+ *
+ * The 3D mode's choice ('rend': hardware or software, which here means
+ * nothing: Direct3D is drawn by DirectDraw) is a group of two radio
+ * buttons made by 0x006d5eb0 (thiscall: the page's name and the group's).
+ * The page's builder has just looked up a control's title at GROUP_TITLE
+ * (in eax, the control's name at [ebp-0x2c]); the group's builder each
+ * button's text at OPTION_TEXT (in eax, the button's number at [ebp-0x18]);
+ * at GROUP_BOUND the group ([ebp-0x14]) has been given the variable it shows
+ * and sets (+0xc0), here VAR_FILTER (0 nearest, 1 linear) instead of the 3D
+ * mode's. When a button is chosen, the page's handler of changes compares
+ * the control's name ([ebp-0x6c]) with 'rend' at GROUP_CHANGED; the filter
+ * changes there, and the name is cleared so that the handler does nothing
+ * more. */
 #define GROUP_TITLE 0x006d51d7u
 #define OPTION_TEXT 0x006d656fu
 #define GROUP_BOUND 0x006d66a1u
@@ -700,7 +722,19 @@ static void hit_test(rc_cpu *c)
 #define G_CHANGED -0x6c
 #define G_VALUE 0xc0u
 #define RENDER NAME('r', 'e', 'n', 'd')
-#define VAR_SHAPE (RC_PATCH_VARS + 0x00u)
+#define RESOLUTION NAME('r', 'e', 's', 'o')
+#define VAR_FILTER (RC_PATCH_VARS + 0x00u)
+
+#define GAME_PAGE_VALUE 0x89cu
+#define GAME_PAGE_SET 0x006d0629u
+#define GAME_PAGE_TAKE 0x006d2c98u
+#define GAME_PAGE_TAKEN 0x006d2cd5u
+#define GAME_PAGE_AT -0x1e8
+#define MENU_PAGE_VALUE 0x2b8u
+#define MENU_PAGE_SET 0x006dbbdeu
+#define MENU_PAGE_TAKE 0x006dbfa4u
+#define MENU_PAGE_TAKEN 0x006dbfd2u
+#define MENU_PAGE_AT -0x6c
 
 /* The setting of the screen size (0 to 4), the current screen (cdecl, no
  * arguments: the main menu's or the game's) and its method that changes
@@ -710,8 +744,14 @@ static void hit_test(rc_cpu *c)
 #define SET_SIZE 0x70u
 
 static int wide;                /* the screen wider than 4:3 */
-static int follow;              /* at the window's shape (else custom_w x custom_h) */
+static int follow;              /* at the window's size (else custom_w x custom_h) */
 static int custom_w, custom_h;  /* settings.ini's WxH, if it gave one */
+static unsigned scale10 = 10;   /* the scale chosen, in tenths (settings.ini's game_scale) */
+
+/* The scales, in tenths; those the slider offers, and the stop of each. */
+static const unsigned all_scales[7] = {10, 15, 20, 25, 30, 40, 50};
+static unsigned offered[5], n_offered;
+static unsigned stop_of[5];
 
 /* A text in guest memory, made once. */
 static uint32_t guest_text(uint32_t *slot, const char *text)
@@ -726,9 +766,228 @@ static uint32_t guest_text(uint32_t *slot, const char *text)
     return *slot;
 }
 
-static int on_render_group(rc_cpu *c) { return rc_ld32(c->r[RC_EBP] + G_NAME) == RENDER; }
+/* The size the game screen is a scale of: the window's, or settings.ini's
+ * WxH. False if there is none. */
+static int base_size(unsigned *w, unsigned *h)
+{
+    int aw = custom_w, ah = custom_h;
+    if (follow) {
+        rc_plat_area(&aw, &ah);
+    }
+    if (aw <= 0 || ah <= 0) {
+        return 0;
+    }
+    *w = (unsigned)aw;
+    *h = (unsigned)ah;
+    return 1;
+}
 
-static void aspect_name(unsigned w, unsigned h, char *out, size_t n);
+/* Whether a scale leaves at least the smallest size (640x480; a shape
+ * narrower than 4:3 counts as 4:3). */
+static int fits(unsigned w, unsigned h, unsigned s)
+{
+    unsigned hh = (uint64_t)h * 4 > (uint64_t)w * 3 ? w * 3 / 4 : h;
+    return (uint64_t)w * 10 / s >= 640 && (uint64_t)hh * 10 / s >= 480;
+}
+
+/* The scales the slider offers now, and their stops. */
+static void offer(void)
+{
+    unsigned w, h, list[7], n = 0;
+    if (base_size(&w, &h)) {
+        for (unsigned i = 0; i < 7; i++) {
+            if (fits(w, h, all_scales[i])) {
+                list[n++] = all_scales[i];
+            }
+        }
+    }
+    if (!n) {
+        list[n++] = 10;
+    }
+    static const unsigned dropped[2] = {15, 25}; /* first, when more than five fit */
+    for (unsigned d = 0; d < 2 && n > 5; d++) {
+        unsigned j = 0;
+        for (unsigned i = 0; i < n; i++) {
+            if (list[i] != dropped[d]) {
+                list[j++] = list[i];
+            }
+        }
+        n = j;
+    }
+    n_offered = n > 5 ? 5 : n;
+    for (unsigned k = 0; k < n_offered; k++) {
+        offered[k] = list[k];
+        stop_of[k] = n_offered == 1 ? 0 : (k * 4 + (n_offered - 1) / 2) / (n_offered - 1);
+    }
+}
+
+/* The scale in effect: the one chosen, or the largest offered below it. */
+static unsigned scale_now(void)
+{
+    offer();
+    unsigned best = offered[0];
+    for (unsigned k = 0; k < n_offered; k++) {
+        if (offered[k] <= scale10) {
+            best = offered[k];
+        }
+    }
+    return best;
+}
+
+/* The game screen wanted (the base size divided by the scale); 0 x 0 for
+ * the game's own. */
+static void shape_now(unsigned *w, unsigned *h)
+{
+    unsigned bw, bh;
+    *w = *h = 0;
+    if (!wide || !base_size(&bw, &bh)) {
+        return;
+    }
+    unsigned s = scale_now();
+    *w = bw * 10 / s;
+    *h = bh * 10 / s;
+}
+
+/* The interface size for a game screen: the largest of the game's that
+ * fits it. */
+static unsigned slot_for(unsigned w, unsigned h)
+{
+    unsigned hh = (uint64_t)h * 4 > (uint64_t)w * 3 ? w * 3 / 4 : h;
+    for (unsigned i = 4; i > 0; i--) {
+        if (stock_h[i] <= hh && stock_w[i] <= w) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+/* Keep the choice in settings.ini. The picture is then shown as large as
+ * fits (a whole-number scale of settings.ini's would show it at that). */
+static void store(void)
+{
+    rc_display d = rc_plat_display_get();
+    d.game_w = !wide ? 0 : follow ? -1 : custom_w;
+    d.game_h = !wide ? 0 : follow ? -1 : custom_h;
+    if (wide) {
+        d.game_scale = (int)scale10;
+        d.scale = 0;
+    }
+    rc_plat_display(&d);
+    rc_plat_display_store();
+}
+
+static uint32_t labels[5]; /* the slider's texts, in guest memory */
+
+/* Take the game screen w x h (0 x 0 for 4:3) and with it its interface
+ * size; while the game screen is shown, change to them. The method lays
+ * the screen out anew only for another size, so the setting says another
+ * one until it is called. */
+static void reshape(rc_cpu *c, unsigned w, unsigned h)
+{
+    uint32_t slot = rc_ld32(SIZE_SETTING), mw, mh;
+    rc_ddraw_mode(&mw, &mh);
+    int showing = slot < 5 && mh == heightened(slot) && mw == widened(slot);
+    aspect_w = w;
+    aspect_h = h;
+    uint32_t to = slot < 5 && wide && w && h ? slot_for(w, h) : slot;
+    memset(labels, 0, sizeof labels);
+    if (to < 5) {
+        rc_log("widescreen: the game screen at %ux%u (the interface at %ux%u)", widened(to), heightened(to),
+               stock_w[to], stock_h[to]);
+    }
+    if (!showing) {
+        rc_st32(SIZE_SETTING, to);
+        return;
+    }
+    if (to == slot && mw == widened(to) && mh == heightened(to)) {
+        return;
+    }
+    unarrange();
+    rc_cpu saved = *c;
+    uint32_t screen = rc_call_guest(c, SCREEN_NOW, 0, NULL);
+    if (screen) {
+        rc_st32(SIZE_SETTING, to ? 0 : 1);
+        c->r[RC_ECX] = screen;
+        uint32_t args[2] = {to, 0};
+        changing_to = (int)to;
+        rc_call_guest(c, rc_ld32(rc_ld32(screen) + SET_SIZE), 2, args);
+        changing_to = -1;
+        if (rc_ld32(SIZE_SETTING) != to) {
+            rc_st32(SIZE_SETTING, slot); /* (it failed: still that size) */
+        }
+    }
+    *c = saved;
+}
+
+/* The slider's stop for the scale in effect. */
+static unsigned stop_now(void)
+{
+    unsigned s = scale_now();
+    for (unsigned k = 0; k < n_offered; k++) {
+        if (offered[k] == s) {
+            return stop_of[k];
+        }
+    }
+    return 0;
+}
+
+static void page_set(uint32_t value_at)
+{
+    if (wide) {
+        rc_st32(value_at, stop_now());
+        memset(labels, 0, sizeof labels);
+    }
+}
+
+static void game_page_set(rc_cpu *c) { page_set(c->r[RC_EAX] + GAME_PAGE_VALUE); }
+static void menu_page_set(rc_cpu *c) { page_set(c->r[RC_EAX] + MENU_PAGE_VALUE); }
+
+static int taken_stop = -1; /* the stop to show once the game has taken the value */
+
+static void page_take(rc_cpu *c, uint32_t value_at)
+{
+    if (!wide) {
+        return;
+    }
+    offer();
+    int v = (int)rc_ld32(value_at), best = 0;
+    for (unsigned k = 1; k < n_offered; k++) {
+        int d = (int)stop_of[k] - v, db = (int)stop_of[best] - v;
+        if ((d < 0 ? -d : d) < (db < 0 ? -db : db)) {
+            best = (int)k;
+        }
+    }
+    taken_stop = (int)stop_of[best];
+    if (offered[best] != scale_now()) {
+        scale10 = offered[best];
+        store();
+        unsigned w, h;
+        shape_now(&w, &h);
+        reshape(c, w, h);
+    }
+    rc_st32(value_at, rc_ld32(SIZE_SETTING)); /* the game changes to the size in effect: nothing */
+}
+
+static void page_taken(uint32_t value_at)
+{
+    if (taken_stop >= 0) {
+        rc_st32(value_at, (uint32_t)taken_stop);
+        taken_stop = -1;
+    }
+}
+
+static void game_page_take(rc_cpu *c)
+{
+    page_take(c, rc_ld32(c->r[RC_EBP] + (uint32_t)GAME_PAGE_AT) + GAME_PAGE_VALUE);
+}
+static void game_page_taken(rc_cpu *c) { page_taken(rc_ld32(c->r[RC_EBP] + (uint32_t)GAME_PAGE_AT) + GAME_PAGE_VALUE); }
+static void menu_page_take(rc_cpu *c)
+{
+    page_take(c, rc_ld32(c->r[RC_EBP] + (uint32_t)MENU_PAGE_AT) + MENU_PAGE_VALUE);
+}
+static void menu_page_taken(rc_cpu *c) { page_taken(rc_ld32(c->r[RC_EBP] + (uint32_t)MENU_PAGE_AT) + MENU_PAGE_VALUE); }
+
+static int on_render_group(rc_cpu *c) { return rc_ld32(c->r[RC_EBP] + G_NAME) == RENDER; }
 
 /* (The box that was "Reduced Graphics Shifting" is patch_scroll.c's, but
  * its texts are looked up here too.) */
@@ -736,10 +995,12 @@ static void aspect_name(unsigned w, unsigned h, char *out, size_t n);
 
 static void group_title(rc_cpu *c)
 {
-    static uint32_t text, edge;
+    static uint32_t filter, scale, edge;
     uint32_t name = rc_ld32(c->r[RC_EBP] + (uint32_t)P_NAME);
-    if (name == RENDER && guest_text(&text, tropico2_tr(TROPICO2_T_SHAPE))) {
-        c->r[RC_EAX] = text;
+    if (name == RENDER && guest_text(&filter, tropico2_tr(TROPICO2_T_FILTER))) {
+        c->r[RC_EAX] = filter;
+    } else if (name == RESOLUTION && wide && guest_text(&scale, tropico2_tr(TROPICO2_T_SCALE))) {
+        c->r[RC_EAX] = scale;
     } else if (name == REDUCED_SHIFTING && guest_text(&edge, tropico2_tr(TROPICO2_T_NO_EDGE_SCROLL))) {
         c->r[RC_EAX] = edge;
     }
@@ -755,44 +1016,39 @@ static void group_title(rc_cpu *c)
 static const uint32_t page_hint_callers[] = {0x006d5298u, 0x006d5360u, 0x006d5375u};
 static void option_hint(rc_cpu *c)
 {
-    static uint32_t window, custom, own, edge;
+    static uint32_t nearest, linear, edge, scale;
     uint32_t ebp = c->r[RC_EBP], caller = rc_ld32(ebp), ret = rc_ld32(ebp + 4);
     for (unsigned i = 0; i < sizeof page_hint_callers / sizeof page_hint_callers[0]; i++) {
-        if (ret == page_hint_callers[i] && rc_ld32(caller + (uint32_t)P_NAME) == REDUCED_SHIFTING &&
-            guest_text(&edge, tropico2_tr(TROPICO2_T_NO_EDGE_SCROLL_HINT))) {
+        uint32_t name = ret == page_hint_callers[i] ? rc_ld32(caller + (uint32_t)P_NAME) : 0;
+        if (name == REDUCED_SHIFTING && guest_text(&edge, tropico2_tr(TROPICO2_T_NO_EDGE_SCROLL_HINT))) {
             c->r[RC_EAX] = edge;
+            return;
+        }
+        if (name == RESOLUTION && wide && guest_text(&scale, tropico2_tr(TROPICO2_T_SCALE_HINT))) {
+            c->r[RC_EAX] = scale;
             return;
         }
     }
     if (ret != HINT_CALLER || rc_ld32(caller + G_NAME) != RENDER) {
         return;
     }
-    uint32_t text = rc_ld32(caller + (uint32_t)G_OPTION) == 1 ? guest_text(&own, tropico2_tr(TROPICO2_T_OWN_HINT))
-                    : custom_w > 0 ? guest_text(&custom, tropico2_tr(TROPICO2_T_CUSTOM_HINT))
-                                   : guest_text(&window, tropico2_tr(TROPICO2_T_WINDOW_HINT));
+    uint32_t text = rc_ld32(caller + (uint32_t)G_OPTION) == 1
+                        ? guest_text(&linear, tropico2_tr(TROPICO2_T_LINEAR_HINT))
+                        : guest_text(&nearest, tropico2_tr(TROPICO2_T_NEAREST_HINT));
     if (text) {
         c->r[RC_EAX] = text;
     }
 }
 
-/* The first button: the window's shape, or settings.ini's; the second the
- * game's own. */
+/* The first button: nearest; the second linear. */
 static void option_text(rc_cpu *c)
 {
-    static uint32_t window, custom, own;
+    static uint32_t nearest, linear;
     if (!on_render_group(c)) {
         return;
     }
-    uint32_t text = 0;
-    if (rc_ld32(c->r[RC_EBP] + G_OPTION) == 1) {
-        text = guest_text(&own, "4:3");
-    } else if (custom_w > 0) {
-        char shape[16];
-        aspect_name((unsigned)custom_w, (unsigned)custom_h, shape, sizeof shape);
-        text = guest_text(&custom, shape);
-    } else {
-        text = guest_text(&window, tropico2_tr(TROPICO2_T_WINDOW));
-    }
+    uint32_t text = rc_ld32(c->r[RC_EBP] + G_OPTION) == 1 ? guest_text(&linear, tropico2_tr(TROPICO2_T_LINEAR))
+                                                            : guest_text(&nearest, tropico2_tr(TROPICO2_T_NEAREST));
     if (text) {
         c->r[RC_EAX] = text;
     }
@@ -801,74 +1057,9 @@ static void option_text(rc_cpu *c)
 static void group_bound(rc_cpu *c)
 {
     if (on_render_group(c)) {
-        rc_st32(VAR_SHAPE, wide ? 0 : 1);
-        rc_st32(rc_ld32(c->r[RC_EBP] + G_GROUP) + G_VALUE, VAR_SHAPE);
+        rc_st32(VAR_FILTER, rc_plat_display_get().smooth ? 1 : 0);
+        rc_st32(rc_ld32(c->r[RC_EBP] + G_GROUP) + G_VALUE, VAR_FILTER);
     }
-}
-
-/* The shape for the state above, from the window's size now if it follows
- * it. */
-static void shape_now(unsigned *w, unsigned *h)
-{
-    *w = *h = 0;
-    if (!wide) {
-        return;
-    }
-    int aw = custom_w, ah = custom_h;
-    if (follow) {
-        rc_plat_area(&aw, &ah);
-    }
-    if (aw > 0 && ah > 0) {
-        *w = (unsigned)aw;
-        *h = (unsigned)ah;
-    }
-}
-
-/* Keep the choice in settings.ini. */
-static void store(void)
-{
-    rc_display d = rc_plat_display_get();
-    d.game_w = !wide ? 0 : follow ? -1 : custom_w;
-    d.game_h = !wide ? 0 : follow ? -1 : custom_h;
-    rc_plat_display(&d);
-    rc_plat_display_store();
-}
-
-static uint32_t labels[5]; /* the slider's texts, in guest memory */
-
-/* Take the shape (w x h, 0 x 0 for 4:3); while the game screen is shown at
- * the size in effect, change to that size at the new width. The method
- * lays the screen out anew only for another size, so the setting says
- * another one until it is called. */
-static void reshape(rc_cpu *c, unsigned w, unsigned h)
-{
-    uint32_t slot = rc_ld32(SIZE_SETTING), mw, mh;
-    rc_ddraw_mode(&mw, &mh);
-    int showing = slot < 5 && mh == heightened(slot) && mw == widened(slot);
-    aspect_w = w;
-    aspect_h = h;
-    memset(labels, 0, sizeof labels);
-    if (slot < 5) {
-        rc_log("widescreen: the game screen at %ux%u", widened(slot), heightened(slot));
-    }
-    if (!showing || (mw == widened(slot) && mh == heightened(slot))) {
-        return;
-    }
-    unarrange();
-    rc_cpu saved = *c;
-    uint32_t screen = rc_call_guest(c, SCREEN_NOW, 0, NULL);
-    if (screen) {
-        rc_st32(SIZE_SETTING, slot ? 0 : 1);
-        c->r[RC_ECX] = screen;
-        uint32_t args[2] = {slot, 0};
-        changing_to = (int)slot;
-        rc_call_guest(c, rc_ld32(rc_ld32(screen) + SET_SIZE), 2, args);
-        changing_to = -1;
-        if (rc_ld32(SIZE_SETTING) != slot) {
-            rc_st32(SIZE_SETTING, slot); /* (it failed: still that size) */
-        }
-    }
-    *c = saved;
 }
 
 static void group_changed(rc_cpu *c)
@@ -878,28 +1069,24 @@ static void group_changed(rc_cpu *c)
         return;
     }
     rc_st32(at, 0);
-    int want = rc_ld32(VAR_SHAPE) == 0;
-    if (want == wide) {
-        return;
+    rc_display d = rc_plat_display_get();
+    bool smooth = rc_ld32(VAR_FILTER) == 1;
+    if (smooth != d.smooth) {
+        d.smooth = smooth;
+        rc_plat_display(&d);
+        rc_plat_display_store();
     }
-    wide = want;
-    if (wide && custom_w <= 0) {
-        follow = 1;
-    }
-    store();
-    unsigned w, h;
-    shape_now(&w, &h);
-    reshape(c, w, h);
 }
 
-/* From the message loop, while the shape follows the window: when the
- * window has kept another shape for half a second, the game screen takes
- * it. */
+/* From the message loop: when the window has kept another size for half
+ * a second, the game screen follows it (and its interface size, and the
+ * scale if it no longer fits). Outside the game screen (the menus), the
+ * size setting is kept at the interface size for the game screen. */
 static void watch_window(rc_cpu *c)
 {
     static uint64_t last_look, since;
     static unsigned want_w, want_h;
-    if (!wide || !follow) {
+    if (!wide) {
         return;
     }
     uint64_t now = rc_ticks_peek_ms();
@@ -909,7 +1096,13 @@ static void watch_window(rc_cpu *c)
     last_look = now;
     unsigned w, h;
     shape_now(&w, &h);
-    if (!w || !h || (w == aspect_w && h == aspect_h)) {
+    uint32_t slot = rc_ld32(SIZE_SETTING), mw, mh;
+    rc_ddraw_mode(&mw, &mh);
+    int showing = slot < 5 && mh == heightened(slot) && mw == widened(slot);
+    if (!showing && changing_to < 0 && w && h && slot < 5 && slot != slot_for(w, h)) {
+        rc_st32(SIZE_SETTING, slot_for(w, h));
+    }
+    if (!follow || !w || !h || (w == aspect_w && h == aspect_h)) {
         want_w = want_h = 0;
         return;
     }
@@ -941,46 +1134,19 @@ static void mode_listed(rc_cpu *c)
     rc_lookup_lifted(MODE_LISTED)(c);
 }
 
-/* The resolution's value, under its slider: the game looks it up among the
- * texts of the options ('opti', the slider's stop as its number; 0x0042ee50
- * returns it in eax), right before LABEL_TEXT. The game's own texts, "640x480"
- * to "1600x1200", become the size the game screen has at each stop, with its
- * shape ("1364x768 (16:9)"). */
+/* The slider's value text, under it: the game looks it up among the texts
+ * of the options ('opti', the slider's stop as its number; 0x0042ee50
+ * returns it in eax), right before LABEL_TEXT. The game's own texts,
+ * "640x480" to "1600x1200", become the scale at that stop and the game
+ * screen's size at it ("1.5x (1280x720)"). */
 #define LABEL_TEXT 0x006d9adcu
 static const char *const own_labels[5] = {"640x480", "800x600", "1024x768", "1280x1024", "1600x1200"};
-
-static unsigned gcd(unsigned a, unsigned b)
-{
-    while (b) {
-        unsigned t = a % b;
-        a = b;
-        b = t;
-    }
-    return a;
-}
-
-/* "16:9" and the like: the common names for what is near them, else the
- * reduced ratio (as Tropico's options page). */
-static void aspect_name(unsigned w, unsigned h, char *out, size_t n)
-{
-    static const struct {
-        unsigned x, y;
-    } names[] = {{4, 3}, {5, 4}, {16, 9}, {16, 10}, {21, 9}, {20, 9}, {3, 2}};
-    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
-        double r = (double)w * names[i].y / ((double)h * names[i].x);
-        if (r > 0.985 && r < 1.025) {
-            snprintf(out, n, "%u:%u", names[i].x, names[i].y);
-            return;
-        }
-    }
-    unsigned g = gcd(w, h);
-    snprintf(out, n, "%u:%u", w / g, h / g);
-}
 
 static void label_text(rc_cpu *c)
 {
     uint32_t text = c->r[RC_EAX];
-    if (!text) {
+    unsigned bw, bh;
+    if (!text || !wide || !base_size(&bw, &bh)) {
         return;
     }
     for (unsigned i = 0; i < 5; i++) {
@@ -990,21 +1156,33 @@ static void label_text(rc_cpu *c)
         while (j < n && rc_ld8(text + j) == (uint8_t)own[j]) {
             j++;
         }
-        if (j == n && changed(i)) {
+        if (j != n) {
+            continue;
+        }
+        offer();
+        for (unsigned k = 0; k < n_offered; k++) {
+            if (stop_of[k] != i) {
+                continue;
+            }
             if (!labels[i]) {
-                char buf[48], shape[16];
-                aspect_name(widened(i), heightened(i), shape, sizeof shape);
-                int len = snprintf(buf, sizeof buf, "%ux%u (%s)", widened(i), heightened(i), shape);
+                char buf[64], scale[24];
+                unsigned s = offered[k];
+                if (s % 10) {
+                    snprintf(scale, sizeof scale, "%u.%u", s / 10, s % 10);
+                } else {
+                    snprintf(scale, sizeof scale, "%u", s / 10);
+                }
+                int len = snprintf(buf, sizeof buf, "%sx (%ux%u)", scale, (bw * 10 / s) & ~3u, bh * 10 / s);
                 labels[i] = rc_heap_alloc((uint32_t)len + 1, true);
-                for (int k = 0; labels[i] && k <= len; k++) {
-                    rc_st8(labels[i] + (uint32_t)k, (uint8_t)buf[k]);
+                for (int m = 0; labels[i] && m <= len; m++) {
+                    rc_st8(labels[i] + (uint32_t)m, (uint8_t)buf[m]);
                 }
             }
             if (labels[i]) {
                 c->r[RC_EAX] = labels[i];
             }
-            return;
         }
+        return;
     }
 }
 
@@ -1157,6 +1335,7 @@ void tropico2_patch_resolution(void)
         custom_w = d.game_w;
         custom_h = d.game_h;
     }
+    scale10 = d.game_scale >= 10 ? (unsigned)d.game_scale : 10;
     shape_now(&aspect_w, &aspect_h);
     for (unsigned i = 0; i < 5; i++) {
         if (changed(i)) {
@@ -1177,6 +1356,13 @@ void tropico2_patch_resolution(void)
     rc_on_point(OPTION_TEXT, option_text);
     rc_on_point(GROUP_BOUND, group_bound);
     rc_on_point(GROUP_CHANGED, group_changed);
+    rc_on_point(GAME_PAGE_SET, game_page_set);
+    rc_on_point(GAME_PAGE_TAKE, game_page_take);
+    rc_on_point(GAME_PAGE_TAKEN, game_page_taken);
+    rc_on_point(MENU_PAGE_SET, menu_page_set);
+    rc_on_point(MENU_PAGE_TAKE, menu_page_take);
+    rc_on_point(MENU_PAGE_TAKEN, menu_page_taken);
+
     rc_add_pump_hook(pump);
     rc_set_pointer_map(pointer_map);
     rc_hook(TREE_DRAW, tree_draw);

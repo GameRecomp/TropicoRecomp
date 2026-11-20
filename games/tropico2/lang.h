@@ -18,11 +18,13 @@ typedef enum tropico2_lang {
 
 /* The texts. */
 typedef enum tropico2_text {
-    TROPICO2_T_SHAPE,  /* the title of the shape's choice, on the graphics page */
-    TROPICO2_T_WINDOW, /* its button for the window's shape */
-    TROPICO2_T_WINDOW_HINT, /* the status line's text for that button, */
-    TROPICO2_T_CUSTOM_HINT, /* for it when settings.ini gives the shape, */
-    TROPICO2_T_OWN_HINT,    /* and for the button for 4:3 */
+    TROPICO2_T_FILTER,       /* the title of the filter's choice, on the graphics page */
+    TROPICO2_T_NEAREST,      /* its buttons */
+    TROPICO2_T_LINEAR,
+    TROPICO2_T_NEAREST_HINT, /* their status line's texts */
+    TROPICO2_T_LINEAR_HINT,
+    TROPICO2_T_SCALE,        /* the title of the scale's slider (that was the resolution's) */
+    TROPICO2_T_SCALE_HINT,   /* its status line's text */
     TROPICO2_T_NO_EDGE_SCROLL,      /* the graphics page's box that was "Reduced Graphics Shifting" */
     TROPICO2_T_NO_EDGE_SCROLL_HINT, /* its status line's text */
     TROPICO2_TEXTS
