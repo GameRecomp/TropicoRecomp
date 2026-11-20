@@ -17,11 +17,11 @@ The result is a native program for Linux, Windows, macOS and Android
 result.
 
 **Status:** Tropico 1 runs: the intro movies, the menus, and a new game on
-a random island, with sound. Ten game years and saving are next. A
+a random island, with sound. Tropico 2 runs: its intro, its menus, the
+campaign and new games on a generated island, its world drawn by our
+Direct3D 7, and in widescreen (16:9 to 21:9 and phones) when chosen. A
 converter page turns the GOG installer into a build for Windows, Linux,
-macOS or Android, for Tropico and for Tropico 2. Tropico 2 plays its intro,
-its menus and a new game on a generated island, its world drawn by our
-Direct3D 7, and in widescreen (16:9 to 21:9 and phones) when chosen. See
+macOS or Android, for Tropico and for Tropico 2. See
 [docs/PLAN.md](docs/PLAN.md).
 
 ## You bring the game
