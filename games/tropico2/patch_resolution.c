@@ -606,33 +606,69 @@ static void tree_draw(rc_cpu *c)
     shift_rects(w, -by, -down);
 }
 
+/* The rectangle a window and the windows shown in it cover (a dialog's
+ * pieces may lie outside its own rectangle); false for none. */
+static int extent(uint32_t w, int32_t *l, int32_t *t, int32_t *r, int32_t *b, unsigned depth)
+{
+    int32_t x = (int32_t)rc_ld32(w + W_RECT), y = (int32_t)rc_ld32(w + W_RECT + 4);
+    int32_t ww = (int32_t)rc_ld32(w + W_RECT + 8), hh = (int32_t)rc_ld32(w + W_RECT + 12);
+    int any = ww > 0 && hh > 0;
+    if (any) {
+        *l = x;
+        *t = y;
+        *r = x + ww;
+        *b = y + hh;
+    }
+    if (depth >= 8) {
+        return any;
+    }
+    EACH_CHILD(w, k)
+    {
+        int32_t cl, ct, cr, cb;
+        if ((rc_ld8(k + W_SHOWN) & 1) && extent(k, &cl, &ct, &cr, &cb, depth + 1)) {
+            if (!any) {
+                *l = cl;
+                *t = ct;
+                *r = cr;
+                *b = cb;
+                any = 1;
+            } else {
+                *l = cl < *l ? cl : *l;
+                *t = ct < *t ? ct : *t;
+                *r = cr > *r ? cr : *r;
+                *b = cb > *b ? cb : *b;
+            }
+        }
+    }
+    return any;
+}
+
 /* The pointer over a dialog or the HUD (where they are drawn) is where the
  * game has them. */
 static void pointer_map(int *x, int *y)
 {
     uint32_t list[32];
     pointer_in_hud = 0;
+    /* Dialogs first: they are drawn over the HUD (the settings book's
+     * closing tab hangs over it). */
+    unsigned n = desktop_seen ? dialogs(desktop_seen, list, 32) : 0;
+    for (unsigned i = 0; i < n; i++) {
+        int32_t l, t, r, b;
+        if (!(rc_ld8(list[i] + W_SHOWN) & 1) || !extent(list[i], &l, &t, &r, &b, 0)) {
+            continue;
+        }
+        if (*x >= l + dialogs_by && *x < r + dialogs_by && *y >= t + dialogs_down && *y < b + dialogs_down) {
+            *x -= dialogs_by;
+            *y -= dialogs_down;
+            return;
+        }
+    }
     if (hud_part && hud_down) {
         int32_t l = (int32_t)rc_ld32(hud_part + W_RECT), t = (int32_t)rc_ld32(hud_part + W_RECT + 4) + hud_down;
         int32_t r = l + (int32_t)rc_ld32(hud_part + W_RECT + 8), b = t + (int32_t)rc_ld32(hud_part + W_RECT + 12);
         if ((rc_ld8(hud_part + W_SHOWN) & 1) && *x >= l && *x < r && *y >= t && *y < b) {
             *y -= hud_down;
             pointer_in_hud = 1;
-            return;
-        }
-    }
-    if (!desktop_seen || (!dialogs_by && !dialogs_down)) {
-        return;
-    }
-    unsigned n = dialogs(desktop_seen, list, 32);
-    for (unsigned i = 0; i < n; i++) {
-        uint32_t d = list[i];
-        int32_t l = (int32_t)rc_ld32(d + W_RECT) + dialogs_by, t = (int32_t)rc_ld32(d + W_RECT + 4) + dialogs_down;
-        int32_t r = l + (int32_t)rc_ld32(d + W_RECT + 8), b = t + (int32_t)rc_ld32(d + W_RECT + 12);
-        if ((rc_ld8(d + W_SHOWN) & 1) && *x >= l && *x < r && *y >= t && *y < b) {
-            *x -= dialogs_by;
-            *y -= dialogs_down;
-            return;
         }
     }
 }
